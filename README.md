@@ -1,8 +1,13 @@
-# OpenJarvis Pi Command Center 2.1.1
+# OpenJarvis Pi Command Center 2.2.0
 
-A private, Pi-first JARVIS operations screen for OpenJarvis, Ollama, Docker, Google connectors, cameras, microphones, and guarded maintenance. The desktop layout is a fixed-height mission-control view with no page scrolling at normal 1080p/900p dashboard sizes. Smaller screens fall back to a responsive scrolling layout.
+A private, Pi-first JARVIS operations screen for OpenJarvis, Ollama, Docker, Google connectors, cameras, microphones, and guarded maintenance. The dashboard stays inside a single fullscreen viewport without page scrolling; compact screens progressively hide secondary rails so the neural core and command line remain usable.
 
-## What is new in 2.1
+## What is new in 2.2
+
+- **Living neural intelligence core** — the center is now a dense GPU-animated field of more than ten thousand particles and sparks. Its cyan, gold, mint, and magenta regions breathe, deform, rotate, and bloom independently instead of behaving like a static globe.
+- **Reference-driven edge HUD** — the page now follows the supplied JARVIS reel language: one dominant intelligence visualization, fixed translucent system and agent rails, labelled orbital clusters, compact bottom operations telemetry, and a floating command console.
+- **Reel-style system clusters** — functional nodes are presented as JARVIS, CODEX, PROSPECTOR, FABRICATOR, SECOND BRAIN, SENTINEL, Docker Matrix, and Google clusters while still opening the same real local data.
+- **Zero-scroll responsive display** — laptop, Pi display, tablet, and phone layouts stay viewport-locked. On narrow screens the secondary rails collapse instead of turning the dashboard into a long webpage.
 
 - **True fullscreen HUD** — `/` is now edge-to-edge with no outer webpage gutters. Press **Enter JARVIS** once to invoke the browser Fullscreen API; the compact top-right control toggles it afterward. Installed/mobile launches use a fullscreen web-app manifest. Browsers require that first press and do not permit pages to silently force fullscreen.
 - **Interactive 3D knowledge galaxy** — a local Three.js scene combines a dense cyan/gold/magenta neural core, orbital calibration rings, system clusters, and metadata-only folder/file nodes. Drag to orbit, scroll to zoom, click a node, or mention a file/system name in chat and the camera flies to it.
@@ -242,3 +247,4 @@ npm.cmd start
 ```
 
 Open the command screen and `/settings`. Pi-only maintenance and openWakeWord controls correctly stay unavailable on Windows; system telemetry, the UI, live preview, browser camera/person detection, browser microphone level, local double-clap detection, and any reachable OpenJarvis/Ollama services can still be tested.
+

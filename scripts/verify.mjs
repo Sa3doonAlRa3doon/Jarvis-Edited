@@ -31,7 +31,7 @@ for (const shard of shards) { const stats = await fs.stat(path.join(modelDirecto
 const handModel = await fs.readFile(path.join(project, 'public', 'models', 'hand-landmarker', 'hand_landmarker.task'));
 assert.equal(handModel.length, 7819105, 'Unexpected hand landmark model size.');
 
-assert.equal(packageJson.version, '2.1.1');
+assert.equal(packageJson.version, '2.2.0');
 assert.match(server, /app\.get\('\/settings'/);
 assert.match(server, /v1\/traces\?limit=40/);
 assert.match(server, /timingSafeEqual/);
@@ -81,3 +81,4 @@ console.log(`Verified ${shards.length} local person-model shards (${(modelBytes 
 console.log(`Verified local MediaPipe hand model (${(handModel.length / 1024 / 1024).toFixed(1)} MiB).`);
 console.log('Verified no-scroll 3D file galaxy, hidden settings, exact camera selection, gesture sensitivity, and live preview.');
 console.log('Verified session-gated dashboard, PIN-gated fixed printer/maintenance actions, and secret-file exclusions.');
+

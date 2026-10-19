@@ -322,8 +322,12 @@ function stopBrowserClap() {
 
 function isEmbeddedPreview() { try { return window.self !== window.top; } catch { return true; } }
 function fullscreenElement() { return document.fullscreenElement || document.webkitFullscreenElement || null; }
+function browserFullscreenActive() {
+  const nativeViewport = Math.abs((window.screen?.height || 0) - window.innerHeight) <= 3 && Math.abs((window.screen?.width || 0) - window.innerWidth) <= 3;
+  return nativeViewport || window.matchMedia('(display-mode: fullscreen)').matches || window.matchMedia('(display-mode: standalone)').matches;
+}
 function syncFullscreenUi() {
-  const active = Boolean(fullscreenElement());
+  const active = Boolean(fullscreenElement()) || browserFullscreenActive();
   ui.fullscreenButton?.classList.toggle('active', active);
   ui.fullscreenButton?.setAttribute('aria-label', active ? 'Exit fullscreen' : 'Enter fullscreen');
   if (ui.fullscreenGate) ui.fullscreenGate.hidden = active || isEmbeddedPreview() || document.body.classList.contains('standalone-hint');
@@ -344,7 +348,7 @@ async function toggleFullscreen() {
     document.body.classList.add('standalone-hint');
     if (ui.fullscreenGate) ui.fullscreenGate.hidden = true;
     if (ui.fullscreenButton) ui.fullscreenButton.title = 'Browser blocked page fullscreen. Press F11 or install JARVIS to the home screen.';
-    appendMessage('error', `Browser fullscreen is blocked here. Press F11, or install JARVIS to the home screen. (${error.message})`);
+    console.info(`JARVIS fullscreen fallback: ${error.message}`);
   }
   syncFullscreenUi();
 }
@@ -418,7 +422,7 @@ ui.fullscreenButton?.addEventListener('click', () => void toggleFullscreen());
 ui.fullscreenGate?.addEventListener('click', () => void toggleFullscreen());
 ui.operationForm.addEventListener('submit', (event) => { event.preventDefault(); void runOperation(); });
 ui.operationClose.addEventListener('click', () => ui.operationDialog.close());
-window.addEventListener('resize', () => { state.galaxy?.resize(); drawTelemetry(); });
+window.addEventListener('resize', () => { syncFullscreenUi(); drawTelemetry(); });
 document.addEventListener('fullscreenchange', syncFullscreenUi);
 document.addEventListener('webkitfullscreenchange', syncFullscreenUi);
 window.addEventListener('message', (event) => { if (event.origin === location.origin && event.data?.type === 'jarvis-settings-preview') { state.settings = { ...state.settings, ...event.data.settings }; document.documentElement.style.setProperty('--accent', state.settings.accent); } });
@@ -442,3 +446,4 @@ async function init() {
 }
 
 void init();
+
