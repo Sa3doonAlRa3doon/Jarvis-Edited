@@ -11,3 +11,4 @@ token.json
 *.pem
 *.key
 public/models/coco-ssd/group1-shard*
+public/models/hand-landmarker/hand_landmarker.task

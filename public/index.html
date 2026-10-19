@@ -46,15 +46,23 @@
 
       <section class="neural hud-panel">
         <div class="core-stage" id="core-stage">
-          <canvas id="brain-canvas" width="900" height="500" aria-label="JARVIS activity visualization"></canvas>
+          <canvas id="brain-canvas" width="900" height="500" aria-label="Interactive 3D JARVIS knowledge and file galaxy"></canvas>
           <div class="core-copy">
-            <span id="core-kicker">LOCAL INTELLIGENCE CORE</span>
-            <h2 id="core-state">ONLINE</h2>
-            <p id="core-subtitle">Say “Hey Jarvis”, “Jarvis”, or double clap</p>
+            <span id="core-kicker">3D KNOWLEDGE MATRIX</span>
+            <h2 id="core-state">CORE</h2>
+            <p id="core-subtitle">Drag orbit • scroll zoom • pinch nodes</p>
           </div>
           <div class="orbital-label label-a"><span>MODEL</span><b id="model-label">WAITING</b></div>
           <div class="orbital-label label-b"><span>WAKE</span><b id="wake-state">STANDBY</b></div>
           <div class="orbital-label label-c"><span>MEMORY</span><b id="memory-state">LOCAL</b></div>
+          <div class="galaxy-toolbar"><b id="galaxy-state">INDEXING FILES</b><button type="button" id="gesture-button">ENABLE GESTURES</button></div>
+          <article class="node-inspector" id="node-inspector" hidden>
+            <span data-node-kind>NODE</span><strong data-node-name>SELECT A NODE</strong><small data-node-path></small>
+          </article>
+          <div class="gesture-feed" id="gesture-feed" hidden>
+            <video id="gesture-video" muted autoplay playsinline hidden></video><canvas id="gesture-canvas" hidden></canvas>
+            <i id="gesture-cursor" hidden></i><span id="gesture-state">GESTURE STANDBY</span>
+          </div>
           <div class="wake-flash" id="wake-flash"><span>JARVIS IS LISTENING</span></div>
         </div>
 
@@ -70,6 +78,7 @@
           <div class="quick-prompts">
             <button type="button" data-prompt="Give me a concise health report for this Pi and its services.">HEALTH REPORT</button>
             <button type="button" data-prompt="Explain the current Docker containers, resource use, and anything unhealthy.">DOCKER STATUS</button>
+            <button type="button" data-prompt="How much time is left on my 3D print and what are the current printer temperatures?">PRINT ETA</button>
             <button type="button" data-prompt="Summarize the latest OpenJarvis agent activity and research citations.">AGENT ACTIVITY</button>
           </div>
         </div>
@@ -101,12 +110,19 @@
           <div class="panel-title compact"><span>03</span><h2>Docker matrix</h2><b id="docker-summary">SCANNING</b></div>
           <div class="docker-list" id="docker-list"><p class="empty-state">Waiting for Docker…</p></div>
         </div>
+        <div class="printer-block">
+          <div class="panel-title compact"><span>04</span><h2>3D printer</h2><b id="printer-state">CHECKING</b></div>
+          <div class="printer-row"><strong id="printer-file">NO ACTIVE FILE</strong><span id="printer-eta">ETA --</span></div>
+          <i class="printer-progress"><b id="printer-progress"></b></i>
+          <div class="printer-row printer-meta"><span id="printer-percent">0%</span><span id="printer-temps">NOZZLE -- / BED --</span></div>
+          <div class="printer-actions"><button type="button" data-printer="pause" disabled>PAUSE</button><button type="button" data-printer="resume" disabled>RESUME</button><button type="button" class="danger" data-printer="cancel" disabled>END PRINT</button></div>
+        </div>
         <div class="event-block">
-          <div class="panel-title compact"><span>04</span><h2>Continuous monitor</h2><b id="event-total">MEMORY 0</b></div>
+          <div class="panel-title compact"><span>05</span><h2>Continuous monitor</h2><b id="event-total">MEMORY 0</b></div>
           <div class="event-feed" id="event-feed"><p class="empty-state">Persistent local activity log ready.</p></div>
         </div>
         <div class="control-block">
-          <div class="panel-title compact"><span>05</span><h2>Maintenance</h2><b id="maintenance-state">ARMED</b></div>
+          <div class="panel-title compact"><span>06</span><h2>Maintenance</h2><b id="maintenance-state">ARMED</b></div>
           <div class="control-actions">
             <button type="button" data-operation="repair">SELF REPAIR</button>
             <button type="button" data-operation="restart-all">RESTART ALL</button>
@@ -121,7 +137,7 @@
 
   <dialog id="operation-dialog" class="operation-dialog">
     <form method="dialog" id="operation-form">
-      <button class="dialog-close" value="cancel" aria-label="Close">×</button>
+      <button class="dialog-close" id="operation-close" type="button" aria-label="Close">×</button>
       <span class="dialog-kicker">PIN-GUARDED PI CONTROL</span>
       <h2 id="operation-title">Confirm operation</h2>
       <p id="operation-description"></p>

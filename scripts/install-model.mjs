@@ -50,3 +50,20 @@ for (const [name, size, sha256] of assets) {
   await rename(temporary, target);
   console.log(`Installed official vision asset: ${name}`);
 }
+
+const handDirectory = path.join(project, 'public', 'models', 'hand-landmarker');
+const handTarget = path.join(handDirectory, 'hand_landmarker.task');
+const handSize = 7819105;
+const handSha256 = 'fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1';
+if (await isValid(handTarget, handSize, handSha256)) {
+  console.log('Verified local gesture asset: hand_landmarker.task');
+} else {
+  await mkdir(handDirectory, { recursive: true });
+  const response = await fetch('https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task', { redirect: 'follow' });
+  if (!response.ok) throw new Error(`Could not download hand_landmarker.task: HTTP ${response.status}`);
+  const data = Buffer.from(await response.arrayBuffer());
+  if (data.length !== handSize || digest(data) !== handSha256) throw new Error('Integrity check failed for hand_landmarker.task');
+  const temporary = `${handTarget}.download`;
+  await rm(temporary, { force: true }); await writeFile(temporary, data, { mode: 0o600 }); await rename(temporary, handTarget);
+  console.log('Installed official gesture asset: hand_landmarker.task');
+}

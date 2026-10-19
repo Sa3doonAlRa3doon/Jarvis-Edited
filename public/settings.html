@@ -22,7 +22,7 @@
             <label class="setting full">ACTIVE SENSOR HOST
               <select id="source"><option value="browser">This browser / laptop test</option><option value="pi">Raspberry Pi 5 hardware</option></select>
             </label>
-            <label class="setting">BROWSER CAMERA<select id="browser-camera"><option value="">Default browser camera</option></select></label>
+            <label class="setting">BROWSER / GESTURE CAMERA<select id="browser-camera"><option value="">Default browser camera</option></select></label>
             <label class="setting">BROWSER MICROPHONE<select id="browser-microphone"><option value="">Default browser microphone</option></select></label>
             <label class="setting">PI V4L2 CAMERA<select id="pi-camera"><option value="">Select /dev/video*</option></select></label>
             <label class="setting">PI ALSA MICROPHONE<select id="pi-microphone"><option value="">Select plughw device</option></select></label>
@@ -56,6 +56,7 @@
             <label class="switch">Voice activity<input id="voice-activity" type="checkbox"></label>
             <label class="switch">Hey Jarvis / Jarvis<input id="wake-word" type="checkbox"></label>
             <label class="switch">Double clap wake<input id="double-clap" type="checkbox"></label>
+            <label class="switch">Camera hand gestures<input id="gesture-control" type="checkbox"></label>
             <label class="switch">Speak responses<input id="auto-speak" type="checkbox"></label>
             <label class="switch">Constrained auto-repair<input id="auto-repair" type="checkbox"></label>
           </div>
@@ -64,6 +65,7 @@
             <label class="setting">VOICE SENSITIVITY <output id="mic-sensitivity-output"></output><input id="mic-sensitivity" type="range" min="0.01" max="0.8" step="0.01"></label>
             <label class="setting">WAKE SENSITIVITY <output id="wake-sensitivity-output"></output><input id="wake-sensitivity" type="range" min="0.2" max="0.95" step="0.05"></label>
             <label class="setting">CLAP SENSITIVITY <output id="clap-sensitivity-output"></output><input id="clap-sensitivity" type="range" min="0.08" max="0.95" step="0.01"></label>
+            <label class="setting">PINCH SENSITIVITY <output id="gesture-sensitivity-output"></output><input id="gesture-sensitivity" type="range" min="0.18" max="0.8" step="0.01"></label>
             <label class="setting">DOUBLE CLAP WINDOW <output id="double-clap-window-output"></output><input id="double-clap-window" type="range" min="300" max="1500" step="50"></label>
             <label class="setting">VISION INTERVAL <output id="scan-interval-output"></output><input id="scan-interval" type="range" min="300" max="4000" step="100"></label>
             <label class="setting">HUD ACCENT<input id="accent" type="color"></label>

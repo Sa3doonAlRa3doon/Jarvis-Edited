@@ -7,6 +7,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { EventStore } from './lib/event-store.mjs';
+import { buildKnowledgeIndex } from './lib/knowledge-index.mjs';
+import { PrinterClient } from './lib/printer-client.mjs';
 import {
   audioRms, clamp, dockerSummary, linuxCameras, linuxMicrophones,
   mediaDevices, runBinary, storageDevices, systemMetrics
@@ -21,6 +23,14 @@ const ollamaUrl = (process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').repl
 const dataDirectory = path.join(__dirname, 'data');
 const settingsPath = path.join(dataDirectory, 'settings.json');
 const eventStore = new EventStore(dataDirectory);
+const printerClient = new PrinterClient({
+  baseUrl: process.env.PRINTER_URL || '',
+  apiKey: process.env.PRINTER_API_KEY || '',
+  timeoutMs: process.env.PRINTER_TIMEOUT_MS || 2800
+});
+let printerSnapshot = { configured: printerClient.configured, online: false, ready: false, state: printerClient.configured ? 'checking' : 'unconfigured', checkedAt: new Date().toISOString() };
+const printerSubscribers = new Set();
+let knowledgeCache = null;
 const wakeEventToken = crypto.randomBytes(32).toString('hex');
 const dashboardAccessPin = String(process.env.DASHBOARD_ACCESS_PIN || process.env.OPS_CONTROL_PIN || '');
 const helperPath = process.env.OPS_HELPER_PATH || '/usr/local/sbin/jarvis-service-control';
@@ -47,7 +57,7 @@ const defaultSettings = {
   personDetection: true, voiceActivity: true, wakeWord: true, doubleClap: true,
   autoSpeak: true, autoRepair: asBool(process.env.AUTO_REPAIR_ENABLED, process.platform === 'linux'), personThreshold: 0.55,
   micSensitivity: 0.18, wakeSensitivity: 0.55, clapSensitivity: 0.34,
-  doubleClapWindow: 700, scanInterval: 900, accent: '#64e8ff'
+  doubleClapWindow: 700, scanInterval: 900, gestureControl: true, gestureSensitivity: 0.42, accent: '#64e8ff'
 };
 let settings = { ...defaultSettings };
 
@@ -65,6 +75,8 @@ function validateSettings(input = {}) {
     micSensitivity: safeNumber(input.micSensitivity, defaultSettings.micSensitivity, 0.01, 0.8),
     wakeSensitivity: safeNumber(input.wakeSensitivity, defaultSettings.wakeSensitivity, 0.2, 0.95),
     clapSensitivity: safeNumber(input.clapSensitivity, defaultSettings.clapSensitivity, 0.08, 0.95),
+    gestureControl: input.gestureControl !== false,
+    gestureSensitivity: safeNumber(input.gestureSensitivity, defaultSettings.gestureSensitivity, 0.18, 0.8),
     doubleClapWindow: Math.round(safeNumber(input.doubleClapWindow, defaultSettings.doubleClapWindow, 300, 1500)),
     scanInterval: Math.round(safeNumber(input.scanInterval, defaultSettings.scanInterval, 300, 4000)), accent
   };
@@ -261,7 +273,7 @@ async function startWakeListener() {
 
 app.disable('x-powered-by');
 app.use((request, response, next) => {
-  const scriptPolicy = request.path === '/settings' ? "'self' 'unsafe-eval'" : "'self'";
+  const scriptPolicy = request.path === '/settings' ? "'self' 'unsafe-eval' 'wasm-unsafe-eval'" : "'self' 'wasm-unsafe-eval'";
   response.set({
     'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'SAMEORIGIN', 'Referrer-Policy': 'no-referrer',
     'Permissions-Policy': 'camera=(self), microphone=(self), geolocation=()',
@@ -271,6 +283,8 @@ app.use((request, response, next) => {
 app.use(express.json({ limit: '1mb' }));
 app.use('/vendor/tfjs', express.static(path.join(__dirname, 'node_modules', '@tensorflow', 'tfjs', 'dist'), { maxAge: '30d' }));
 app.use('/vendor/coco-ssd', express.static(path.join(__dirname, 'node_modules', '@tensorflow-models', 'coco-ssd', 'dist'), { maxAge: '30d' }));
+app.use('/vendor/three', express.static(path.join(__dirname, 'node_modules', 'three', 'build'), { maxAge: '30d' }));
+app.use('/vendor/mediapipe', express.static(path.join(__dirname, 'node_modules', '@mediapipe', 'tasks-vision'), { maxAge: '30d' }));
 
 app.post('/api/wake-event', async (request, response) => {
   const token = String(request.get('X-Wake-Token') || '');
@@ -287,7 +301,7 @@ function enforceSameOrigin(request, response, next) {
   response.status(403).json({ error: 'Cross-origin mutation blocked.' });
 }
 app.use('/api', enforceSameOrigin);
-app.get('/api/health', (_request, response) => response.json({ status: 'ok', version: '2.0.0' }));
+app.get('/api/health', (_request, response) => response.json({ status: 'ok', version: '2.1.0' }));
 app.get('/api/auth/status', (request, response) => response.json({ required: Boolean(dashboardAccessPin), authenticated: dashboardAuthenticated(request) }));
 app.post('/api/auth/login', (request, response) => {
   if (!dashboardAccessPin) { response.json({ ok: true, required: false }); return; }
@@ -307,7 +321,7 @@ app.post('/api/auth/logout', (request, response) => {
 });
 app.use('/api', requireDashboardAuth);
 
-app.get('/api/config', (_request, response) => response.json({ name: 'JARVIS', version: '2.0.0', ttsMode: process.env.TTS_MODE || 'local', fishVoiceId: process.env.FISH_AUDIO_VOICE_ID || '', models, timezone: 'Asia/Dubai', piOnly: true, operationsEnabled: Boolean(process.env.OPS_CONTROL_PIN) }));
+app.get('/api/config', (_request, response) => response.json({ name: 'JARVIS', version: '2.1.0', ttsMode: process.env.TTS_MODE || 'local', fishVoiceId: process.env.FISH_AUDIO_VOICE_ID || '', models, timezone: 'Asia/Dubai', piOnly: true, operationsEnabled: Boolean(process.env.OPS_CONTROL_PIN), printerConfigured: printerClient.configured }));
 app.get('/api/metrics', async (_request, response) => response.json(await systemMetrics()));
 app.get('/api/storage', async (_request, response) => response.json({ devices: await storageDevices() }));
 app.get('/api/docker', async (_request, response) => response.json(await dockerSummary()));
@@ -315,6 +329,22 @@ app.get('/api/agents', async (_request, response) => response.json(await agentSn
 app.get('/api/events/history', (_request, response) => response.json(eventStore.snapshot()));
 app.get('/api/operations/status', async (_request, response) => response.json(await operationStatus()));
 app.get('/api/wake/status', (_request, response) => response.json({ ...wakeState, process: undefined, configured: settings.source === 'pi' && Boolean(settings.piMicrophone) }));
+app.get('/api/knowledge', async (_request, response) => {
+  if (!knowledgeCache || Date.now() - knowledgeCache.createdAt > 30_000) {
+    const value = await buildKnowledgeIndex({ projectRoot: __dirname, roots: process.env.KNOWLEDGE_ROOTS || '', maxDepth: 4, maxNodes: 180 });
+    knowledgeCache = { value, createdAt: Date.now() };
+  }
+  response.set('Cache-Control', 'private, max-age=20'); response.json(knowledgeCache.value);
+});
+app.get('/api/printer/status', (_request, response) => { response.set('Cache-Control', 'no-store'); response.json(printerSnapshot); });
+app.get('/api/printer/events', (request, response) => {
+  response.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive' });
+  response.flushHeaders(); response.write(`event: printer\ndata: ${JSON.stringify(printerSnapshot)}\n\n`);
+  const push = (snapshot) => response.write(`event: printer\ndata: ${JSON.stringify(snapshot)}\n\n`);
+  printerSubscribers.add(push);
+  const keepalive = setInterval(() => response.write(': printer-pulse\n\n'), 20_000);
+  request.on('close', () => { clearInterval(keepalive); printerSubscribers.delete(push); });
+});
 app.get('/api/events', (request, response) => {
   response.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive' });
   response.flushHeaders(); response.write(`event: snapshot\ndata: ${JSON.stringify(eventStore.snapshot())}\n\n`);
@@ -375,6 +405,25 @@ app.post('/api/operations/action', async (request, response) => {
   }
 });
 
+app.post('/api/printer/action', async (request, response) => {
+  const confirmations = { pause: 'PAUSE PRINT', resume: 'RESUME PRINT', cancel: 'CANCEL PRINT' };
+  const action = String(request.body?.action || '');
+  if (!confirmations[action]) { response.status(400).json({ error: 'Unknown printer operation.' }); return; }
+  if (operationRateLimited(`printer:${request.ip}`)) { response.status(429).json({ error: 'Too many control attempts. Wait one minute.' }); return; }
+  if (!verifyPin(request.body?.pin)) { response.status(403).json({ error: 'Control PIN is incorrect or not configured.' }); return; }
+  if (String(request.body?.confirmation || '').trim().toUpperCase() !== confirmations[action]) { response.status(400).json({ error: `Type ${confirmations[action]} exactly to confirm.` }); return; }
+  if (!printerClient.configured) { response.status(503).json({ error: 'Set PRINTER_URL on the Pi first.' }); return; }
+  try {
+    printerSnapshot = await printerClient.action(action);
+    for (const push of printerSubscribers) push(printerSnapshot);
+    await eventStore.append('printer', `Printer ${action} requested`, { action, state: printerSnapshot.state, filename: printerSnapshot.filename || '' });
+    response.json({ ok: true, result: printerSnapshot });
+  } catch (error) {
+    await eventStore.append('alert', `Printer ${action} failed`, { action, error: cleanText(error.message, 200) });
+    response.status(502).json({ error: cleanText(error.message, 260) });
+  }
+});
+
 app.post('/api/chat', async (request, response) => {
   const prompt = cleanText(request.body?.prompt, 6000); const history = Array.isArray(request.body?.history) ? request.body.history.slice(-16) : [];
   if (!prompt) { response.status(400).json({ error: 'Prompt must contain 1–6000 characters.' }); return; }
@@ -382,6 +431,9 @@ app.post('/api/chat', async (request, response) => {
   if (/\b(docker|container|compose|service|cpu|ram|memory|storage|disk|temperature|gpu)\b/i.test(prompt)) {
     const [metrics, docker, operations] = await Promise.all([systemMetrics(), dockerSummary(), operationStatus()]);
     liveContext = `\nLive read-only system context (do not claim actions):\n${JSON.stringify({ metrics, docker, operations }).slice(0, 12_000)}`;
+  }
+  if (/\b(printer|print|printing|klipper|moonraker|nozzle|bed|gcode|time left|eta)\b/i.test(prompt)) {
+    liveContext += `\nLive read-only 3D printer context (never claim or execute a printer action):\n${JSON.stringify(printerSnapshot).slice(0, 5000)}`;
   }
   const messages = [{ role: 'system', content: `You are JARVIS, a private assistant running on a Raspberry Pi 5. Be precise, calm, helpful, and concise. Never claim a tool or maintenance action succeeded unless the provided result confirms it. You may explain Docker state from supplied read-only context, but never invent containers or metrics.${liveContext}` },
     ...history.filter((item) => ['user', 'assistant'].includes(item?.role) && typeof item?.content === 'string').map((item) => ({ role: item.role, content: cleanText(item.content, 6000) })), { role: 'user', content: prompt }];
@@ -416,6 +468,13 @@ app.use(express.static(path.join(__dirname, 'public'), { etag: true, maxAge: pro
 app.use((error, _request, response, _next) => { console.error('Dashboard request failed:', error.message); response.status(500).json({ error: 'Dashboard request failed.' }); });
 
 let knownTraceIds = new Set(); let traceInitialised = false; let lastHealthSignature = ''; let lastRepairAt = 0;
+async function refreshPrinterStatus() {
+  const previousSignature = `${printerSnapshot.online}:${printerSnapshot.state}:${printerSnapshot.filename || ''}`;
+  printerSnapshot = await printerClient.status();
+  const nextSignature = `${printerSnapshot.online}:${printerSnapshot.state}:${printerSnapshot.filename || ''}`;
+  for (const push of printerSubscribers) push(printerSnapshot);
+  if (previousSignature !== nextSignature) await eventStore.append('printer', printerSnapshot.online ? `Printer state: ${printerSnapshot.state}` : 'Printer offline', { state: printerSnapshot.state, filename: printerSnapshot.filename || '' });
+}
 async function monitorTick() {
   try {
     const [services, agents, operations] = await Promise.all([serviceStatus(), agentSnapshot(), operationStatus()]);
@@ -437,13 +496,14 @@ async function monitorTick() {
   } catch {}
 }
 
-await eventStore.init(); await loadSettings(); await eventStore.append('boot', 'JARVIS command center starting', { version: '2.0.0', platform: process.platform });
+await eventStore.init(); await loadSettings(); await eventStore.append('boot', 'JARVIS command center starting', { version: '2.1.0', platform: process.platform });
 const server = app.listen(port, host, async () => {
   console.log(`JARVIS Command Center listening at http://${host}:${port}`); console.log(`OpenJarvis: ${openJarvisUrl} | Ollama: ${ollamaUrl}`);
-  await startWakeListener(); void monitorTick();
+  await startWakeListener(); void monitorTick(); void refreshPrinterStatus();
 });
 const monitorTimer = setInterval(() => void monitorTick(), 12_000);
+const printerTimer = setInterval(() => void refreshPrinterStatus(), 2_000);
 async function shutdown() {
-  clearInterval(monitorTimer); await stopWakeListener(); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 3000).unref();
+  clearInterval(monitorTimer); clearInterval(printerTimer); await stopWakeListener(); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 3000).unref();
 }
 process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);

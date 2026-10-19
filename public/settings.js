@@ -3,8 +3,8 @@ const form = $('#settings-form');
 const ui = {
   status: $('#settings-status'), message: $('#settings-message'), source: $('#source'),
   browserCamera: $('#browser-camera'), browserMicrophone: $('#browser-microphone'), piCamera: $('#pi-camera'), piMicrophone: $('#pi-microphone'),
-  personDetection: $('#person-detection'), voiceActivity: $('#voice-activity'), wakeWord: $('#wake-word'), doubleClap: $('#double-clap'), autoSpeak: $('#auto-speak'), autoRepair: $('#auto-repair'),
-  personThreshold: $('#person-threshold'), micSensitivity: $('#mic-sensitivity'), wakeSensitivity: $('#wake-sensitivity'), clapSensitivity: $('#clap-sensitivity'), doubleClapWindow: $('#double-clap-window'), scanInterval: $('#scan-interval'), accent: $('#accent'),
+  personDetection: $('#person-detection'), voiceActivity: $('#voice-activity'), wakeWord: $('#wake-word'), doubleClap: $('#double-clap'), gestureControl: $('#gesture-control'), autoSpeak: $('#auto-speak'), autoRepair: $('#auto-repair'),
+  personThreshold: $('#person-threshold'), micSensitivity: $('#mic-sensitivity'), wakeSensitivity: $('#wake-sensitivity'), clapSensitivity: $('#clap-sensitivity'), gestureSensitivity: $('#gesture-sensitivity'), doubleClapWindow: $('#double-clap-window'), scanInterval: $('#scan-interval'), accent: $('#accent'),
   cameraPreview: $('#camera-preview'), video: $('#camera-video'), image: $('#pi-camera-image'), canvas: $('#sensor-canvas'), placeholder: $('#camera-placeholder'),
   personReadout: $('#person-readout'), micReadout: $('#mic-readout'), wakeReadout: $('#wake-readout'),
   start: $('#start-sensors'), stop: $('#stop-sensors'), testWake: $('#test-wake'), googleGrid: $('#google-grid'), googleNote: $('#google-note'), preview: $('#live-preview')
@@ -16,6 +16,7 @@ const valueBindings = [
   ['micSensitivity', 'mic-sensitivity-output', (value) => `${Math.round(value * 100)}%`],
   ['wakeSensitivity', 'wake-sensitivity-output', (value) => `${Math.round(value * 100)}%`],
   ['clapSensitivity', 'clap-sensitivity-output', (value) => `${Math.round(value * 100)}%`],
+  ['gestureSensitivity', 'gesture-sensitivity-output', (value) => `${Math.round(value * 100)}%`],
   ['doubleClapWindow', 'double-clap-window-output', (value) => `${value} ms`],
   ['scanInterval', 'scan-interval-output', (value) => `${value} ms`]
 ];
@@ -35,16 +36,16 @@ function currentSettings() {
     source: ui.source.value, browserCamera: ui.browserCamera.value, browserMicrophone: ui.browserMicrophone.value,
     piCamera: ui.piCamera.value, piMicrophone: ui.piMicrophone.value,
     personDetection: ui.personDetection.checked, voiceActivity: ui.voiceActivity.checked, wakeWord: ui.wakeWord.checked,
-    doubleClap: ui.doubleClap.checked, autoSpeak: ui.autoSpeak.checked, autoRepair: ui.autoRepair.checked,
+    doubleClap: ui.doubleClap.checked, gestureControl: ui.gestureControl.checked, autoSpeak: ui.autoSpeak.checked, autoRepair: ui.autoRepair.checked,
     personThreshold: Number(ui.personThreshold.value), micSensitivity: Number(ui.micSensitivity.value),
-    wakeSensitivity: Number(ui.wakeSensitivity.value), clapSensitivity: Number(ui.clapSensitivity.value),
+    wakeSensitivity: Number(ui.wakeSensitivity.value), clapSensitivity: Number(ui.clapSensitivity.value), gestureSensitivity: Number(ui.gestureSensitivity.value),
     doubleClapWindow: Number(ui.doubleClapWindow.value), scanInterval: Number(ui.scanInterval.value), accent: ui.accent.value
   };
 }
 function applySettings(settings) {
   state.settings = settings;
-  for (const [key, element] of [['source', ui.source], ['browserCamera', ui.browserCamera], ['browserMicrophone', ui.browserMicrophone], ['piCamera', ui.piCamera], ['piMicrophone', ui.piMicrophone], ['personThreshold', ui.personThreshold], ['micSensitivity', ui.micSensitivity], ['wakeSensitivity', ui.wakeSensitivity], ['clapSensitivity', ui.clapSensitivity], ['doubleClapWindow', ui.doubleClapWindow], ['scanInterval', ui.scanInterval], ['accent', ui.accent]]) element.value = settings[key] ?? '';
-  for (const [key, element] of [['personDetection', ui.personDetection], ['voiceActivity', ui.voiceActivity], ['wakeWord', ui.wakeWord], ['doubleClap', ui.doubleClap], ['autoSpeak', ui.autoSpeak], ['autoRepair', ui.autoRepair]]) element.checked = Boolean(settings[key]);
+  for (const [key, element] of [['source', ui.source], ['browserCamera', ui.browserCamera], ['browserMicrophone', ui.browserMicrophone], ['piCamera', ui.piCamera], ['piMicrophone', ui.piMicrophone], ['personThreshold', ui.personThreshold], ['micSensitivity', ui.micSensitivity], ['wakeSensitivity', ui.wakeSensitivity], ['clapSensitivity', ui.clapSensitivity], ['gestureSensitivity', ui.gestureSensitivity], ['doubleClapWindow', ui.doubleClapWindow], ['scanInterval', ui.scanInterval], ['accent', ui.accent]]) element.value = settings[key] ?? '';
+  for (const [key, element] of [['personDetection', ui.personDetection], ['voiceActivity', ui.voiceActivity], ['wakeWord', ui.wakeWord], ['doubleClap', ui.doubleClap], ['gestureControl', ui.gestureControl], ['autoSpeak', ui.autoSpeak], ['autoRepair', ui.autoRepair]]) element.checked = Boolean(settings[key]);
   updateOutputs(); previewSettings();
 }
 function updateOutputs() {

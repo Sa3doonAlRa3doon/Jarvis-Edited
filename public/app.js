@@ -1,3 +1,6 @@
+import { createKnowledgeGalaxy } from './galaxy.js';
+import { GestureController } from './gesture-controller.js';
+
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 
@@ -19,13 +22,18 @@ const ui = {
   maintenanceState: $('#maintenance-state'), operationDialog: $('#operation-dialog'), operationForm: $('#operation-form'),
   operationTitle: $('#operation-title'), operationDescription: $('#operation-description'), operationPin: $('#operation-pin'),
   operationConfirmation: $('#operation-confirmation'), confirmationPhrase: $('#confirmation-phrase'),
-  operationError: $('#operation-error'), confirmOperation: $('#confirm-operation')
+  operationError: $('#operation-error'), confirmOperation: $('#confirm-operation'), operationClose: $('#operation-close'), galaxyState: $('#galaxy-state'),
+  nodeInspector: $('#node-inspector'), gestureButton: $('#gesture-button'), gestureFeed: $('#gesture-feed'),
+  gestureVideo: $('#gesture-video'), gestureCanvas: $('#gesture-canvas'), gestureCursor: $('#gesture-cursor'), gestureState: $('#gesture-state'),
+  printerState: $('#printer-state'), printerFile: $('#printer-file'), printerEta: $('#printer-eta'),
+  printerProgress: $('#printer-progress'), printerPercent: $('#printer-percent'), printerTemps: $('#printer-temps')
 };
 
 const state = {
   config: null, settings: null, metrics: null, status: null, storage: [], docker: null,
   agents: { lanes: { code: [], research: [], monitor: [] }, traces: [] }, events: [], eventSummary: {},
-  history: [], lane: 'code', operation: null, operationStatus: null, lastAssistant: '',
+  history: [], lane: 'code', operation: null, operationKind: 'system', operationStatus: null, lastAssistant: '',
+  galaxy: null, gesture: null, printer: { configured: false, online: false, state: 'checking' },
   chart: { cpu: Array(52).fill(0), ram: Array(52).fill(0), gpu: Array(52).fill(0) },
   clap: { stream: null, context: null, analyser: null, raf: 0, firstAt: 0, above: false },
   neuralEnergy: 0.22
@@ -43,6 +51,11 @@ const operationCopy = {
   'stop-until-reboot': { title: 'Stop until next reboot', confirmation: 'STOP UNTIL REBOOT', description: 'Stops the allow-listed services and all currently running Docker containers. A runtime lock disappears automatically at the next reboot.' },
   'maintenance-on': { title: 'Persistent maintenance stop', confirmation: 'ENTER MAINTENANCE', description: 'Stops the allow-listed services and running containers and leaves a persistent lock, so they remain stopped after reboot until you press Resume.' },
   resume: { title: 'Resume services', confirmation: 'RESUME SERVICES', description: 'Removes both maintenance locks, starts the allow-listed services, and restarts only the Docker containers captured before maintenance.' }
+};
+const printerCopy = {
+  pause: { title: 'Pause the active 3D print', confirmation: 'PAUSE PRINT', description: 'Requests a Moonraker pause for the currently active job. The printer URL is fixed on the Pi and cannot be changed here.' },
+  resume: { title: 'Resume the paused 3D print', confirmation: 'RESUME PRINT', description: 'Requests a Moonraker resume for a paused job after the control PIN and exact confirmation.' },
+  cancel: { title: 'End the active 3D print', confirmation: 'CANCEL PRINT', description: 'Destructive: permanently cancels the active print. JARVIS never performs this automatically or from model output.' }
 };
 
 function escapeHtml(value) {
@@ -66,6 +79,11 @@ function duration(seconds) {
   const hours = Math.floor((value % 86400) / 3600);
   const minutes = Math.floor((value % 3600) / 60);
   return days ? `${days}d ${hours}h` : hours ? `${hours}h ${minutes}m` : `${minutes}m`;
+}
+function compactDuration(seconds) {
+  if (seconds == null || !Number.isFinite(Number(seconds))) return '--';
+  const value = Math.max(0, Math.round(Number(seconds))); const hours = Math.floor(value / 3600); const minutes = Math.floor((value % 3600) / 60);
+  return hours ? `${hours}h ${String(minutes).padStart(2, '0')}m` : `${minutes}m`;
 }
 function timeLabel(value) {
   const date = value ? new Date(value) : new Date();
@@ -149,7 +167,7 @@ function renderStatus(payload) {
   ui.serviceList.innerHTML = services.map((item) => `<article class="service-item"><i class="${item.ok ? 'ok' : ''}"></i><div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.detail)}</span></div><b>${item.ok ? 'ONLINE' : 'OFFLINE'}</b></article>`).join('');
   const healthy = payload.services?.openjarvis?.online && payload.services?.ollama?.online;
   ui.systemDot.className = healthy ? 'online' : 'warning'; ui.systemState.textContent = healthy ? 'SYSTEM NOMINAL' : 'DEGRADED';
-  ui.coreState.textContent = healthy ? 'ONLINE' : 'STANDBY'; ui.coreSubtitle.textContent = healthy ? 'Say “Hey Jarvis”, “Jarvis”, or double clap' : 'Local model services are not both ready';
+  ui.coreState.textContent = 'JARVIS'; ui.coreSubtitle.textContent = healthy ? 'Speak • pinch • inspect • command' : 'Visual core ready // model services standby';
   ui.modelLabel.textContent = payload.services?.ollama?.models?.[0] || 'NO MODEL';
   ui.wakeState.textContent = payload.wake?.ready ? 'LISTENING' : payload.wake?.configured ? 'STARTING' : 'STANDBY';
   state.neuralEnergy = healthy ? .42 : .18;
@@ -169,6 +187,22 @@ function renderDocker(payload) {
   const running = payload.containers.filter((item) => String(item.state).toLowerCase() === 'running').length;
   ui.dockerSummary.textContent = `${running}/${payload.containers.length} RUNNING`;
   ui.dockerList.innerHTML = payload.containers.length ? payload.containers.slice(0, 8).map((item) => `<article class="docker-item"><i class="${String(item.state).toLowerCase() === 'running' ? 'ok' : ''}"></i><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.cpu || item.state)}</span><b>${escapeHtml(item.memoryPercent || item.status)}</b></article>`).join('') : '<p class="empty-state">Docker is online with no containers.</p>';
+}
+
+function renderPrinter(payload) {
+  state.printer = payload || state.printer;
+  const online = Boolean(payload?.online); const progress = Math.round((Number(payload?.progress) || 0) * 100);
+  ui.printerState.textContent = payload?.configured === false ? 'NOT SET' : online ? String(payload.state || 'online').toUpperCase() : 'OFFLINE';
+  ui.printerState.style.color = online ? 'var(--mint)' : '';
+  ui.printerFile.textContent = payload?.filename || (online ? 'NO ACTIVE FILE' : 'PRINTER OFFLINE');
+  ui.printerEta.textContent = `ETA ${compactDuration(payload?.remaining)}`;
+  ui.printerProgress.style.width = `${progress}%`; ui.printerPercent.textContent = `${progress}%`;
+  const temperatures = payload?.temperatures || {};
+  ui.printerTemps.textContent = online ? `N ${Math.round(temperatures.nozzle || 0)}°/${Math.round(temperatures.nozzleTarget || 0)}° · B ${Math.round(temperatures.bed || 0)}°/${Math.round(temperatures.bedTarget || 0)}°` : 'NOZZLE -- / BED --';
+  $$('[data-printer]').forEach((button) => {
+    const action = button.dataset.printer;
+    button.disabled = !online || (action === 'pause' && payload.state !== 'printing') || (action === 'resume' && payload.state !== 'paused') || (action === 'cancel' && !['printing', 'paused'].includes(payload.state));
+  });
 }
 
 function renderAgents(payload) {
@@ -240,6 +274,14 @@ function handleWake(event) {
 
 async function sendPrompt(prompt) {
   const text = String(prompt || '').trim(); if (!text || ui.send.disabled) return;
+  state.galaxy?.focusFromText(text);
+  const directPrinterAction = /\b(?:cancel|end|stop)\s+(?:my\s+|the\s+)?(?:3d\s+)?print\b/i.test(text) ? 'cancel'
+    : /\bpause\s+(?:my\s+|the\s+)?(?:3d\s+)?print\b/i.test(text) ? 'pause'
+      : /\bresume\s+(?:my\s+|the\s+)?(?:3d\s+)?print\b/i.test(text) ? 'resume' : '';
+  if (directPrinterAction) {
+    appendMessage('user', text); appendMessage('assistant', `I opened the guarded ${directPrinterAction} control. Enter the operations PIN and type ${printerCopy[directPrinterAction].confirmation} exactly. I will not execute it automatically.`, 'LOCAL SAFETY');
+    openPrinterAction(directPrinterAction); return;
+  }
   appendMessage('user', text); state.history.push({ role: 'user', content: text }); state.history = state.history.slice(-16);
   ui.prompt.value = ''; ui.send.disabled = true; ui.send.textContent = 'RUNNING'; state.neuralEnergy = .95;
   try {
@@ -279,23 +321,35 @@ function stopBrowserClap() {
 
 function openOperation(action) {
   const copy = operationCopy[action]; if (!copy) return;
-  state.operation = action; ui.operationTitle.textContent = copy.title; ui.operationDescription.textContent = copy.description; ui.confirmationPhrase.textContent = copy.confirmation;
+  state.operation = action; state.operationKind = 'system'; ui.operationTitle.textContent = copy.title; ui.operationDescription.textContent = copy.description; ui.confirmationPhrase.textContent = copy.confirmation;
   ui.operationPin.value = ''; ui.operationConfirmation.value = ''; ui.operationError.textContent = ''; ui.confirmOperation.disabled = false; ui.confirmOperation.textContent = 'RUN ON RASPBERRY PI'; ui.operationDialog.showModal(); ui.operationPin.focus();
 }
+function openPrinterAction(action) {
+  const copy = printerCopy[action]; if (!copy) return;
+  state.operation = action; state.operationKind = 'printer'; ui.operationTitle.textContent = copy.title; ui.operationDescription.textContent = copy.description; ui.confirmationPhrase.textContent = copy.confirmation;
+  ui.operationPin.value = ''; ui.operationConfirmation.value = ''; ui.operationError.textContent = ''; ui.confirmOperation.disabled = false; ui.confirmOperation.textContent = action === 'cancel' ? 'CONFIRM END PRINT' : 'SEND TO PRINTER'; ui.operationDialog.showModal(); ui.operationPin.focus();
+}
 async function runOperation() {
-  const copy = operationCopy[state.operation]; if (!copy) return;
+  const copy = state.operationKind === 'printer' ? printerCopy[state.operation] : operationCopy[state.operation]; if (!copy) return;
   ui.operationError.textContent = ''; ui.confirmOperation.disabled = true; ui.confirmOperation.textContent = 'EXECUTING';
   try {
-    const result = await json('/api/operations/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: state.operation, pin: ui.operationPin.value, confirmation: ui.operationConfirmation.value }) });
-    renderOperationStatus(result.result); ui.operationDialog.close(); addEvent({ id: `local-${Date.now()}`, at: new Date().toISOString(), type: 'control', message: `${state.operation} completed`, detail: {} });
+    const endpoint = state.operationKind === 'printer' ? '/api/printer/action' : '/api/operations/action';
+    const result = await json(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: state.operation, pin: ui.operationPin.value, confirmation: ui.operationConfirmation.value }) });
+    if (state.operationKind === 'printer') renderPrinter(result.result); else renderOperationStatus(result.result);
+    ui.operationDialog.close(); addEvent({ id: `local-${Date.now()}`, at: new Date().toISOString(), type: state.operationKind === 'printer' ? 'printer' : 'control', message: `${state.operation} completed`, detail: {} });
   } catch (error) { ui.operationError.textContent = error.message; }
-  finally { ui.confirmOperation.disabled = false; ui.confirmOperation.textContent = 'RUN ON RASPBERRY PI'; }
+  finally { ui.confirmOperation.disabled = false; ui.confirmOperation.textContent = state.operationKind === 'printer' ? (state.operation === 'cancel' ? 'CONFIRM END PRINT' : 'SEND TO PRINTER') : 'RUN ON RASPBERRY PI'; }
 }
 
 function startEventStream() {
   const source = new EventSource('/api/events');
   source.addEventListener('snapshot', (event) => { const payload = JSON.parse(event.data); state.events = payload.events || []; state.eventSummary = payload.summary || {}; renderEvents(); });
   source.addEventListener('activity', (event) => addEvent(JSON.parse(event.data)));
+}
+function startPrinterStream() {
+  const source = new EventSource('/api/printer/events');
+  source.addEventListener('printer', (event) => renderPrinter(JSON.parse(event.data)));
+  source.addEventListener('error', () => { if (source.readyState === EventSource.CLOSED) setTimeout(() => void json('/api/printer/status').then(renderPrinter).catch(() => {}), 2500); });
 }
 
 async function refreshFast() {
@@ -310,40 +364,16 @@ async function refreshSlow() {
   if (agents.status === 'fulfilled') renderAgents(agents.value);
 }
 
-function resizeBrain() {
-  const rect = ui.brain.getBoundingClientRect(); const scale = Math.min(2, window.devicePixelRatio || 1);
-  ui.brain.width = Math.max(1, Math.round(rect.width * scale)); ui.brain.height = Math.max(1, Math.round(rect.height * scale));
-}
-const neuralNodes = Array.from({ length: 128 }, (_, index) => ({
-  seed: index * 9.713, radius: .16 + ((index * 37) % 100) / 560,
-  speed: .00011 + ((index * 19) % 17) * .000006,
-  phase: (index * 2.399) % (Math.PI * 2), size: 1 + (index % 4) * .34
-}));
-function drawBrain(time = 0) {
-  const canvas = ui.brain; const context = canvas.getContext('2d'); const width = canvas.width; const height = canvas.height;
-  context.clearRect(0, 0, width, height); const centerX = width / 2; const centerY = height * .48; const base = Math.min(width, height) * .46;
-  state.neuralEnergy += ((state.config ? .38 : .18) - state.neuralEnergy) * .004;
-  const points = neuralNodes.map((node, index) => {
-    const angle = node.phase + time * node.speed * (index % 2 ? 1 : -1); const wobble = Math.sin(time * .0008 + node.seed) * .055;
-    const x = centerX + Math.cos(angle) * base * (node.radius + wobble) * (1.25 + .18 * Math.sin(node.seed));
-    const y = centerY + Math.sin(angle * 1.17 + Math.sin(node.seed) * .4) * base * (node.radius + wobble) * .72;
-    return { x, y, size: node.size };
-  });
-  context.lineWidth = Math.max(1, width / 1500);
-  for (let i = 0; i < points.length; i += 1) {
-    const a = points[i];
-    for (let j = i + 1; j < Math.min(points.length, i + 10); j += 1) {
-      const b = points[j]; const distance = Math.hypot(a.x - b.x, a.y - b.y);
-      if (distance < base * .28) { context.strokeStyle = `rgba(100,232,255,${(.1 - distance / (base * 3.1)) * (0.6 + state.neuralEnergy)})`; context.beginPath(); context.moveTo(a.x, a.y); context.lineTo(b.x, b.y); context.stroke(); }
-    }
-  }
-  for (const point of points) {
-    const glow = Math.max(1.2, point.size * (1 + state.neuralEnergy * 1.5));
-    context.fillStyle = `rgba(118,236,255,${.42 + state.neuralEnergy * .32})`; context.shadowColor = '#64e8ff'; context.shadowBlur = glow * 3; context.beginPath(); context.arc(point.x, point.y, glow, 0, Math.PI * 2); context.fill();
-  }
-  context.shadowBlur = 0;
-  const gradient = context.createRadialGradient(centerX, centerY, 0, centerX, centerY, base * .62); gradient.addColorStop(0, `rgba(100,232,255,${.16 * state.neuralEnergy})`); gradient.addColorStop(1, 'rgba(100,232,255,0)'); context.fillStyle = gradient; context.beginPath(); context.arc(centerX, centerY, base * .62, 0, Math.PI * 2); context.fill();
-  requestAnimationFrame(drawBrain);
+async function toggleGestures() {
+  if (!state.gesture) return;
+  if (state.gesture.active) { await state.gesture.stop(); ui.gestureButton.classList.remove('active'); ui.gestureButton.textContent = 'ENABLE GESTURES'; ui.gestureFeed.hidden = true; return; }
+  if (state.settings?.gestureControl === false) { appendMessage('error', 'Gesture control is disabled in /settings.'); return; }
+  ui.gestureFeed.hidden = false; ui.gestureButton.disabled = true;
+  try {
+    await state.gesture.start({ deviceId: state.settings?.browserCamera || '', sensitivity: state.settings?.gestureSensitivity || .42 });
+    ui.gestureButton.classList.add('active'); ui.gestureButton.textContent = 'STOP GESTURES';
+  } catch (error) { ui.gestureFeed.hidden = true; appendMessage('error', `Gesture camera unavailable: ${error.message}`); }
+  finally { ui.gestureButton.disabled = false; }
 }
 
 ui.composer.addEventListener('submit', (event) => { event.preventDefault(); void sendPrompt(ui.prompt.value); });
@@ -352,18 +382,26 @@ ui.voiceButton.addEventListener('click', () => void toggleBrowserClap());
 $$('[data-prompt]').forEach((button) => button.addEventListener('click', () => void sendPrompt(button.dataset.prompt)));
 $$('.lane-tabs button').forEach((button) => button.addEventListener('click', () => { state.lane = button.dataset.lane; renderLane(); }));
 $$('[data-operation]').forEach((button) => button.addEventListener('click', () => openOperation(button.dataset.operation)));
+$$('[data-printer]').forEach((button) => button.addEventListener('click', () => openPrinterAction(button.dataset.printer)));
+ui.gestureButton.addEventListener('click', () => void toggleGestures());
 ui.operationForm.addEventListener('submit', (event) => { event.preventDefault(); void runOperation(); });
-window.addEventListener('resize', () => { resizeBrain(); drawTelemetry(); });
+ui.operationClose.addEventListener('click', () => ui.operationDialog.close());
+window.addEventListener('resize', () => { state.galaxy?.resize(); drawTelemetry(); });
 window.addEventListener('message', (event) => { if (event.origin === location.origin && event.data?.type === 'jarvis-settings-preview') { state.settings = { ...state.settings, ...event.data.settings }; document.documentElement.style.setProperty('--accent', state.settings.accent); } });
-window.addEventListener('beforeunload', stopBrowserClap);
+window.addEventListener('beforeunload', () => { stopBrowserClap(); void state.gesture?.stop(); });
 
 async function init() {
-  updateClock(); setInterval(updateClock, 1000); resizeBrain(); requestAnimationFrame(drawBrain);
+  updateClock(); setInterval(updateClock, 1000);
   await window.ensureDashboardAuthentication?.();
-  startEventStream();
+  startEventStream(); startPrinterStream();
   const [config, settings] = await Promise.allSettled([json('/api/config'), json('/api/settings')]);
   if (config.status === 'fulfilled') state.config = config.value;
   if (settings.status === 'fulfilled') { state.settings = settings.value; document.documentElement.style.setProperty('--accent', state.settings.accent); }
+  state.galaxy = await createKnowledgeGalaxy({ canvas: ui.brain, inspector: ui.nodeInspector, onStatus: (message) => { ui.galaxyState.textContent = message; } });
+  state.gesture = new GestureController({
+    video: ui.gestureVideo, canvas: ui.gestureCanvas, cursor: ui.gestureCursor,
+    onGesture: (gesture) => state.galaxy?.gesture(gesture), onStatus: (message) => { ui.gestureState.textContent = message; }
+  });
   await Promise.all([refreshFast(), refreshSlow()]);
   setInterval(() => void refreshFast(), 2500); setInterval(() => void refreshSlow(), 7000);
 }

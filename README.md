@@ -1,8 +1,16 @@
-# OpenJarvis Pi Command Center 2.0
+# OpenJarvis Pi Command Center 2.1
 
 A private, Pi-first JARVIS operations screen for OpenJarvis, Ollama, Docker, Google connectors, cameras, microphones, and guarded maintenance. The desktop layout is a fixed-height mission-control view with no page scrolling at normal 1080p/900p dashboard sizes. Smaller screens fall back to a responsive scrolling layout.
 
-## What is new in 2.0
+## What is new in 2.1
+
+- **Interactive 3D knowledge galaxy** — a local Three.js scene combines a dense cyan/gold/magenta neural core, orbital calibration rings, system clusters, and metadata-only folder/file nodes. Drag to orbit, scroll to zoom, click a node, or mention a file/system name in chat and the camera flies to it.
+- **Camera gesture controls** — the official MediaPipe Hand Landmarker runs locally in the browser. The selected browser camera supports pointer movement, pinch-to-select, pinch-drag rotation, and two-hand zoom. The camera starts only after **Enable Gestures** is pressed.
+- **Moonraker printer telemetry** — the bottom HUD shows printer state, active file, progress, estimated time left, and nozzle/bed temperatures from the fixed `PRINTER_URL`. The server polls once every two seconds and streams normalized state to the screen.
+- **Guarded print controls** — pause, resume, and cancel use fixed Moonraker endpoints. They require the operations PIN plus `PAUSE PRINT`, `RESUME PRINT`, or `CANCEL PRINT`; chat can open the confirmation screen but cannot execute an action automatically.
+- **Private knowledge indexing** — only server-configured roots are scanned. The browser receives names and metadata, never file contents; hidden, dependency, data, credential, token, key, and secret paths are excluded, and symlinks are ignored.
+
+The 2.0 agent, monitoring, maintenance, sensor, wake-word, Google, and Pi telemetry features remain included:
 
 - **Code Assistant Visualizer** — reads recent OpenJarvis traces and separates `native_openhands` CodeAct activity into code/tool/result steps. It never invents activity when OpenJarvis is unavailable.
 - **Deep Research Monitor** — shows `deep_research` traces and turns URLs returned by research into clickable citations.
@@ -105,11 +113,13 @@ The tunnel is optional for viewing the Pi dashboard and selecting Pi-attached de
 Open `/settings`, choose **This browser** for laptop testing or **Raspberry Pi 5 hardware** for Pi devices, select the exact camera/microphone, then save.
 
 - Browser mode requests permission only after **Start sensors** is pressed.
+- The main screen requests camera permission separately only after **Enable Gestures** is pressed. Select the exact **Browser / Gesture Camera** in `/settings`; this is also how Ubuntu/Chromium on the Pi selects one camera while leaving other cameras untouched.
 - Pi mode uses the selected `/dev/video*` and `plughw:CARD,DEVICE` paths only.
 - Person detection runs the TensorFlow.js COCO-SSD model locally. The release ZIP includes it; GitHub installs download the official model shards once during `npm install`, verify their hashes, and then run offline.
 - Voice activity and double-clap detection analyze signal levels; audio is not saved.
 - The Pi `hey jarvis` model runs fully locally through openWakeWord. Its own documentation notes that saying only “Jarvis” may work but has a higher false-reject rate, so “Hey Jarvis” is the reliable phrase. See [openWakeWord’s Hey Jarvis model documentation](https://github.com/dscripka/openWakeWord/blob/main/docs/models/hey_jarvis.md).
 - A high wake threshold reduces false activations; noisy rooms may need a higher clap threshold.
+- Pinch sensitivity is adjustable in `/settings`. A larger value accepts a wider thumb-to-index gap; start near 42% and tune it for camera distance and lighting.
 
 Check Pi hardware directly:
 
@@ -118,6 +128,36 @@ v4l2-ctl --list-devices
 arecord -l
 ls -l /dev/video*
 ```
+
+## 3D printer / Moonraker
+
+The default example is already set for your printer UI:
+
+```dotenv
+PRINTER_URL=http://192.168.4.74:4408
+PRINTER_API_KEY=
+PRINTER_TIMEOUT_MS=2800
+```
+
+Keep these values only in `.env` on the Pi. If your Fluidd reverse proxy at port `4408` does not forward Moonraker API routes, use Moonraker's direct local address instead, commonly `http://192.168.4.74:7125`. If Moonraker requires an API key, put it in `PRINTER_API_KEY`; it is sent only server-to-printer and never returned to the browser.
+
+While the printer is off, the HUD correctly shows **OFFLINE** and print controls stay disabled. When it is online, try:
+
+- “How much time is left on my 3D print?”
+- “What are the nozzle and bed temperatures?”
+- “Pause my print” or “End my 3D print” — JARVIS opens the guarded confirmation dialog and waits for the PIN and exact phrase.
+
+No chat/model response can send G-code, choose another printer URL, or bypass the confirmation dialog.
+
+## 3D knowledge roots
+
+By default the galaxy indexes only this command-center project. To add trusted folders, set `KNOWLEDGE_ROOTS` in `.env` using the operating system path separator (`:` on Linux, `;` on Windows):
+
+```dotenv
+KNOWLEDGE_ROOTS=/home/pi5/Documents:/home/pi5/3d-models
+```
+
+Indexing is bounded to 180 nodes and four levels per refresh. It exposes file names, type, size, and modified time—not contents or absolute paths.
 
 ## Google Workspace
 

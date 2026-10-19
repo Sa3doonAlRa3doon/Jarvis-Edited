@@ -76,6 +76,14 @@ set_env_value() {
   fi
 }
 
+if ! grep -q '^PRINTER_URL=.' .env; then
+  set_env_value PRINTER_URL http://192.168.4.74:4408
+  echo "Configured the fixed Moonraker/Fluidd printer endpoint at http://192.168.4.74:4408."
+fi
+grep -q '^PRINTER_API_KEY=' .env || set_env_value PRINTER_API_KEY ''
+grep -q '^PRINTER_TIMEOUT_MS=' .env || set_env_value PRINTER_TIMEOUT_MS 2800
+grep -q '^KNOWLEDGE_ROOTS=' .env || set_env_value KNOWLEDGE_ROOTS ''
+
 if ! grep -q '^OPS_CONTROL_PIN=.' .env; then
   GENERATED_PIN="$(python3 -c 'import secrets; print(f"{secrets.randbelow(1000000):06d}")')"
   set_env_value OPS_CONTROL_PIN "$GENERATED_PIN"
@@ -179,6 +187,7 @@ PI_ADDRESS="$(hostname -I | awk '{print $1}')"
 echo "JARVIS dashboard installed on http://$PI_ADDRESS:8787."
 echo "Unlock it with the private dashboard PIN stored in $APP_DIR/.env."
 echo "Camera/microphone access is limited to devices selected in the Vision & Voice tab."
+echo "3D knowledge gestures and the fixed printer HUD are included. Printer actions still require the private PIN plus an exact phrase."
 echo "Hidden settings: http://$PI_ADDRESS:8787/settings"
 echo "For laptop camera/microphone testing, browsers require a secure origin. Use this tunnel:"
 echo "ssh -N -L 8787:127.0.0.1:8787 $APP_USER@$PI_ADDRESS"
