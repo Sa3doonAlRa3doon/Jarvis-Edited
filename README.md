@@ -106,7 +106,7 @@ Open `/settings`, choose **This browser** for laptop testing or **Raspberry Pi 5
 
 - Browser mode requests permission only after **Start sensors** is pressed.
 - Pi mode uses the selected `/dev/video*` and `plughw:CARD,DEVICE` paths only.
-- Person detection runs the bundled TensorFlow.js COCO-SSD model locally.
+- Person detection runs the TensorFlow.js COCO-SSD model locally. The release ZIP includes it; GitHub installs download the official model shards once during `npm install`, verify their hashes, and then run offline.
 - Voice activity and double-clap detection analyze signal levels; audio is not saved.
 - The Pi `hey jarvis` model runs fully locally through openWakeWord. Its own documentation notes that saying only “Jarvis” may work but has a higher false-reject rate, so “Hey Jarvis” is the reliable phrase. See [openWakeWord’s Hey Jarvis model documentation](https://github.com/dscripka/openWakeWord/blob/main/docs/models/hey_jarvis.md).
 - A high wake threshold reduces false activations; noisy rooms may need a higher clap threshold.
@@ -201,4 +201,3 @@ npm.cmd start
 ```
 
 Open the command screen and `/settings`. Pi-only maintenance and openWakeWord controls correctly stay unavailable on Windows; system telemetry, the UI, live preview, browser camera/person detection, browser microphone level, local double-clap detection, and any reachable OpenJarvis/Ollama services can still be tested.
-

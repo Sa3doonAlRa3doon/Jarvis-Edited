@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#02070b">
+  <title>JARVIS // Pi Operations</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="command-page">
+  <div class="backdrop" aria-hidden="true"><i></i><i></i><i></i></div>
+  <div class="scanline" aria-hidden="true"></div>
+
+  <main class="command-shell">
+    <header class="topbar hud-panel">
+      <div class="brand">
+        <div class="brand-glyph" aria-hidden="true"><span></span></div>
+        <div><small>PI5 AUTONOMOUS OPERATIONS</small><h1>JARVIS <b>OS</b></h1></div>
+      </div>
+      <div class="mission-strip">
+        <span><i id="system-dot"></i><b id="system-state">INITIALIZING</b></span>
+        <span>NODE <b id="node-address">127.0.0.1</b></span>
+        <span>UPTIME <b id="uptime-value">--</b></span>
+        <span>ROUTE <b id="active-route">GENERAL</b></span>
+      </div>
+      <div class="time-lockup"><strong id="clock">--:--:--</strong><span id="date-label">ASIA / DUBAI</span></div>
+    </header>
+
+    <section class="command-grid">
+      <aside class="telemetry hud-panel">
+        <div class="panel-title"><span>01</span><h2>System telemetry</h2><b>LIVE</b></div>
+        <div class="metric-grid">
+          <article class="metric"><div><span>CPU</span><strong id="cpu-value">0%</strong></div><i><b id="cpu-bar"></b></i><small id="cpu-detail">-- cores</small></article>
+          <article class="metric"><div><span>RAM</span><strong id="ram-value">0%</strong></div><i><b id="ram-bar"></b></i><small id="ram-detail">-- / --</small></article>
+          <article class="metric"><div><span>GPU</span><strong id="gpu-value">N/A</strong></div><i><b id="gpu-bar"></b></i><small id="gpu-detail">driver probe</small></article>
+          <article class="metric"><div><span>THERMAL</span><strong id="temperature-value">--°</strong></div><i><b id="temperature-bar"></b></i><small>SoC sensor</small></article>
+        </div>
+        <canvas id="telemetry-chart" width="520" height="116" aria-label="CPU and RAM history"></canvas>
+
+        <div class="subhead"><span>CONNECTED STORAGE</span><b id="storage-count">0</b></div>
+        <div class="storage-list" id="storage-list"><p class="empty-state">Scanning devices…</p></div>
+
+        <div class="subhead"><span>CORE SERVICES</span><b id="service-count">0/0</b></div>
+        <div class="service-list" id="service-list"><p class="empty-state">Checking services…</p></div>
+      </aside>
+
+      <section class="neural hud-panel">
+        <div class="core-stage" id="core-stage">
+          <canvas id="brain-canvas" width="900" height="500" aria-label="JARVIS activity visualization"></canvas>
+          <div class="core-copy">
+            <span id="core-kicker">LOCAL INTELLIGENCE CORE</span>
+            <h2 id="core-state">ONLINE</h2>
+            <p id="core-subtitle">Say “Hey Jarvis”, “Jarvis”, or double clap</p>
+          </div>
+          <div class="orbital-label label-a"><span>MODEL</span><b id="model-label">WAITING</b></div>
+          <div class="orbital-label label-b"><span>WAKE</span><b id="wake-state">STANDBY</b></div>
+          <div class="orbital-label label-c"><span>MEMORY</span><b id="memory-state">LOCAL</b></div>
+          <div class="wake-flash" id="wake-flash"><span>JARVIS IS LISTENING</span></div>
+        </div>
+
+        <div class="conversation">
+          <div class="message-stream" id="messages" aria-live="polite">
+            <article class="message assistant"><span>J</span><div><b>JARVIS</b><p>Operations console online. Ask about system health, Docker, Google, research, or coding work.</p></div></article>
+          </div>
+          <form class="composer" id="composer">
+            <button class="voice-button" id="voice-button" type="button" aria-label="Enable browser microphone">◉</button>
+            <label><span>DIRECTIVE</span><textarea id="prompt" rows="1" maxlength="6000" placeholder="Ask JARVIS about this Pi, Docker, code, research, or Google…"></textarea></label>
+            <button class="send-button" id="send-button" type="submit">EXECUTE</button>
+          </form>
+          <div class="quick-prompts">
+            <button type="button" data-prompt="Give me a concise health report for this Pi and its services.">HEALTH REPORT</button>
+            <button type="button" data-prompt="Explain the current Docker containers, resource use, and anything unhealthy.">DOCKER STATUS</button>
+            <button type="button" data-prompt="Summarize the latest OpenJarvis agent activity and research citations.">AGENT ACTIVITY</button>
+          </div>
+        </div>
+      </section>
+
+      <aside class="agents hud-panel">
+        <div class="panel-title"><span>02</span><h2>Agent visualizer</h2><b id="agent-link-state">SYNC</b></div>
+        <div class="lane-tabs" role="tablist" aria-label="Agent monitors">
+          <button class="active" type="button" data-lane="code"><span>CODE</span><small>native_openhands</small></button>
+          <button type="button" data-lane="research"><span>RESEARCH</span><small>deep_research</small></button>
+          <button type="button" data-lane="monitor"><span>MONITOR</span><small>operative</small></button>
+        </div>
+        <div class="agent-header">
+          <div><span id="lane-eyebrow">CODEACT STREAM</span><h3 id="lane-title">Code Assistant</h3></div>
+          <div class="pulse-dot"><i></i><span id="lane-state">WAITING</span></div>
+        </div>
+        <div class="trace-summary">
+          <span>TRACE <b id="trace-id">—</b></span><span>STEPS <b id="trace-steps">0</b></span><span>LATENCY <b id="trace-latency">0 ms</b></span>
+        </div>
+        <div class="lane-feed" id="lane-feed"><p class="empty-state">Waiting for OpenJarvis traces. Run an agent and its code, tool calls, file actions, and results will appear here.</p></div>
+        <div class="citation-panel">
+          <div class="subhead"><span>INTERACTIVE CITATIONS</span><b id="citation-count">0</b></div>
+          <div id="citation-list"><p class="empty-state">Research links appear here.</p></div>
+        </div>
+      </aside>
+
+      <section class="operations hud-panel">
+        <div class="docker-block">
+          <div class="panel-title compact"><span>03</span><h2>Docker matrix</h2><b id="docker-summary">SCANNING</b></div>
+          <div class="docker-list" id="docker-list"><p class="empty-state">Waiting for Docker…</p></div>
+        </div>
+        <div class="event-block">
+          <div class="panel-title compact"><span>04</span><h2>Continuous monitor</h2><b id="event-total">MEMORY 0</b></div>
+          <div class="event-feed" id="event-feed"><p class="empty-state">Persistent local activity log ready.</p></div>
+        </div>
+        <div class="control-block">
+          <div class="panel-title compact"><span>05</span><h2>Maintenance</h2><b id="maintenance-state">ARMED</b></div>
+          <div class="control-actions">
+            <button type="button" data-operation="repair">SELF REPAIR</button>
+            <button type="button" data-operation="restart-all">RESTART ALL</button>
+            <button type="button" data-operation="stop-until-reboot">STOP UNTIL REBOOT</button>
+            <button type="button" data-operation="maintenance-on">PERSISTENT STOP</button>
+            <button type="button" class="resume" data-operation="resume">RESUME</button>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <dialog id="operation-dialog" class="operation-dialog">
+    <form method="dialog" id="operation-form">
+      <button class="dialog-close" value="cancel" aria-label="Close">×</button>
+      <span class="dialog-kicker">PIN-GUARDED PI CONTROL</span>
+      <h2 id="operation-title">Confirm operation</h2>
+      <p id="operation-description"></p>
+      <label>CONTROL PIN<input id="operation-pin" type="password" inputmode="numeric" autocomplete="off" required></label>
+      <label>TYPE TO CONFIRM <b id="confirmation-phrase"></b><input id="operation-confirmation" type="text" autocomplete="off" required></label>
+      <p class="dialog-error" id="operation-error"></p>
+      <button class="confirm-operation" id="confirm-operation" type="submit">RUN ON RASPBERRY PI</button>
+    </form>
+  </dialog>
+
+  <script src="/auth.js"></script>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

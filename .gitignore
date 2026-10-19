@@ -1,0 +1,13 @@
+node_modules/
+.wake-venv/
+data/
+.env
+npm-debug.log*
+*.wav
+*.mp3
+client_secret*.json
+credentials.json
+token.json
+*.pem
+*.key
+public/models/coco-ssd/group1-shard*

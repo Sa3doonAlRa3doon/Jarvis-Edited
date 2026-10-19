@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#02070b">
+  <title>JARVIS // Hidden Settings</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="settings-page">
+  <main class="settings-shell">
+    <header class="settings-header hud-panel">
+      <div><h1>JARVIS <b>// HIDDEN SETTINGS</b></h1><p>Private Pi configuration. The dashboard intentionally has no visible settings link.</p></div>
+      <span class="settings-status" id="settings-status">LOADING</span>
+    </header>
+
+    <section class="settings-layout">
+      <form class="settings-controls hud-panel" id="settings-form">
+        <section class="settings-section">
+          <h2><span>01</span> SENSOR SOURCE &amp; DEVICES</h2>
+          <div class="settings-grid">
+            <label class="setting full">ACTIVE SENSOR HOST
+              <select id="source"><option value="browser">This browser / laptop test</option><option value="pi">Raspberry Pi 5 hardware</option></select>
+            </label>
+            <label class="setting">BROWSER CAMERA<select id="browser-camera"><option value="">Default browser camera</option></select></label>
+            <label class="setting">BROWSER MICROPHONE<select id="browser-microphone"><option value="">Default browser microphone</option></select></label>
+            <label class="setting">PI V4L2 CAMERA<select id="pi-camera"><option value="">Select /dev/video*</option></select></label>
+            <label class="setting">PI ALSA MICROPHONE<select id="pi-microphone"><option value="">Select plughw device</option></select></label>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <h2><span>02</span> CAMERA &amp; MICROPHONE TEST</h2>
+          <div class="camera-preview" id="camera-preview">
+            <video id="camera-video" muted autoplay playsinline></video>
+            <img id="pi-camera-image" alt="Selected Raspberry Pi camera frame" hidden>
+            <canvas id="sensor-canvas"></canvas>
+            <span class="camera-placeholder" id="camera-placeholder">PRESS START SENSORS TO TEST</span>
+          </div>
+          <div class="sensor-readout">
+            <div><span>PERSON</span><b id="person-readout">STANDBY</b></div>
+            <div><span>MIC LEVEL</span><b id="mic-readout">0%</b></div>
+            <div><span>WAKE ENGINE</span><b id="wake-readout">STANDBY</b></div>
+          </div>
+          <div class="settings-actions">
+            <button class="sensor-button" id="start-sensors" type="button">START SENSORS</button>
+            <button class="sensor-button" id="stop-sensors" type="button">STOP</button>
+            <button class="sensor-button" id="test-wake" type="button">TEST WAKE SIGNAL</button>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <h2><span>03</span> DETECTION &amp; TALKBACK</h2>
+          <div class="toggle-grid">
+            <label class="switch">Person detection<input id="person-detection" type="checkbox"></label>
+            <label class="switch">Voice activity<input id="voice-activity" type="checkbox"></label>
+            <label class="switch">Hey Jarvis / Jarvis<input id="wake-word" type="checkbox"></label>
+            <label class="switch">Double clap wake<input id="double-clap" type="checkbox"></label>
+            <label class="switch">Speak responses<input id="auto-speak" type="checkbox"></label>
+            <label class="switch">Constrained auto-repair<input id="auto-repair" type="checkbox"></label>
+          </div>
+          <div class="settings-grid">
+            <label class="setting">PERSON CONFIDENCE <output id="person-threshold-output"></output><input id="person-threshold" type="range" min="0.25" max="0.95" step="0.05"></label>
+            <label class="setting">VOICE SENSITIVITY <output id="mic-sensitivity-output"></output><input id="mic-sensitivity" type="range" min="0.01" max="0.8" step="0.01"></label>
+            <label class="setting">WAKE SENSITIVITY <output id="wake-sensitivity-output"></output><input id="wake-sensitivity" type="range" min="0.2" max="0.95" step="0.05"></label>
+            <label class="setting">CLAP SENSITIVITY <output id="clap-sensitivity-output"></output><input id="clap-sensitivity" type="range" min="0.08" max="0.95" step="0.01"></label>
+            <label class="setting">DOUBLE CLAP WINDOW <output id="double-clap-window-output"></output><input id="double-clap-window" type="range" min="300" max="1500" step="50"></label>
+            <label class="setting">VISION INTERVAL <output id="scan-interval-output"></output><input id="scan-interval" type="range" min="300" max="4000" step="100"></label>
+            <label class="setting">HUD ACCENT<input id="accent" type="color"></label>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <h2><span>04</span> GOOGLE WORKSPACE ACCESS</h2>
+          <div class="google-grid" id="google-grid"></div>
+          <p class="empty-state" id="google-note">Google access belongs to OpenJarvis on the Pi. Credentials never enter this browser or the dashboard package.</p>
+        </section>
+
+        <div class="settings-actions">
+          <button class="primary" type="submit">SAVE TO PI</button>
+          <span class="settings-message" id="settings-message">Changes appear in the preview immediately.</span>
+        </div>
+      </form>
+
+      <aside class="settings-preview hud-panel">
+        <div class="panel-title"><span>LIVE</span><h2>COMMAND SCREEN PREVIEW</h2><b>RIGHT-SIDE VIEW</b></div>
+        <iframe id="live-preview" src="/?preview=1" title="Live JARVIS dashboard preview"></iframe>
+      </aside>
+    </section>
+  </main>
+
+  <script src="/auth.js"></script>
+  <script src="/vendor/tfjs/tf.min.js"></script>
+  <script src="/vendor/coco-ssd/coco-ssd.min.js"></script>
+  <script src="/settings.js" type="module"></script>
+</body>
+</html>
