@@ -1,0 +1,20 @@
+{
+  "name": "JARVIS Pi Command Center",
+  "short_name": "JARVIS",
+  "description": "Private fullscreen Raspberry Pi operations HUD",
+  "start_url": "/",
+  "scope": "/",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone", "minimal-ui"],
+  "background_color": "#020609",
+  "theme_color": "#02070b",
+  "orientation": "landscape",
+  "icons": [
+    {
+      "src": "/jarvis-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

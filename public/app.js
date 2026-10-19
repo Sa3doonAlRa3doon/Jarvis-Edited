@@ -26,7 +26,8 @@ const ui = {
   nodeInspector: $('#node-inspector'), gestureButton: $('#gesture-button'), gestureFeed: $('#gesture-feed'),
   gestureVideo: $('#gesture-video'), gestureCanvas: $('#gesture-canvas'), gestureCursor: $('#gesture-cursor'), gestureState: $('#gesture-state'),
   printerState: $('#printer-state'), printerFile: $('#printer-file'), printerEta: $('#printer-eta'),
-  printerProgress: $('#printer-progress'), printerPercent: $('#printer-percent'), printerTemps: $('#printer-temps')
+  printerProgress: $('#printer-progress'), printerPercent: $('#printer-percent'), printerTemps: $('#printer-temps'),
+  fullscreenButton: $('#fullscreen-button'), fullscreenGate: $('#fullscreen-gate')
 };
 
 const state = {
@@ -319,6 +320,35 @@ function stopBrowserClap() {
   Object.assign(state.clap, { stream: null, context: null, analyser: null, raf: 0, firstAt: 0, above: false }); ui.voiceButton.classList.remove('listening'); ui.voiceButton.title = 'Enable browser double-clap listener';
 }
 
+function isEmbeddedPreview() { try { return window.self !== window.top; } catch { return true; } }
+function fullscreenElement() { return document.fullscreenElement || document.webkitFullscreenElement || null; }
+function syncFullscreenUi() {
+  const active = Boolean(fullscreenElement());
+  ui.fullscreenButton?.classList.toggle('active', active);
+  ui.fullscreenButton?.setAttribute('aria-label', active ? 'Exit fullscreen' : 'Enter fullscreen');
+  if (ui.fullscreenGate) ui.fullscreenGate.hidden = active || isEmbeddedPreview() || document.body.classList.contains('standalone-hint');
+  state.galaxy?.resize();
+}
+async function toggleFullscreen() {
+  if (isEmbeddedPreview()) return;
+  try {
+    if (fullscreenElement()) await (document.exitFullscreen?.() || document.webkitExitFullscreen?.());
+    else {
+      const root = document.documentElement;
+      const request = root.requestFullscreen || root.webkitRequestFullscreen;
+      if (!request) throw new Error('this browser requires Add to Home Screen or its own fullscreen key');
+      try { await request.call(root, { navigationUI: 'hide' }); }
+      catch { await request.call(root); }
+    }
+  } catch (error) {
+    document.body.classList.add('standalone-hint');
+    if (ui.fullscreenGate) ui.fullscreenGate.hidden = true;
+    if (ui.fullscreenButton) ui.fullscreenButton.title = 'Browser blocked page fullscreen. Press F11 or install JARVIS to the home screen.';
+    appendMessage('error', `Browser fullscreen is blocked here. Press F11, or install JARVIS to the home screen. (${error.message})`);
+  }
+  syncFullscreenUi();
+}
+
 function openOperation(action) {
   const copy = operationCopy[action]; if (!copy) return;
   state.operation = action; state.operationKind = 'system'; ui.operationTitle.textContent = copy.title; ui.operationDescription.textContent = copy.description; ui.confirmationPhrase.textContent = copy.confirmation;
@@ -384,15 +414,20 @@ $$('.lane-tabs button').forEach((button) => button.addEventListener('click', () 
 $$('[data-operation]').forEach((button) => button.addEventListener('click', () => openOperation(button.dataset.operation)));
 $$('[data-printer]').forEach((button) => button.addEventListener('click', () => openPrinterAction(button.dataset.printer)));
 ui.gestureButton.addEventListener('click', () => void toggleGestures());
+ui.fullscreenButton?.addEventListener('click', () => void toggleFullscreen());
+ui.fullscreenGate?.addEventListener('click', () => void toggleFullscreen());
 ui.operationForm.addEventListener('submit', (event) => { event.preventDefault(); void runOperation(); });
 ui.operationClose.addEventListener('click', () => ui.operationDialog.close());
 window.addEventListener('resize', () => { state.galaxy?.resize(); drawTelemetry(); });
+document.addEventListener('fullscreenchange', syncFullscreenUi);
+document.addEventListener('webkitfullscreenchange', syncFullscreenUi);
 window.addEventListener('message', (event) => { if (event.origin === location.origin && event.data?.type === 'jarvis-settings-preview') { state.settings = { ...state.settings, ...event.data.settings }; document.documentElement.style.setProperty('--accent', state.settings.accent); } });
 window.addEventListener('beforeunload', () => { stopBrowserClap(); void state.gesture?.stop(); });
 
 async function init() {
   updateClock(); setInterval(updateClock, 1000);
   await window.ensureDashboardAuthentication?.();
+  syncFullscreenUi();
   startEventStream(); startPrinterStream();
   const [config, settings] = await Promise.allSettled([json('/api/config'), json('/api/settings')]);
   if (config.status === 'fulfilled') state.config = config.value;

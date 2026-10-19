@@ -1,9 +1,10 @@
-# OpenJarvis Pi Command Center 2.1
+# OpenJarvis Pi Command Center 2.1.1
 
 A private, Pi-first JARVIS operations screen for OpenJarvis, Ollama, Docker, Google connectors, cameras, microphones, and guarded maintenance. The desktop layout is a fixed-height mission-control view with no page scrolling at normal 1080p/900p dashboard sizes. Smaller screens fall back to a responsive scrolling layout.
 
 ## What is new in 2.1
 
+- **True fullscreen HUD** — `/` is now edge-to-edge with no outer webpage gutters. Press **Enter JARVIS** once to invoke the browser Fullscreen API; the compact top-right control toggles it afterward. Installed/mobile launches use a fullscreen web-app manifest. Browsers require that first press and do not permit pages to silently force fullscreen.
 - **Interactive 3D knowledge galaxy** — a local Three.js scene combines a dense cyan/gold/magenta neural core, orbital calibration rings, system clusters, and metadata-only folder/file nodes. Drag to orbit, scroll to zoom, click a node, or mention a file/system name in chat and the camera flies to it.
 - **Camera gesture controls** — the official MediaPipe Hand Landmarker runs locally in the browser. The selected browser camera supports pointer movement, pinch-to-select, pinch-drag rotation, and two-hand zoom. The camera starts only after **Enable Gestures** is pressed.
 - **Moonraker printer telemetry** — the bottom HUD shows printer state, active file, progress, estimated time left, and nozzle/bed temperatures from the fixed `PRINTER_URL`. The server polls once every two seconds and streams normalized state to the screen.

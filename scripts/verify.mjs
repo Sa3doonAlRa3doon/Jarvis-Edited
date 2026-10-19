@@ -31,7 +31,7 @@ for (const shard of shards) { const stats = await fs.stat(path.join(modelDirecto
 const handModel = await fs.readFile(path.join(project, 'public', 'models', 'hand-landmarker', 'hand_landmarker.task'));
 assert.equal(handModel.length, 7819105, 'Unexpected hand landmark model size.');
 
-assert.equal(packageJson.version, '2.1.0');
+assert.equal(packageJson.version, '2.1.1');
 assert.match(server, /app\.get\('\/settings'/);
 assert.match(server, /v1\/traces\?limit=40/);
 assert.match(server, /timingSafeEqual/);
@@ -52,6 +52,10 @@ assert.match(settingsClient, /exact:\s*settings\.browserMicrophone/);
 assert.match(settingsClient, /modelUrl: '\/models\/coco-ssd\/model\.json'/);
 assert.match(settingsHtml, /id="gesture-sensitivity"/);
 assert.match(html, /id="gesture-button"/);
+assert.match(html, /id="fullscreen-gate"/);
+assert.match(html, /rel="manifest"/);
+assert.match(client, /requestFullscreen/);
+assert.match(css, /\.fullscreen-gate/);
 assert.match(html, /data-printer="cancel"/);
 assert.match(client, /CANCEL PRINT/);
 assert.match(gestures, /HandLandmarker\.createFromOptions/);
