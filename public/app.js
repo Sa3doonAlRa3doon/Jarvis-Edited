@@ -27,7 +27,8 @@ const ui = {
   gestureVideo: $('#gesture-video'), gestureCanvas: $('#gesture-canvas'), gestureCursor: $('#gesture-cursor'), gestureState: $('#gesture-state'),
   printerState: $('#printer-state'), printerFile: $('#printer-file'), printerEta: $('#printer-eta'),
   printerProgress: $('#printer-progress'), printerPercent: $('#printer-percent'), printerTemps: $('#printer-temps'),
-  fullscreenButton: $('#fullscreen-button'), fullscreenGate: $('#fullscreen-gate')
+  fullscreenButton: $('#fullscreen-button'), fullscreenGate: $('#fullscreen-gate'), coreLayer: $('#core-layer'),
+  coreLink: $('#core-link'), coreHealth: $('#core-health')
 };
 
 const state = {
@@ -47,18 +48,19 @@ const laneLabels = {
 };
 
 const coreModes = {
-  system: { kicker: 'COGNITIVE NEURAL MATRIX', title: 'READY', subtitle: 'AWAITING DIRECTIVE // LOCAL INTELLIGENCE' },
-  docker: { kicker: 'CONTAINER ORCHESTRATION', title: 'DOCKER', subtitle: 'LIVE SERVICE TOPOLOGY // SELECT A NODE' },
-  printer: { kicker: 'ADDITIVE MANUFACTURING CELL', title: 'FABRICATOR', subtitle: 'MOONRAKER TELEMETRY // GUARDED CONTROL' },
-  agents: { kicker: 'COORDINATED OPERATIVE LAYER', title: 'AGENTS', subtitle: 'CODEACT // RESEARCH // CONTINUOUS MONITOR' },
-  research: { kicker: 'MULTI-HOP KNOWLEDGE ENGINE', title: 'PROSPECTOR', subtitle: 'SOURCE MAP // INTERACTIVE CITATIONS' },
-  memory: { kicker: 'PERSISTENT LOCAL ARCHIVE', title: 'MEMORY', subtitle: 'COMPRESSED CONTEXT // PRIVATE STORAGE' }
+  system: { layer: '01', link: 'LOCAL', health: 'NOMINAL', kicker: 'COGNITIVE NEURAL MATRIX', title: 'READY', subtitle: 'AWAITING DIRECTIVE // LOCAL INTELLIGENCE' },
+  docker: { layer: '02', link: 'ENGINE', health: 'LIVE', kicker: 'CONTAINER ORCHESTRATION', title: 'DOCKER', subtitle: 'LIVE SERVICE TOPOLOGY // SELECT A NODE' },
+  printer: { layer: '03', link: 'MOONRAKER', health: 'GUARDED', kicker: 'ADDITIVE MANUFACTURING CELL', title: 'FABRICATOR', subtitle: 'MOONRAKER TELEMETRY // GUARDED CONTROL' },
+  agents: { layer: '04', link: 'CODEACT', health: 'SYNC', kicker: 'COORDINATED OPERATIVE LAYER', title: 'AGENTS', subtitle: 'CODEACT // RESEARCH // CONTINUOUS MONITOR' },
+  research: { layer: '05', link: 'INDEX', health: 'SOURCED', kicker: 'MULTI-HOP KNOWLEDGE ENGINE', title: 'PROSPECTOR', subtitle: 'SOURCE MAP // INTERACTIVE CITATIONS' },
+  memory: { layer: '06', link: 'ARCHIVE', health: 'PRIVATE', kicker: 'PERSISTENT LOCAL ARCHIVE', title: 'MEMORY', subtitle: 'COMPRESSED CONTEXT // PRIVATE STORAGE' }
 };
 
 function activateCoreMode(mode, { focus = false } = {}) {
   const config = coreModes[mode] || coreModes.system; const changed = state.coreMode !== mode;
   state.coreMode = mode; document.body.dataset.coreMode = mode;
   ui.coreKicker.textContent = config.kicker; ui.coreState.textContent = config.title; ui.coreSubtitle.textContent = config.subtitle;
+  ui.coreLayer.textContent = config.layer; ui.coreLink.textContent = config.link; ui.coreHealth.textContent = config.health;
   $$('[data-core-mode]').forEach((button) => { const active = button.dataset.coreMode === mode; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active)); });
   if (changed || !focus) state.galaxy?.setMode(mode); else {
     const button = $(`[data-core-mode="${mode}"]`); if (button?.dataset.node) state.galaxy?.selectById(button.dataset.node);
@@ -304,14 +306,14 @@ async function sendPrompt(prompt) {
     openPrinterAction(directPrinterAction); return;
   }
   appendMessage('user', text); state.history.push({ role: 'user', content: text }); state.history = state.history.slice(-16);
-  ui.prompt.value = ''; ui.send.disabled = true; ui.send.textContent = 'RUNNING'; state.neuralEnergy = .95;
+  ui.prompt.value = ''; ui.send.disabled = true; ui.send.innerHTML = '<span>LINK</span><b>RUNNING</b>'; state.neuralEnergy = .95;
   try {
     const result = await json('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: text, history: state.history.slice(0, -1) }) });
     ui.route.textContent = result.route;
     if (result.route === 'CODEACT') activateCoreMode('agents'); else if (result.route === 'RESEARCH') activateCoreMode('research');
     state.lastAssistant = result.content; appendMessage('assistant', result.content, result.source); state.history.push({ role: 'assistant', content: result.content }); state.history = state.history.slice(-16); void speak(result.content);
   } catch (error) { appendMessage('error', error.message); }
-  finally { ui.send.disabled = false; ui.send.textContent = 'EXECUTE'; state.neuralEnergy = .42; }
+  finally { ui.send.disabled = false; ui.send.innerHTML = '<span>RUN</span><b>EXECUTE</b>'; state.neuralEnergy = .42; }
 }
 
 async function toggleBrowserClap() {
@@ -470,3 +472,4 @@ async function init() {
 }
 
 void init();
+

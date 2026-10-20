@@ -1,8 +1,16 @@
-# OpenJarvis Pi Command Center 2.3.0
+# OpenJarvis Pi Command Center 2.4.0
 
 A private, Pi-first JARVIS operations screen for OpenJarvis, Ollama, Docker, Google connectors, cameras, microphones, and guarded maintenance. The dashboard stays inside a single fullscreen viewport without page scrolling; compact screens progressively hide secondary rails so the neural core and command line remain usable.
 
-## What is new in 2.3
+## What is new in 2.4
+
+- **Precision reactor core** — the center is now a restrained, layered cyan/gold reactor with calibrated rings, a bright energy seed, mode-aware colors, and readable status diagnostics instead of a bright wireframe ball.
+- **Cleaner spatial hierarchy** — background stars, sparks, filaments, and file links were reduced by more than half so the active 3D formation and selected node remain legible at a glance.
+- **Readable instrument rails** — CPU, RAM, GPU, thermals, services, storage, and agent traces use larger values, clearer separation, stronger active states, and angled edge geometry inspired by the supplied references.
+- **Rebuilt operations deck** — Docker, printer, continuous-monitor, and maintenance controls are taller and easier to read while staying inside one fixed fullscreen viewport.
+- **Mode-linked diagnostics** — CORE, DOCKER, FABRICATOR, AGENTS, RESEARCH, and MEMORY now drive the reactor accent, layer number, link type, health label, particle formation, and command context together.
+
+The 2.3 command-center structure and every existing local operation remain included:
 
 - **Interactive intelligence layers** — the top-center CORE, DOCKER, FABRICATOR, AGENTS, RESEARCH, and MEMORY controls now morph the particle field into six distinct live 3D formations, retune its light, and update the command context.
 - **Cinematic instrument rails** — the left and right sides are no longer large dashboard cards. They are thin translucent telemetry and agent-report instruments with edge rules, compact signals, and uninterrupted space around the neural core.
@@ -11,7 +19,7 @@ A private, Pi-first JARVIS operations screen for OpenJarvis, Ollama, Docker, Goo
 
 The 2.2 neural visualization and every existing local operation remain included:
 
-- **Living neural intelligence core** — the center is now a dense GPU-animated field of more than ten thousand particles and sparks. Its cyan, gold, mint, and magenta regions breathe, deform, rotate, and bloom independently instead of behaving like a static globe.
+- **Living neural intelligence core** — the center uses a GPU-animated field of thousands of particles and restrained sparks. Its cyan, gold, mint, and blue regions breathe, deform, rotate, and bloom independently instead of behaving like a static globe.
 - **Reference-driven edge HUD** — the page now follows the supplied JARVIS reel language: one dominant intelligence visualization, fixed translucent system and agent rails, labelled orbital clusters, compact bottom operations telemetry, and a floating command console.
 - **Reel-style system clusters** — functional nodes are presented as JARVIS, CODEX, PROSPECTOR, FABRICATOR, SECOND BRAIN, SENTINEL, Docker Matrix, and Google clusters while still opening the same real local data.
 - **Zero-scroll responsive display** — laptop, Pi display, tablet, and phone layouts stay viewport-locked. On narrow screens the secondary rails collapse instead of turning the dashboard into a long webpage.
@@ -254,3 +262,4 @@ npm.cmd start
 ```
 
 Open the command screen and `/settings`. Pi-only maintenance and openWakeWord controls correctly stay unavailable on Windows; system telemetry, the UI, live preview, browser camera/person detection, browser microphone level, local double-clap detection, and any reachable OpenJarvis/Ollama services can still be tested.
+

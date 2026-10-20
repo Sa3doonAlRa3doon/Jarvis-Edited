@@ -58,6 +58,10 @@
       <section class="neural hud-panel">
         <div class="core-stage" id="core-stage">
           <canvas id="brain-canvas" width="900" height="500" aria-label="Interactive 3D JARVIS knowledge and file galaxy"></canvas>
+          <div class="reactor-shell" aria-hidden="true">
+            <i></i><i></i><i></i><i></i>
+            <span></span><b></b>
+          </div>
           <div class="mode-console" aria-label="JARVIS system map">
             <span>SELECT INTELLIGENCE LAYER</span>
             <nav class="core-modes">
@@ -74,6 +78,11 @@
             <h2 id="core-state">READY</h2>
             <p id="core-subtitle">AWAITING DIRECTIVE // LOCAL INTELLIGENCE</p>
             <div class="core-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <div class="core-diagnostics">
+              <span>LAYER <b id="core-layer">01</b></span>
+              <span>LINK <b id="core-link">LOCAL</b></span>
+              <span>STATE <b id="core-health">NOMINAL</b></span>
+            </div>
           </div>
           <div class="core-crosshair" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
           <div class="orbital-label label-a"><span>MODEL</span><b id="model-label">WAITING</b></div>
@@ -184,3 +193,4 @@
   <script src="/app.js" type="module"></script>
 </body>
 </html>
+

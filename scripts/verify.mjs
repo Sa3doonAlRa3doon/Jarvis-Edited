@@ -31,7 +31,7 @@ for (const shard of shards) { const stats = await fs.stat(path.join(modelDirecto
 const handModel = await fs.readFile(path.join(project, 'public', 'models', 'hand-landmarker', 'hand_landmarker.task'));
 assert.equal(handModel.length, 7819105, 'Unexpected hand landmark model size.');
 
-assert.equal(packageJson.version, '2.3.0');
+assert.equal(packageJson.version, '2.4.0');
 assert.match(server, /app\.get\('\/settings'/);
 assert.match(server, /v1\/traces\?limit=40/);
 assert.match(server, /timingSafeEqual/);
@@ -49,6 +49,9 @@ for (const mode of ['system', 'docker', 'printer', 'agents', 'research', 'memory
 assert.match(client, /activateCoreMode/);
 assert.match(galaxy, /formationFor/);
 assert.match(galaxy, /uMorph/);
+assert.match(html, /class="reactor-shell"/);
+assert.match(client, /coreHealth/);
+assert.match(css, /v2\.4 restrained reactor command center/);
 assert.doesNotMatch(html, /href=["']\/settings/);
 assert.match(settingsHtml, /id="live-preview"/);
 assert.match(settingsClient, /exact:\s*settings\.browserCamera/);
@@ -85,3 +88,4 @@ console.log(`Verified ${shards.length} local person-model shards (${(modelBytes 
 console.log(`Verified local MediaPipe hand model (${(handModel.length / 1024 / 1024).toFixed(1)} MiB).`);
 console.log('Verified no-scroll 3D file galaxy, hidden settings, exact camera selection, gesture sensitivity, and live preview.');
 console.log('Verified session-gated dashboard, PIN-gated fixed printer/maintenance actions, and secret-file exclusions.');
+
