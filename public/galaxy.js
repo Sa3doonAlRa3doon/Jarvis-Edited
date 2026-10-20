@@ -74,13 +74,53 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
     const zone = y > 1.55 ? 2 : y < -1.35 ? 3 : x > 1.4 ? 1 : 0; const color = palette[zone].clone();
     const brightness = .66 + (((index * 67) % 100) / 100) * .52; color.multiplyScalar(brightness); brainColors.push(color.r, color.g, color.b);
   }
-  const brainGeometry = new THREE.BufferGeometry(); brainGeometry.setAttribute('position', new THREE.Float32BufferAttribute(brainPositions, 3)); brainGeometry.setAttribute('color', new THREE.Float32BufferAttribute(brainColors, 3));
+  const brainGeometry = new THREE.BufferGeometry();
+  const baseFormation = Float32Array.from(brainPositions);
+  let currentFormation = Float32Array.from(baseFormation);
+  let activeMode = 'system';
+  let morphProgress = 1;
+
+  function formationFor(mode) {
+    if (mode === 'system') return Float32Array.from(baseFormation);
+    const output = new Float32Array(baseFormation.length);
+    const count = baseFormation.length / 3;
+    for (let point = 0; point < count; point += 1) {
+      const offset = point * 3; const t = point / count; const seed = ((point * 149) % 997) / 997;
+      const bx = baseFormation[offset]; const by = baseFormation[offset + 1]; const bz = baseFormation[offset + 2];
+      let x = bx; let y = by; let z = bz;
+      if (mode === 'docker') {
+        const angle = point * 2.3999632297; const band = (point % 17) / 17;
+        const radius = 2.2 + band * 4.7; x = Math.cos(angle) * radius; z = Math.sin(angle) * radius * .66; y = (seed - .5) * 7.4 + Math.sin(angle * 3) * .18;
+      } else if (mode === 'printer') {
+        const angle = t * Math.PI * 23; const radius = 1.7 + seed * 2.4;
+        x = Math.cos(angle) * radius; z = Math.sin(angle) * radius * .78; y = (t - .5) * 10.6;
+      } else if (mode === 'agents') {
+        const lane = point % 3; const angle = t * Math.PI * 18 + lane * Math.PI * .66; const radius = 2.15 + lane * 1.38;
+        x = Math.cos(angle) * radius + (lane - 1) * 1.2; z = Math.sin(angle) * radius * .58; y = (seed - .5) * 9.2;
+      } else if (mode === 'research') {
+        const theta = point * 2.3999632297; const u = seed * 2 - 1; const radial = Math.sqrt(Math.max(0, 1 - u * u)); const ray = 1.3 + Math.pow(((point * 83) % 251) / 251, .43) * 7.1;
+        x = Math.cos(theta) * radial * ray; y = u * ray * .82; z = Math.sin(theta) * radial * ray * .78;
+      } else if (mode === 'memory') {
+        const major = 4.55; const minor = 1.15 + seed * 1.05; const a = t * Math.PI * 18; const b = point * 2.3999632297;
+        x = (major + minor * Math.cos(b)) * Math.cos(a); y = minor * Math.sin(b) * 1.55; z = (major + minor * Math.cos(b)) * Math.sin(a) * .62;
+      }
+      output[offset] = x; output[offset + 1] = y; output[offset + 2] = z;
+    }
+    return output;
+  }
+
+  brainGeometry.setAttribute('position', new THREE.Float32BufferAttribute(brainPositions, 3));
+  brainGeometry.setAttribute('aFrom', new THREE.BufferAttribute(Float32Array.from(baseFormation), 3));
+  brainGeometry.setAttribute('aTo', new THREE.BufferAttribute(Float32Array.from(baseFormation), 3));
+  brainGeometry.setAttribute('color', new THREE.Float32BufferAttribute(brainColors, 3));
   const brainMaterial = new THREE.PointsMaterial({ size: .073, vertexColors: true, transparent: true, opacity: .88, sizeAttenuation: true, blending: THREE.AdditiveBlending, depthWrite: false });
   brainMaterial.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = { value: 0 };
-    shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTime;');
+    shader.uniforms.uMorph = { value: 1 };
+    shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTime;\nuniform float uMorph;\nattribute vec3 aFrom;\nattribute vec3 aTo;');
     shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
-      vec3 transformed = vec3(position);
+      float easedMorph = uMorph * uMorph * (3.0 - 2.0 * uMorph);
+      vec3 transformed = mix(aFrom, aTo, easedMorph);
       float phase = position.x * 1.21 + position.y * .87 + position.z * .63;
       float pulse = 1.0 + .052 * sin(uTime * 1.16 + phase) + .024 * sin(uTime * .43 + position.y * 2.35);
       transformed *= pulse;
@@ -89,7 +129,7 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
     `);
     brainMaterial.userData.shader = shader;
   };
-  brainMaterial.customProgramCacheKey = () => 'jarvis-neural-breath-v2';
+  brainMaterial.customProgramCacheKey = () => 'jarvis-neural-morph-v3';
   const brainCloud = new THREE.Points(brainGeometry, brainMaterial); world.add(brainCloud);
 
   const sparkPositions = []; const sparkColors = [];
@@ -137,6 +177,19 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
   let previousPointer = null;
   let gesturePinched = false;
   let gesturePrevious = null;
+
+  const modeColors = { system: 0x64e8ff, docker: 0x71ffca, printer: 0xf5bd5c, agents: 0xee76b8, research: 0x84f6d5, memory: 0x92b8ff };
+
+  function setMode(mode = 'system') {
+    if (!Object.hasOwn(modeColors, mode)) mode = 'system';
+    const next = formationFor(mode);
+    const from = brainGeometry.getAttribute('aFrom'); const to = brainGeometry.getAttribute('aTo');
+    from.array.set(currentFormation); to.array.set(next); from.needsUpdate = true; to.needsUpdate = true;
+    currentFormation = next; activeMode = mode; morphProgress = 0;
+    const color = modeColors[mode]; pointLight.color.setHex(color); core.material.emissive.setHex(color); coreRing.material.color.setHex(color); coreGlow.material.color.setHex(color);
+    orbitalRings[0]?.material.color.setHex(color); targetDistance = mode === 'research' ? 25 : mode === 'printer' ? 21 : 23; focusPoint.set(0, 0, 0);
+    onStatus(`MATRIX // ${mode.toUpperCase()}`); return mode;
+  }
 
   function clearKnowledge() {
     for (const mesh of meshes.splice(0)) { world.remove(mesh); mesh.geometry.dispose(); mesh.material.dispose(); }
@@ -239,6 +292,7 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
     dragging = false; previousPointer = null;
   });
   canvas.addEventListener('wheel', (event) => { event.preventDefault(); targetDistance = Math.max(10, Math.min(44, targetDistance + event.deltaY * .022)); }, { passive: false });
+  canvas.addEventListener('dblclick', () => setMode('system'));
 
   function gesture({ x, y, pinched, hands = 1, spread = 0 }) {
     const rect = canvas.getBoundingClientRect(); const clientX = rect.left + x * rect.width; const clientY = rect.top + y * rect.height;
@@ -251,8 +305,9 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
   const clock = new THREE.Clock();
   function animate() {
     const elapsed = clock.getElapsedTime();
+    morphProgress = Math.min(1, morphProgress + .018);
     core.rotation.x = elapsed * .08; core.rotation.y = elapsed * .16; coreRing.rotation.z = elapsed * .11;
-    if (brainMaterial.userData.shader) brainMaterial.userData.shader.uniforms.uTime.value = elapsed;
+    if (brainMaterial.userData.shader) { brainMaterial.userData.shader.uniforms.uTime.value = elapsed; brainMaterial.userData.shader.uniforms.uMorph.value = morphProgress; }
     const breath = 1 + Math.sin(elapsed * 1.12) * .018;
     brainCloud.scale.set(breath * (1 + Math.sin(elapsed * .39) * .018), breath * (1 + Math.sin(elapsed * .53 + 1) * .022), breath);
     brainCloud.rotation.y = elapsed * .025; brainCloud.rotation.x = Math.sin(elapsed * .11) * .075;
@@ -262,7 +317,7 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
     orbitalRings.forEach((ring, index) => { ring.rotation.z += (index % 2 ? -1 : 1) * (.00042 + index * .00008); });
     ticks.rotation.z = -elapsed * .03;
     stars.rotation.y = elapsed * .004;
-    if (!dragging && !gesturePinched) world.rotation.y += .00072;
+    if (!dragging && !gesturePinched) world.rotation.y += activeMode === 'printer' ? .00115 : activeMode === 'research' ? .00135 : .00072;
     for (let index = 0; index < meshes.length; index += 1) {
       const mesh = meshes[index]; mesh.rotation.y += .002 + (index % 4) * .0005;
       if (mesh !== selected) mesh.scale.setScalar(1 + Math.sin(elapsed * 1.4 + index) * .055);
@@ -276,6 +331,5 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
   try { knowledge = await fetch('/api/knowledge').then((response) => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); }); buildGraph(); }
   catch (error) { onStatus(`INDEX OFFLINE // ${error.message}`); knowledge = { nodes: [], links: [], summary: {} }; buildGraph(); }
 
-  return { focusFromText, gesture, resize, selectById: (id) => selectMesh(meshById.get(id)), get selected() { return selected?.userData?.node || null; } };
+  return { focusFromText, gesture, resize, setMode, selectById: (id) => selectMesh(meshById.get(id)), get selected() { return selected?.userData?.node || null; }, get mode() { return activeMode; } };
 }
-

@@ -12,7 +12,7 @@ const ui = {
   gpuDetail: $('#gpu-detail'), temperatureValue: $('#temperature-value'), temperatureBar: $('#temperature-bar'),
   chart: $('#telemetry-chart'), storageList: $('#storage-list'), storageCount: $('#storage-count'),
   serviceList: $('#service-list'), serviceCount: $('#service-count'), brain: $('#brain-canvas'), coreStage: $('#core-stage'),
-  coreState: $('#core-state'), coreSubtitle: $('#core-subtitle'), modelLabel: $('#model-label'), wakeState: $('#wake-state'),
+  coreState: $('#core-state'), coreSubtitle: $('#core-subtitle'), coreKicker: $('#core-kicker'), modelLabel: $('#model-label'), wakeState: $('#wake-state'),
   memoryState: $('#memory-state'), wakeFlash: $('#wake-flash'), messages: $('#messages'), composer: $('#composer'),
   prompt: $('#prompt'), send: $('#send-button'), voiceButton: $('#voice-button'), agentLink: $('#agent-link-state'),
   laneEyebrow: $('#lane-eyebrow'), laneTitle: $('#lane-title'), laneState: $('#lane-state'), laneFeed: $('#lane-feed'),
@@ -37,7 +37,7 @@ const state = {
   galaxy: null, gesture: null, printer: { configured: false, online: false, state: 'checking' },
   chart: { cpu: Array(52).fill(0), ram: Array(52).fill(0), gpu: Array(52).fill(0) },
   clap: { stream: null, context: null, analyser: null, raf: 0, firstAt: 0, above: false },
-  neuralEnergy: 0.22
+  neuralEnergy: 0.22, coreMode: 'system'
 };
 
 const laneLabels = {
@@ -45,6 +45,25 @@ const laneLabels = {
   research: { eyebrow: 'MULTI-HOP INDEX', title: 'Deep Research' },
   monitor: { eyebrow: 'PERSISTENT OPERATIVE', title: 'Continuous Monitor' }
 };
+
+const coreModes = {
+  system: { kicker: 'COGNITIVE NEURAL MATRIX', title: 'READY', subtitle: 'AWAITING DIRECTIVE // LOCAL INTELLIGENCE' },
+  docker: { kicker: 'CONTAINER ORCHESTRATION', title: 'DOCKER', subtitle: 'LIVE SERVICE TOPOLOGY // SELECT A NODE' },
+  printer: { kicker: 'ADDITIVE MANUFACTURING CELL', title: 'FABRICATOR', subtitle: 'MOONRAKER TELEMETRY // GUARDED CONTROL' },
+  agents: { kicker: 'COORDINATED OPERATIVE LAYER', title: 'AGENTS', subtitle: 'CODEACT // RESEARCH // CONTINUOUS MONITOR' },
+  research: { kicker: 'MULTI-HOP KNOWLEDGE ENGINE', title: 'PROSPECTOR', subtitle: 'SOURCE MAP // INTERACTIVE CITATIONS' },
+  memory: { kicker: 'PERSISTENT LOCAL ARCHIVE', title: 'MEMORY', subtitle: 'COMPRESSED CONTEXT // PRIVATE STORAGE' }
+};
+
+function activateCoreMode(mode, { focus = false } = {}) {
+  const config = coreModes[mode] || coreModes.system; const changed = state.coreMode !== mode;
+  state.coreMode = mode; document.body.dataset.coreMode = mode;
+  ui.coreKicker.textContent = config.kicker; ui.coreState.textContent = config.title; ui.coreSubtitle.textContent = config.subtitle;
+  $$('[data-core-mode]').forEach((button) => { const active = button.dataset.coreMode === mode; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active)); });
+  if (changed || !focus) state.galaxy?.setMode(mode); else {
+    const button = $(`[data-core-mode="${mode}"]`); if (button?.dataset.node) state.galaxy?.selectById(button.dataset.node);
+  }
+}
 
 const operationCopy = {
   repair: { title: 'Constrained self-repair', confirmation: 'REPAIR SERVICES', description: 'Restarts only failed allow-listed JARVIS services and previously saved Docker containers. It never runs AI-generated shell commands.' },
@@ -168,7 +187,7 @@ function renderStatus(payload) {
   ui.serviceList.innerHTML = services.map((item) => `<article class="service-item"><i class="${item.ok ? 'ok' : ''}"></i><div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.detail)}</span></div><b>${item.ok ? 'ONLINE' : 'OFFLINE'}</b></article>`).join('');
   const healthy = payload.services?.openjarvis?.online && payload.services?.ollama?.online;
   ui.systemDot.className = healthy ? 'online' : 'warning'; ui.systemState.textContent = healthy ? 'SYSTEM NOMINAL' : 'DEGRADED';
-  ui.coreState.textContent = 'JARVIS'; ui.coreSubtitle.textContent = healthy ? 'Speak • pinch • inspect • command' : 'Visual core ready // model services standby';
+  if (state.coreMode === 'system') ui.coreSubtitle.textContent = healthy ? 'SPEAK // PINCH // INSPECT // COMMAND' : 'VISUAL CORE READY // MODEL SERVICES STANDBY';
   ui.modelLabel.textContent = payload.services?.ollama?.models?.[0] || 'NO MODEL';
   ui.wakeState.textContent = payload.wake?.ready ? 'LISTENING' : payload.wake?.configured ? 'STARTING' : 'STANDBY';
   state.neuralEnergy = healthy ? .42 : .18;
@@ -280,6 +299,7 @@ async function sendPrompt(prompt) {
     : /\bpause\s+(?:my\s+|the\s+)?(?:3d\s+)?print\b/i.test(text) ? 'pause'
       : /\bresume\s+(?:my\s+|the\s+)?(?:3d\s+)?print\b/i.test(text) ? 'resume' : '';
   if (directPrinterAction) {
+    activateCoreMode('printer');
     appendMessage('user', text); appendMessage('assistant', `I opened the guarded ${directPrinterAction} control. Enter the operations PIN and type ${printerCopy[directPrinterAction].confirmation} exactly. I will not execute it automatically.`, 'LOCAL SAFETY');
     openPrinterAction(directPrinterAction); return;
   }
@@ -287,7 +307,9 @@ async function sendPrompt(prompt) {
   ui.prompt.value = ''; ui.send.disabled = true; ui.send.textContent = 'RUNNING'; state.neuralEnergy = .95;
   try {
     const result = await json('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: text, history: state.history.slice(0, -1) }) });
-    ui.route.textContent = result.route; state.lastAssistant = result.content; appendMessage('assistant', result.content, result.source); state.history.push({ role: 'assistant', content: result.content }); state.history = state.history.slice(-16); void speak(result.content);
+    ui.route.textContent = result.route;
+    if (result.route === 'CODEACT') activateCoreMode('agents'); else if (result.route === 'RESEARCH') activateCoreMode('research');
+    state.lastAssistant = result.content; appendMessage('assistant', result.content, result.source); state.history.push({ role: 'assistant', content: result.content }); state.history = state.history.slice(-16); void speak(result.content);
   } catch (error) { appendMessage('error', error.message); }
   finally { ui.send.disabled = false; ui.send.textContent = 'EXECUTE'; state.neuralEnergy = .42; }
 }
@@ -414,6 +436,7 @@ ui.composer.addEventListener('submit', (event) => { event.preventDefault(); void
 ui.prompt.addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); ui.composer.requestSubmit(); } });
 ui.voiceButton.addEventListener('click', () => void toggleBrowserClap());
 $$('[data-prompt]').forEach((button) => button.addEventListener('click', () => void sendPrompt(button.dataset.prompt)));
+$$('[data-core-mode]').forEach((button) => button.addEventListener('click', () => activateCoreMode(button.dataset.coreMode, { focus: button.classList.contains('active') })));
 $$('.lane-tabs button').forEach((button) => button.addEventListener('click', () => { state.lane = button.dataset.lane; renderLane(); }));
 $$('[data-operation]').forEach((button) => button.addEventListener('click', () => openOperation(button.dataset.operation)));
 $$('[data-printer]').forEach((button) => button.addEventListener('click', () => openPrinterAction(button.dataset.printer)));
@@ -437,6 +460,7 @@ async function init() {
   if (config.status === 'fulfilled') state.config = config.value;
   if (settings.status === 'fulfilled') { state.settings = settings.value; document.documentElement.style.setProperty('--accent', state.settings.accent); }
   state.galaxy = await createKnowledgeGalaxy({ canvas: ui.brain, inspector: ui.nodeInspector, onStatus: (message) => { ui.galaxyState.textContent = message; } });
+  activateCoreMode('system');
   state.gesture = new GestureController({
     video: ui.gestureVideo, canvas: ui.gestureCanvas, cursor: ui.gestureCursor,
     onGesture: (gesture) => state.galaxy?.gesture(gesture), onStatus: (message) => { ui.gestureState.textContent = message; }
@@ -446,4 +470,3 @@ async function init() {
 }
 
 void init();
-

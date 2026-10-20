@@ -19,13 +19,16 @@
     <header class="topbar hud-panel">
       <div class="brand">
         <div class="brand-glyph" aria-hidden="true"><span></span></div>
-        <div><small>PI5 AUTONOMOUS OPERATIONS</small><h1>JARVIS <b>OS</b></h1></div>
+        <div><small>PRIVATE PI5 INTELLIGENCE</small><h1>J.A.R.V.I.S. <b>ONLINE</b></h1></div>
       </div>
-      <div class="mission-strip">
-        <span><i id="system-dot"></i><b id="system-state">INITIALIZING</b></span>
-        <span>NODE <b id="node-address">127.0.0.1</b></span>
-        <span>UPTIME <b id="uptime-value">--</b></span>
-        <span>ROUTE <b id="active-route">GENERAL</b></span>
+      <div class="top-center">
+        <div class="mission-strip">
+          <span><i id="system-dot"></i><b id="system-state">INITIALIZING</b></span>
+          <span>NODE <b id="node-address">127.0.0.1</b></span>
+          <span>UPTIME <b id="uptime-value">--</b></span>
+          <span>ROUTE <b id="active-route">GENERAL</b></span>
+        </div>
+        <div class="top-signal" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
       </div>
       <div class="time-lockup">
         <div><strong id="clock">--:--:--</strong><span id="date-label">ASIA / DUBAI</span></div>
@@ -35,7 +38,8 @@
 
     <section class="command-grid">
       <aside class="telemetry hud-panel">
-        <div class="panel-title"><span>01</span><h2>System telemetry</h2><b>LIVE</b></div>
+        <div class="edge-caption"><span>01 / SYSTEM</span><b>LIVE FEED</b></div>
+        <div class="panel-title"><span>◈</span><h2>Neural telemetry</h2><b>PI 5</b></div>
         <div class="metric-grid">
           <article class="metric"><div><span>CPU</span><strong id="cpu-value">0%</strong></div><i><b id="cpu-bar"></b></i><small id="cpu-detail">-- cores</small></article>
           <article class="metric"><div><span>RAM</span><strong id="ram-value">0%</strong></div><i><b id="ram-bar"></b></i><small id="ram-detail">-- / --</small></article>
@@ -44,7 +48,7 @@
         </div>
         <canvas id="telemetry-chart" width="520" height="116" aria-label="CPU and RAM history"></canvas>
 
-        <div class="subhead"><span>CONNECTED STORAGE</span><b id="storage-count">0</b></div>
+        <div class="subhead"><span>CONNECTED VOLUMES</span><b id="storage-count">0</b></div>
         <div class="storage-list" id="storage-list"><p class="empty-state">Scanning devices…</p></div>
 
         <div class="subhead"><span>CORE SERVICES</span><b id="service-count">0/0</b></div>
@@ -54,15 +58,28 @@
       <section class="neural hud-panel">
         <div class="core-stage" id="core-stage">
           <canvas id="brain-canvas" width="900" height="500" aria-label="Interactive 3D JARVIS knowledge and file galaxy"></canvas>
+          <div class="mode-console" aria-label="JARVIS system map">
+            <span>SELECT INTELLIGENCE LAYER</span>
+            <nav class="core-modes">
+              <button class="active" type="button" data-core-mode="system" data-node="system-system"><i>01</i><b>CORE</b><small>OVERVIEW</small></button>
+              <button type="button" data-core-mode="docker" data-node="system-docker"><i>02</i><b>DOCKER</b><small>CONTAINERS</small></button>
+              <button type="button" data-core-mode="printer" data-node="system-printer"><i>03</i><b>FABRICATOR</b><small>PRINT CELL</small></button>
+              <button type="button" data-core-mode="agents" data-node="system-agents"><i>04</i><b>AGENTS</b><small>CODEACT</small></button>
+              <button type="button" data-core-mode="research" data-node="system-research"><i>05</i><b>RESEARCH</b><small>KNOWLEDGE</small></button>
+              <button type="button" data-core-mode="memory" data-node="system-memory"><i>06</i><b>MEMORY</b><small>ARCHIVE</small></button>
+            </nav>
+          </div>
           <div class="core-copy">
             <span id="core-kicker">COGNITIVE NEURAL MATRIX</span>
-            <h2 id="core-state">JARVIS</h2>
-            <p id="core-subtitle">LOCAL INTELLIGENCE // ACTIVE</p>
+            <h2 id="core-state">READY</h2>
+            <p id="core-subtitle">AWAITING DIRECTIVE // LOCAL INTELLIGENCE</p>
+            <div class="core-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
           </div>
+          <div class="core-crosshair" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
           <div class="orbital-label label-a"><span>MODEL</span><b id="model-label">WAITING</b></div>
           <div class="orbital-label label-b"><span>WAKE</span><b id="wake-state">STANDBY</b></div>
           <div class="orbital-label label-c"><span>MEMORY</span><b id="memory-state">LOCAL</b></div>
-          <div class="galaxy-toolbar"><b id="galaxy-state">INDEXING FILES</b><button type="button" id="gesture-button">ENABLE GESTURES</button></div>
+          <div class="galaxy-toolbar"><b id="galaxy-state">INDEXING FILES</b><button type="button" id="gesture-button">GESTURE LINK</button></div>
           <article class="node-inspector" id="node-inspector" hidden>
             <span data-node-kind>NODE</span><strong data-node-name>SELECT A NODE</strong><small data-node-path></small>
           </article>
@@ -73,14 +90,15 @@
           <div class="wake-flash" id="wake-flash"><span>JARVIS IS LISTENING</span></div>
         </div>
 
-        <div class="conversation">
+        <div class="conversation command-deck">
+          <div class="deck-status" aria-hidden="true"><span>VOICE</span><b>READY</b></div>
           <div class="message-stream" id="messages" aria-live="polite">
             <article class="message assistant"><span>J</span><div><b>JARVIS</b><p>Operations console online. Ask about system health, Docker, Google, research, or coding work.</p></div></article>
           </div>
           <form class="composer" id="composer">
-            <button class="voice-button" id="voice-button" type="button" aria-label="Enable browser microphone">◉</button>
-            <label><span>DIRECTIVE</span><textarea id="prompt" rows="1" maxlength="6000" placeholder="Ask JARVIS about this Pi, Docker, code, research, or Google…"></textarea></label>
-            <button class="send-button" id="send-button" type="submit">EXECUTE</button>
+            <button class="voice-button" id="voice-button" type="button" aria-label="Enable browser microphone"><i></i></button>
+            <label><span>DIRECTIVE CHANNEL</span><textarea id="prompt" rows="1" maxlength="6000" placeholder="Speak or type a directive…"></textarea></label>
+            <button class="send-button" id="send-button" type="submit"><span>RUN</span><b>EXECUTE</b></button>
           </form>
           <div class="quick-prompts">
             <button type="button" data-prompt="Give me a concise health report for this Pi and its services.">HEALTH REPORT</button>
@@ -92,11 +110,12 @@
       </section>
 
       <aside class="agents hud-panel">
-        <div class="panel-title"><span>02</span><h2>Agent visualizer</h2><b id="agent-link-state">SYNC</b></div>
+        <div class="edge-caption"><span>02 / OPERATIVES</span><b id="agent-link-state">SYNC</b></div>
+        <div class="panel-title"><span>◈</span><h2>Agent reports</h2><b>SECURE</b></div>
         <div class="lane-tabs" role="tablist" aria-label="Agent monitors">
-          <button class="active" type="button" data-lane="code"><span>CODE</span><small>native_openhands</small></button>
-          <button type="button" data-lane="research"><span>RESEARCH</span><small>deep_research</small></button>
-          <button type="button" data-lane="monitor"><span>MONITOR</span><small>operative</small></button>
+          <button class="active" type="button" data-lane="code"><i>01</i><span>CODEX</span><small>native_openhands</small></button>
+          <button type="button" data-lane="research"><i>02</i><span>PROSPECTOR</span><small>deep_research</small></button>
+          <button type="button" data-lane="monitor"><i>03</i><span>SENTINEL</span><small>continuous monitor</small></button>
         </div>
         <div class="agent-header">
           <div><span id="lane-eyebrow">CODEACT STREAM</span><h3 id="lane-title">Code Assistant</h3></div>
@@ -114,7 +133,7 @@
 
       <section class="operations hud-panel">
         <div class="docker-block">
-          <div class="panel-title compact"><span>03</span><h2>Docker matrix</h2><b id="docker-summary">SCANNING</b></div>
+          <div class="panel-title compact"><span>03</span><h2>Container grid</h2><b id="docker-summary">SCANNING</b></div>
           <div class="docker-list" id="docker-list"><p class="empty-state">Waiting for Docker…</p></div>
         </div>
         <div class="printer-block">
@@ -165,4 +184,3 @@
   <script src="/app.js" type="module"></script>
 </body>
 </html>
-

@@ -1,8 +1,15 @@
-# OpenJarvis Pi Command Center 2.2.0
+# OpenJarvis Pi Command Center 2.3.0
 
 A private, Pi-first JARVIS operations screen for OpenJarvis, Ollama, Docker, Google connectors, cameras, microphones, and guarded maintenance. The dashboard stays inside a single fullscreen viewport without page scrolling; compact screens progressively hide secondary rails so the neural core and command line remain usable.
 
-## What is new in 2.2
+## What is new in 2.3
+
+- **Interactive intelligence layers** — the top-center CORE, DOCKER, FABRICATOR, AGENTS, RESEARCH, and MEMORY controls now morph the particle field into six distinct live 3D formations, retune its light, and update the command context.
+- **Cinematic instrument rails** — the left and right sides are no longer large dashboard cards. They are thin translucent telemetry and agent-report instruments with edge rules, compact signals, and uninterrupted space around the neural core.
+- **Unified command deck** — voice, typing, Docker, printer, persistent events, and guarded maintenance now form one angular bottom operations bus instead of disconnected boxes.
+- **Reference-matched visual hierarchy** — cyan instrumentation, gold focus states, sparse technical typography, rotating calibration rings, edge labels, crosshairs, and a single dominant center follow the strongest full-screen homemade JARVIS references.
+
+The 2.2 neural visualization and every existing local operation remain included:
 
 - **Living neural intelligence core** — the center is now a dense GPU-animated field of more than ten thousand particles and sparks. Its cyan, gold, mint, and magenta regions breathe, deform, rotate, and bloom independently instead of behaving like a static globe.
 - **Reference-driven edge HUD** — the page now follows the supplied JARVIS reel language: one dominant intelligence visualization, fixed translucent system and agent rails, labelled orbital clusters, compact bottom operations telemetry, and a floating command console.
@@ -247,4 +254,3 @@ npm.cmd start
 ```
 
 Open the command screen and `/settings`. Pi-only maintenance and openWakeWord controls correctly stay unavailable on Windows; system telemetry, the UI, live preview, browser camera/person detection, browser microphone level, local double-clap detection, and any reachable OpenJarvis/Ollama services can still be tested.
-
