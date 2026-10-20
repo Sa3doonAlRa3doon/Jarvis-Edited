@@ -61,9 +61,9 @@ function activateCoreMode(mode, { focus = false } = {}) {
   state.coreMode = mode; document.body.dataset.coreMode = mode;
   ui.coreKicker.textContent = config.kicker; ui.coreState.textContent = config.title; ui.coreSubtitle.textContent = config.subtitle;
   ui.coreLayer.textContent = config.layer; ui.coreLink.textContent = config.link; ui.coreHealth.textContent = config.health;
-  $$('[data-core-mode]').forEach((button) => { const active = button.dataset.coreMode === mode; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active)); });
+  $$('button[data-core-mode]').forEach((button) => { const active = button.dataset.coreMode === mode; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active)); });
   if (changed || !focus) state.galaxy?.setMode(mode); else {
-    const button = $(`[data-core-mode="${mode}"]`); if (button?.dataset.node) state.galaxy?.selectById(button.dataset.node);
+    const button = $(`button[data-core-mode="${mode}"]`); if (button?.dataset.node) state.galaxy?.selectById(button.dataset.node);
   }
 }
 
@@ -438,7 +438,7 @@ ui.composer.addEventListener('submit', (event) => { event.preventDefault(); void
 ui.prompt.addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); ui.composer.requestSubmit(); } });
 ui.voiceButton.addEventListener('click', () => void toggleBrowserClap());
 $$('[data-prompt]').forEach((button) => button.addEventListener('click', () => void sendPrompt(button.dataset.prompt)));
-$$('[data-core-mode]').forEach((button) => button.addEventListener('click', () => activateCoreMode(button.dataset.coreMode, { focus: button.classList.contains('active') })));
+$$('button[data-core-mode]').forEach((button) => button.addEventListener('click', () => activateCoreMode(button.dataset.coreMode, { focus: button.classList.contains('active') })));
 $$('.lane-tabs button').forEach((button) => button.addEventListener('click', () => { state.lane = button.dataset.lane; renderLane(); }));
 $$('[data-operation]').forEach((button) => button.addEventListener('click', () => openOperation(button.dataset.operation)));
 $$('[data-printer]').forEach((button) => button.addEventListener('click', () => openPrinterAction(button.dataset.printer)));

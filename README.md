@@ -1,8 +1,17 @@
-# OpenJarvis Pi Command Center 2.4.0
+# OpenJarvis Pi Command Center 2.5.0
 
 A private, Pi-first JARVIS operations screen for OpenJarvis, Ollama, Docker, Google connectors, cameras, microphones, and guarded maintenance. The dashboard stays inside a single fullscreen viewport without page scrolling; compact screens progressively hide secondary rails so the neural core and command line remain usable.
 
-## What is new in 2.4
+## What is new in 2.5
+
+- **Rebuilt hidden configuration core** — `/settings` is now a matching full-screen JARVIS instrument with a compact section rail, fixed save bus, protected live preview, and no long page scroll on laptop or Pi displays.
+- **Safe profile editing** — every change gets a clear unsaved state, live preview, one-click revert, recommended-profile staging, save progress, and navigation protection so edits cannot disappear silently.
+- **Device-bus clarity** — laptop and Raspberry Pi hardware are visually separated, the active host is unmistakable, unavailable saved devices remain visible, and a dedicated rescan preserves valid selections.
+- **Better sensor calibration** — camera framing, person lock, microphone meter, wake state, and explicit start/stop status now share one focused calibration screen. Changing a live sensor source safely closes the old stream.
+- **Preview and search tools** — settings can be found by name, the dashboard preview switches between adaptive and Pi 16:9 framing, and accent presets update the real command screen immediately.
+- **Sensor reliability fixes** — browser wake profiles now request the microphone correctly, empty listener profiles show a useful error, Pi polling cannot overlap, Pi camera frames size correctly, and all media tracks close on exit.
+
+The 2.4 precision command-center design and every existing local operation remain included:
 
 - **Precision reactor core** — the center is now a restrained, layered cyan/gold reactor with calibrated rings, a bright energy seed, mode-aware colors, and readable status diagnostics instead of a bright wireframe ball.
 - **Cleaner spatial hierarchy** — background stars, sparks, filaments, and file links were reduced by more than half so the active 3D formation and selected node remain legible at a glance.

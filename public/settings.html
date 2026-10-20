@@ -4,89 +4,163 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#02070b">
-  <title>JARVIS // Hidden Settings</title>
+  <title>JARVIS // Configuration Core</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body class="settings-page">
+  <div class="settings-backdrop" aria-hidden="true"></div>
   <main class="settings-shell">
     <header class="settings-header hud-panel">
-      <div><h1>JARVIS <b>// HIDDEN SETTINGS</b></h1><p>Private Pi configuration. The dashboard intentionally has no visible settings link.</p></div>
-      <span class="settings-status" id="settings-status">LOADING</span>
+      <div class="settings-brand">
+        <span class="settings-mark"><i></i></span>
+        <div><p>PRIVATE SYSTEM CONTROL</p><h1>JARVIS <b>// CONFIGURATION CORE</b></h1></div>
+      </div>
+      <div class="settings-health" aria-label="System context">
+        <span><i class="pulse-dot"></i> LOCAL NODE <b id="settings-node">PI-5</b></span>
+        <span>BUILD <b id="settings-version">2.5.0</b></span>
+        <span>PROFILE <b id="settings-profile">LOADING</b></span>
+      </div>
+      <div class="settings-header-actions">
+        <a href="/" class="settings-return">COMMAND SCREEN</a>
+        <span class="settings-status" id="settings-status" data-state="loading">LOADING</span>
+      </div>
     </header>
 
     <section class="settings-layout">
-      <form class="settings-controls hud-panel" id="settings-form">
-        <section class="settings-section">
-          <h2><span>01</span> SENSOR SOURCE &amp; DEVICES</h2>
-          <div class="settings-grid">
-            <label class="setting full">ACTIVE SENSOR HOST
-              <select id="source"><option value="browser">This browser / laptop test</option><option value="pi">Raspberry Pi 5 hardware</option></select>
-            </label>
-            <label class="setting">BROWSER / GESTURE CAMERA<select id="browser-camera"><option value="">Default browser camera</option></select></label>
-            <label class="setting">BROWSER MICROPHONE<select id="browser-microphone"><option value="">Default browser microphone</option></select></label>
-            <label class="setting">PI V4L2 CAMERA<select id="pi-camera"><option value="">Select /dev/video*</option></select></label>
-            <label class="setting">PI ALSA MICROPHONE<select id="pi-microphone"><option value="">Select plughw device</option></select></label>
-          </div>
-        </section>
-
-        <section class="settings-section">
-          <h2><span>02</span> CAMERA &amp; MICROPHONE TEST</h2>
-          <div class="camera-preview" id="camera-preview">
-            <video id="camera-video" muted autoplay playsinline></video>
-            <img id="pi-camera-image" alt="Selected Raspberry Pi camera frame" hidden>
-            <canvas id="sensor-canvas"></canvas>
-            <span class="camera-placeholder" id="camera-placeholder">PRESS START SENSORS TO TEST</span>
-          </div>
-          <div class="sensor-readout">
-            <div><span>PERSON</span><b id="person-readout">STANDBY</b></div>
-            <div><span>MIC LEVEL</span><b id="mic-readout">0%</b></div>
-            <div><span>WAKE ENGINE</span><b id="wake-readout">STANDBY</b></div>
-          </div>
-          <div class="settings-actions">
-            <button class="sensor-button" id="start-sensors" type="button">START SENSORS</button>
-            <button class="sensor-button" id="stop-sensors" type="button">STOP</button>
-            <button class="sensor-button" id="test-wake" type="button">TEST WAKE SIGNAL</button>
-          </div>
-        </section>
-
-        <section class="settings-section">
-          <h2><span>03</span> DETECTION &amp; TALKBACK</h2>
-          <div class="toggle-grid">
-            <label class="switch">Person detection<input id="person-detection" type="checkbox"></label>
-            <label class="switch">Voice activity<input id="voice-activity" type="checkbox"></label>
-            <label class="switch">Hey Jarvis / Jarvis<input id="wake-word" type="checkbox"></label>
-            <label class="switch">Double clap wake<input id="double-clap" type="checkbox"></label>
-            <label class="switch">Camera hand gestures<input id="gesture-control" type="checkbox"></label>
-            <label class="switch">Speak responses<input id="auto-speak" type="checkbox"></label>
-            <label class="switch">Constrained auto-repair<input id="auto-repair" type="checkbox"></label>
-          </div>
-          <div class="settings-grid">
-            <label class="setting">PERSON CONFIDENCE <output id="person-threshold-output"></output><input id="person-threshold" type="range" min="0.25" max="0.95" step="0.05"></label>
-            <label class="setting">VOICE SENSITIVITY <output id="mic-sensitivity-output"></output><input id="mic-sensitivity" type="range" min="0.01" max="0.8" step="0.01"></label>
-            <label class="setting">WAKE SENSITIVITY <output id="wake-sensitivity-output"></output><input id="wake-sensitivity" type="range" min="0.2" max="0.95" step="0.05"></label>
-            <label class="setting">CLAP SENSITIVITY <output id="clap-sensitivity-output"></output><input id="clap-sensitivity" type="range" min="0.08" max="0.95" step="0.01"></label>
-            <label class="setting">PINCH SENSITIVITY <output id="gesture-sensitivity-output"></output><input id="gesture-sensitivity" type="range" min="0.18" max="0.8" step="0.01"></label>
-            <label class="setting">DOUBLE CLAP WINDOW <output id="double-clap-window-output"></output><input id="double-clap-window" type="range" min="300" max="1500" step="50"></label>
-            <label class="setting">VISION INTERVAL <output id="scan-interval-output"></output><input id="scan-interval" type="range" min="300" max="4000" step="100"></label>
-            <label class="setting">HUD ACCENT<input id="accent" type="color"></label>
-          </div>
-        </section>
-
-        <section class="settings-section">
-          <h2><span>04</span> GOOGLE WORKSPACE ACCESS</h2>
-          <div class="google-grid" id="google-grid"></div>
-          <p class="empty-state" id="google-note">Google access belongs to OpenJarvis on the Pi. Credentials never enter this browser or the dashboard package.</p>
-        </section>
-
-        <div class="settings-actions">
-          <button class="primary" type="submit">SAVE TO PI</button>
-          <span class="settings-message" id="settings-message">Changes appear in the preview immediately.</span>
+      <nav class="settings-nav hud-panel" aria-label="Settings sections">
+        <label class="settings-search">
+          <span>FIND CONTROL</span>
+          <input id="settings-search" type="search" placeholder="camera, voice, accent…" autocomplete="off">
+        </label>
+        <div class="settings-nav-list">
+          <button type="button" class="active" data-target="devices"><span>01</span><b>DEVICE BUS</b><small>Sensor host &amp; hardware</small></button>
+          <button type="button" data-target="sensors"><span>02</span><b>LIVE SENSORS</b><small>Camera &amp; audio test</small></button>
+          <button type="button" data-target="perception"><span>03</span><b>PERCEPTION</b><small>Detection &amp; wake controls</small></button>
+          <button type="button" data-target="interface"><span>04</span><b>INTERFACE</b><small>HUD appearance</small></button>
+          <button type="button" data-target="integrations"><span>05</span><b>INTEGRATIONS</b><small>Private Google bridge</small></button>
         </div>
+        <div class="settings-nav-footer">
+          <span>ACCESS PATH</span><code>/settings</code>
+          <p>Not linked from the command screen.</p>
+        </div>
+      </nav>
+
+      <form class="settings-controls hud-panel" id="settings-form" novalidate>
+        <div class="settings-workspace" id="settings-workspace">
+          <section class="settings-section active" data-section="devices" data-search="device source host browser laptop raspberry pi camera microphone v4l2 alsa refresh">
+            <div class="settings-section-head"><div><span>SECTION 01</span><h2>DEVICE BUS</h2><p>Choose exactly which machine, camera, and microphone JARVIS may use.</p></div><button type="button" class="section-tool" id="refresh-devices">↻ RESCAN</button></div>
+            <div class="source-selector" role="group" aria-label="Active sensor host">
+              <label><input id="source-browser" type="radio" name="source-card" value="browser"><span><b>TEST WORKSTATION</b><small>This laptop or browser</small><i>BROWSER API</i></span></label>
+              <label><input id="source-pi" type="radio" name="source-card" value="pi"><span><b>RASPBERRY PI 5</b><small>Deployed local hardware</small><i>NATIVE DEVICES</i></span></label>
+            </div>
+            <select id="source" hidden><option value="browser">This browser / laptop test</option><option value="pi">Raspberry Pi 5 hardware</option></select>
+            <div class="device-zone" data-host="browser">
+              <div class="zone-title"><span>BROWSER INPUTS</span><b id="browser-device-count">SCANNING</b></div>
+              <div class="settings-grid">
+                <label class="setting" data-search="browser gesture camera webcam"><span>BROWSER / GESTURE CAMERA</span><select id="browser-camera" data-sensor-source><option value="">Default browser camera</option></select><small>Used for presence and hand tracking.</small></label>
+                <label class="setting" data-search="browser microphone mic voice"><span>BROWSER MICROPHONE</span><select id="browser-microphone" data-sensor-source><option value="">Default browser microphone</option></select><small>Used for talkback, wake phrase, and clap.</small></label>
+              </div>
+            </div>
+            <div class="device-zone" data-host="pi">
+              <div class="zone-title"><span>PI NATIVE INPUTS</span><b id="pi-device-count">SCANNING</b></div>
+              <div class="settings-grid">
+                <label class="setting" data-search="pi v4l2 camera video"><span>PI V4L2 CAMERA</span><select id="pi-camera" data-sensor-source><option value="">Select /dev/video*</option></select><small>Only this device will be opened on the Pi.</small></label>
+                <label class="setting" data-search="pi alsa microphone plughw"><span>PI ALSA MICROPHONE</span><select id="pi-microphone" data-sensor-source><option value="">Select plughw device</option></select><small>Wake listener stays locked to this ALSA input.</small></label>
+              </div>
+            </div>
+            <div class="privacy-callout"><b>LOCAL PERCEPTION BOUNDARY</b><p>Camera frames and microphone samples stay inside this browser or the Raspberry Pi. They are not sent to Google or the dashboard repository.</p></div>
+          </section>
+
+          <section class="settings-section" data-section="sensors" data-search="sensor test camera preview person microphone mic level wake signal detection">
+            <div class="settings-section-head"><div><span>SECTION 02</span><h2>LIVE SENSOR CALIBRATION</h2><p>Test the selected devices before saving them to the Pi profile.</p></div><span class="section-state" id="sensor-state">STANDBY</span></div>
+            <div class="camera-preview" id="camera-preview">
+              <video id="camera-video" muted autoplay playsinline></video>
+              <img id="pi-camera-image" alt="Selected Raspberry Pi camera frame" hidden>
+              <canvas id="sensor-canvas"></canvas>
+              <div class="camera-reticle" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+              <span class="camera-placeholder" id="camera-placeholder"><b>OPTICAL FEED OFFLINE</b><small>Press START CALIBRATION to open only your selected devices</small></span>
+              <span class="camera-source" id="camera-source">NO SOURCE</span>
+            </div>
+            <div class="sensor-readout">
+              <div><span>PERSON LOCK</span><b id="person-readout">STANDBY</b><i></i></div>
+              <div><span>MIC LEVEL</span><b id="mic-readout">0%</b><i id="mic-meter"></i></div>
+              <div><span>WAKE ENGINE</span><b id="wake-readout">STANDBY</b><i></i></div>
+            </div>
+            <div class="sensor-actions">
+              <button class="sensor-button primary" id="start-sensors" type="button">START CALIBRATION</button>
+              <button class="sensor-button" id="stop-sensors" type="button" disabled>STOP SENSORS</button>
+              <button class="sensor-button" id="test-wake" type="button">SIMULATE WAKE</button>
+            </div>
+            <p class="sensor-guidance" id="sensor-guidance">Tip: browser device names appear after camera/microphone permission is granted.</p>
+          </section>
+
+          <section class="settings-section" data-section="perception" data-search="person detection voice activity hey jarvis wake double clap gesture speak repair confidence sensitivity pinch interval">
+            <div class="settings-section-head"><div><span>SECTION 03</span><h2>PERCEPTION MATRIX</h2><p>Enable only the listeners you need, then tune their trigger thresholds.</p></div><span class="section-state">LOCAL AI</span></div>
+            <div class="toggle-grid">
+              <label class="switch" data-search="person camera detection"><span><b>PERSON DETECTION</b><small>Local COCO-SSD presence scan</small></span><input id="person-detection" type="checkbox"><i></i></label>
+              <label class="switch" data-search="voice activity microphone"><span><b>VOICE ACTIVITY</b><small>Live input-level analysis</small></span><input id="voice-activity" type="checkbox"><i></i></label>
+              <label class="switch" data-search="hey jarvis wake word"><span><b>HEY JARVIS / JARVIS</b><small>Wake phrase listener</small></span><input id="wake-word" type="checkbox"><i></i></label>
+              <label class="switch" data-search="double clap wake"><span><b>DOUBLE CLAP WAKE</b><small>Two-impulse acoustic trigger</small></span><input id="double-clap" type="checkbox"><i></i></label>
+              <label class="switch" data-search="camera hand gestures pinch"><span><b>CAMERA HAND GESTURES</b><small>Pinch, rotate, and navigate</small></span><input id="gesture-control" type="checkbox"><i></i></label>
+              <label class="switch" data-search="speak responses talkback"><span><b>SPEAK RESPONSES</b><small>Local voice talkback</small></span><input id="auto-speak" type="checkbox"><i></i></label>
+              <label class="switch caution" data-search="automatic constrained repair services"><span><b>CONSTRAINED AUTO-REPAIR</b><small>Restart allow-listed failed services</small></span><input id="auto-repair" type="checkbox"><i></i></label>
+            </div>
+            <div class="calibration-grid">
+              <label class="setting" data-search="person confidence"><span>PERSON CONFIDENCE <output id="person-threshold-output"></output></span><input id="person-threshold" type="range" min="0.25" max="0.95" step="0.05"><small>Higher values reduce false detections.</small></label>
+              <label class="setting" data-search="voice sensitivity"><span>VOICE SENSITIVITY <output id="mic-sensitivity-output"></output></span><input id="mic-sensitivity" type="range" min="0.01" max="0.8" step="0.01"><small>Lower is more sensitive to quiet speech.</small></label>
+              <label class="setting" data-search="wake sensitivity jarvis"><span>WAKE SENSITIVITY <output id="wake-sensitivity-output"></output></span><input id="wake-sensitivity" type="range" min="0.2" max="0.95" step="0.05"><small>Wake phrase detection threshold.</small></label>
+              <label class="setting" data-search="clap sensitivity"><span>CLAP SENSITIVITY <output id="clap-sensitivity-output"></output></span><input id="clap-sensitivity" type="range" min="0.08" max="0.95" step="0.01"><small>Raise it in noisy rooms.</small></label>
+              <label class="setting" data-search="pinch gesture sensitivity"><span>PINCH SENSITIVITY <output id="gesture-sensitivity-output"></output></span><input id="gesture-sensitivity" type="range" min="0.18" max="0.8" step="0.01"><small>Gesture pinch distance threshold.</small></label>
+              <label class="setting" data-search="double clap window"><span>DOUBLE CLAP WINDOW <output id="double-clap-window-output"></output></span><input id="double-clap-window" type="range" min="300" max="1500" step="50"><small>Maximum delay between claps.</small></label>
+              <label class="setting full" data-search="vision scan interval performance"><span>VISION SCAN INTERVAL <output id="scan-interval-output"></output></span><input id="scan-interval" type="range" min="300" max="4000" step="100"><small>Longer intervals reduce Pi CPU usage.</small></label>
+            </div>
+          </section>
+
+          <section class="settings-section" data-section="interface" data-search="interface hud accent color preview screen appearance cyan gold">
+            <div class="settings-section-head"><div><span>SECTION 04</span><h2>INTERFACE SIGNATURE</h2><p>Tune the command screen without leaving this protected route.</p></div><span class="section-state">LIVE PREVIEW</span></div>
+            <div class="accent-control">
+              <label class="setting" data-search="hud accent color"><span>HUD ACCENT COLOR</span><input id="accent" type="color"><small>Updates the reactor and telemetry highlights immediately.</small></label>
+              <div class="accent-presets" role="group" aria-label="Accent presets">
+                <button type="button" data-accent="#64e8ff" style="--swatch:#64e8ff"><i></i> ARC CYAN</button>
+                <button type="button" data-accent="#71ffca" style="--swatch:#71ffca"><i></i> MINT CORE</button>
+                <button type="button" data-accent="#f5bd5c" style="--swatch:#f5bd5c"><i></i> MARK GOLD</button>
+                <button type="button" data-accent="#7d8cff" style="--swatch:#7d8cff"><i></i> NEURAL VIOLET</button>
+              </div>
+            </div>
+            <div class="interface-note"><span>DISPLAY CONTRACT</span><h3>ONE SCREEN. ZERO PAGE SCROLL.</h3><p>The command dashboard remains a full-screen instrument panel. Use the preview viewport controls to inspect laptop and Pi display proportions.</p></div>
+          </section>
+
+          <section class="settings-section" data-section="integrations" data-search="google integration drive gmail calendar tasks contacts oauth private">
+            <div class="settings-section-head"><div><span>SECTION 05</span><h2>PRIVATE INTEGRATION BRIDGE</h2><p>Read-only status of the Google connectors installed in OpenJarvis on the Pi.</p></div><span class="section-state" id="google-state">CHECKING</span></div>
+            <div class="google-grid" id="google-grid"></div>
+            <div class="privacy-callout google"><b>CREDENTIAL ISOLATION</b><p id="google-note">Google access belongs to OpenJarvis on the Pi. Credentials never enter this browser or the dashboard package.</p></div>
+          </section>
+
+          <div class="search-empty" id="search-empty" hidden><b>NO CONTROL FOUND</b><span>Try camera, voice, wake, device, Google, or accent.</span></div>
+        </div>
+
+        <footer class="settings-savebar">
+          <div class="save-state"><i id="dirty-dot"></i><span><b id="save-state-title">PROFILE SYNCHRONIZED</b><small id="settings-message">Changes appear in the preview immediately.</small></span></div>
+          <button type="button" class="save-secondary" id="recommended-settings">RECOMMENDED</button>
+          <button type="button" class="save-secondary" id="revert-settings" disabled>REVERT</button>
+          <button class="primary" id="save-settings" type="submit" disabled>SAVE TO PI</button>
+        </footer>
       </form>
 
-      <aside class="settings-preview hud-panel">
-        <div class="panel-title"><span>LIVE</span><h2>COMMAND SCREEN PREVIEW</h2><b>RIGHT-SIDE VIEW</b></div>
-        <iframe id="live-preview" src="/?preview=1" title="Live JARVIS dashboard preview"></iframe>
+      <aside class="settings-preview hud-panel" id="settings-preview-panel">
+        <div class="preview-head">
+          <div><span>LIVE MIRROR</span><h2>COMMAND SCREEN</h2></div>
+          <div class="preview-tools" role="group" aria-label="Preview controls">
+            <button type="button" class="active" data-preview-size="wide" title="Wide preview">16:9</button>
+            <button type="button" data-preview-size="compact" title="Compact preview">PI</button>
+            <button type="button" id="reload-preview" title="Reload preview">↻</button>
+            <button type="button" id="open-preview" title="Open command screen">↗</button>
+          </div>
+        </div>
+        <div class="preview-viewport wide" id="preview-viewport">
+          <iframe id="live-preview" src="/?preview=1" title="Live JARVIS dashboard preview"></iframe>
+        </div>
+        <div class="preview-foot"><span><i></i> LIVE STYLE LINK</span><b id="preview-resolution">16:9 ADAPTIVE</b></div>
       </aside>
     </section>
   </main>
@@ -97,3 +171,4 @@
   <script src="/settings.js" type="module"></script>
 </body>
 </html>
+

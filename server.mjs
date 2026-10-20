@@ -301,7 +301,7 @@ function enforceSameOrigin(request, response, next) {
   response.status(403).json({ error: 'Cross-origin mutation blocked.' });
 }
 app.use('/api', enforceSameOrigin);
-app.get('/api/health', (_request, response) => response.json({ status: 'ok', version: '2.4.0' }));
+app.get('/api/health', (_request, response) => response.json({ status: 'ok', version: '2.5.0' }));
 app.get('/api/auth/status', (request, response) => response.json({ required: Boolean(dashboardAccessPin), authenticated: dashboardAuthenticated(request) }));
 app.post('/api/auth/login', (request, response) => {
   if (!dashboardAccessPin) { response.json({ ok: true, required: false }); return; }
@@ -321,7 +321,7 @@ app.post('/api/auth/logout', (request, response) => {
 });
 app.use('/api', requireDashboardAuth);
 
-app.get('/api/config', (_request, response) => response.json({ name: 'JARVIS', version: '2.4.0', ttsMode: process.env.TTS_MODE || 'local', fishVoiceId: process.env.FISH_AUDIO_VOICE_ID || '', models, timezone: 'Asia/Dubai', piOnly: true, operationsEnabled: Boolean(process.env.OPS_CONTROL_PIN), printerConfigured: printerClient.configured }));
+app.get('/api/config', (_request, response) => response.json({ name: 'JARVIS', version: '2.5.0', ttsMode: process.env.TTS_MODE || 'local', fishVoiceId: process.env.FISH_AUDIO_VOICE_ID || '', models, timezone: 'Asia/Dubai', piOnly: true, operationsEnabled: Boolean(process.env.OPS_CONTROL_PIN), printerConfigured: printerClient.configured }));
 app.get('/api/metrics', async (_request, response) => response.json(await systemMetrics()));
 app.get('/api/storage', async (_request, response) => response.json({ devices: await storageDevices() }));
 app.get('/api/docker', async (_request, response) => response.json(await dockerSummary()));
@@ -496,7 +496,7 @@ async function monitorTick() {
   } catch {}
 }
 
-await eventStore.init(); await loadSettings(); await eventStore.append('boot', 'JARVIS command center starting', { version: '2.4.0', platform: process.platform });
+await eventStore.init(); await loadSettings(); await eventStore.append('boot', 'JARVIS command center starting', { version: '2.5.0', platform: process.platform });
 const server = app.listen(port, host, async () => {
   console.log(`JARVIS Command Center listening at http://${host}:${port}`); console.log(`OpenJarvis: ${openJarvisUrl} | Ollama: ${ollamaUrl}`);
   await startWakeListener(); void monitorTick(); void refreshPrinterStatus();
