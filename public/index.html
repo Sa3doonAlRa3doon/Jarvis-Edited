@@ -58,10 +58,17 @@
       <section class="neural hud-panel">
         <div class="core-stage" id="core-stage">
           <canvas id="brain-canvas" width="900" height="500" aria-label="Interactive 3D JARVIS knowledge and file galaxy"></canvas>
-          <div class="reactor-shell" aria-hidden="true">
+          <div class="holo-floor" aria-hidden="true"></div>
+          <div class="constellation-labels" aria-hidden="true">
+            <span class="constellation-a"><i></i>VOICE MATRIX <b>ARMED</b></span>
+            <span class="constellation-b"><i></i>VISION BUS <b>LOCAL</b></span>
+            <span class="constellation-c"><i></i>NODE GRAPH <b>LIVE</b></span>
+            <span class="constellation-d"><i></i>SECURE MEMORY <b>INDEXED</b></span>
+          </div>
+          <button class="reactor-shell" id="reactor-scan" type="button" aria-label="Scan the active intelligence layer" title="Scan active intelligence layer">
             <i></i><i></i><i></i><i></i>
             <span></span><b></b>
-          </div>
+          </button>
           <div class="mode-console" aria-label="JARVIS system map">
             <span>SELECT INTELLIGENCE LAYER</span>
             <nav class="core-modes">
@@ -193,4 +200,3 @@
   <script src="/app.js" type="module"></script>
 </body>
 </html>
-

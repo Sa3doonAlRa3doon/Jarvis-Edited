@@ -1,6 +1,6 @@
 {
   "name": "openjarvis-pi-command-center",
-  "version": "2.5.0",
+  "version": "3.0.0",
   "private": true,
   "description": "Private Pi 5 JARVIS console with a 3D knowledge galaxy, local hand gestures, Moonraker printer controls, agents, sensors, and maintenance",
   "type": "module",
@@ -26,4 +26,3 @@
     "argparse": "2.0.1"
   }
 }
-

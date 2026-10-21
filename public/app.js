@@ -28,7 +28,7 @@ const ui = {
   printerState: $('#printer-state'), printerFile: $('#printer-file'), printerEta: $('#printer-eta'),
   printerProgress: $('#printer-progress'), printerPercent: $('#printer-percent'), printerTemps: $('#printer-temps'),
   fullscreenButton: $('#fullscreen-button'), fullscreenGate: $('#fullscreen-gate'), coreLayer: $('#core-layer'),
-  coreLink: $('#core-link'), coreHealth: $('#core-health')
+  coreLink: $('#core-link'), coreHealth: $('#core-health'), reactorScan: $('#reactor-scan')
 };
 
 const state = {
@@ -62,9 +62,16 @@ function activateCoreMode(mode, { focus = false } = {}) {
   ui.coreKicker.textContent = config.kicker; ui.coreState.textContent = config.title; ui.coreSubtitle.textContent = config.subtitle;
   ui.coreLayer.textContent = config.layer; ui.coreLink.textContent = config.link; ui.coreHealth.textContent = config.health;
   $$('button[data-core-mode]').forEach((button) => { const active = button.dataset.coreMode === mode; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active)); });
-  if (changed || !focus) state.galaxy?.setMode(mode); else {
-    const button = $(`button[data-core-mode="${mode}"]`); if (button?.dataset.node) state.galaxy?.selectById(button.dataset.node);
-  }
+  if (changed || !focus) state.galaxy?.setMode(mode);
+  if (focus) { const button = $(`button[data-core-mode="${mode}"]`); if (button?.dataset.node) state.galaxy?.selectById(button.dataset.node); }
+}
+
+function pulseCore() {
+  ui.coreStage?.classList.remove('scan-burst');
+  void ui.coreStage?.offsetWidth;
+  ui.coreStage?.classList.add('scan-burst');
+  activateCoreMode(state.coreMode, { focus: true });
+  window.setTimeout(() => ui.coreStage?.classList.remove('scan-burst'), 1250);
 }
 
 const operationCopy = {
@@ -354,7 +361,7 @@ function syncFullscreenUi() {
   const active = Boolean(fullscreenElement()) || browserFullscreenActive();
   ui.fullscreenButton?.classList.toggle('active', active);
   ui.fullscreenButton?.setAttribute('aria-label', active ? 'Exit fullscreen' : 'Enter fullscreen');
-  if (ui.fullscreenGate) ui.fullscreenGate.hidden = active || isEmbeddedPreview() || document.body.classList.contains('standalone-hint');
+  if (ui.fullscreenGate) ui.fullscreenGate.hidden = true;
   state.galaxy?.resize();
 }
 async function toggleFullscreen() {
@@ -438,13 +445,14 @@ ui.composer.addEventListener('submit', (event) => { event.preventDefault(); void
 ui.prompt.addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); ui.composer.requestSubmit(); } });
 ui.voiceButton.addEventListener('click', () => void toggleBrowserClap());
 $$('[data-prompt]').forEach((button) => button.addEventListener('click', () => void sendPrompt(button.dataset.prompt)));
-$$('button[data-core-mode]').forEach((button) => button.addEventListener('click', () => activateCoreMode(button.dataset.coreMode, { focus: button.classList.contains('active') })));
+$$('button[data-core-mode]').forEach((button) => button.addEventListener('click', () => activateCoreMode(button.dataset.coreMode, { focus: true })));
 $$('.lane-tabs button').forEach((button) => button.addEventListener('click', () => { state.lane = button.dataset.lane; renderLane(); }));
 $$('[data-operation]').forEach((button) => button.addEventListener('click', () => openOperation(button.dataset.operation)));
 $$('[data-printer]').forEach((button) => button.addEventListener('click', () => openPrinterAction(button.dataset.printer)));
 ui.gestureButton.addEventListener('click', () => void toggleGestures());
 ui.fullscreenButton?.addEventListener('click', () => void toggleFullscreen());
 ui.fullscreenGate?.addEventListener('click', () => void toggleFullscreen());
+ui.reactorScan?.addEventListener('click', pulseCore);
 ui.operationForm.addEventListener('submit', (event) => { event.preventDefault(); void runOperation(); });
 ui.operationClose.addEventListener('click', () => ui.operationDialog.close());
 window.addEventListener('resize', () => { syncFullscreenUi(); drawTelemetry(); });
@@ -472,4 +480,3 @@ async function init() {
 }
 
 void init();
-

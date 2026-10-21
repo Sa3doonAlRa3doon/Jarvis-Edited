@@ -25,15 +25,15 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
   renderer.setClearColor(0x000000, 0);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.35;
+  renderer.toneMappingExposure = 1.72;
   const scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(0x010508, 0.018);
+  scene.fog = new THREE.FogExp2(0x010508, 0.012);
   const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 400);
-  camera.position.set(0, 1.25, 23);
+  camera.position.set(0, 1.15, 21.5);
   const world = new THREE.Group(); scene.add(world);
-  scene.add(new THREE.AmbientLight(0x255d72, 2.2));
-  const pointLight = new THREE.PointLight(0x64e8ff, 52, 90); pointLight.position.set(-2, 1, 8); scene.add(pointLight);
-  const goldLight = new THREE.PointLight(0xf5bd5c, 22, 60); goldLight.position.set(7, 6, 4); scene.add(goldLight);
+  scene.add(new THREE.AmbientLight(0x317b93, 2.8));
+  const pointLight = new THREE.PointLight(0x64e8ff, 68, 96); pointLight.position.set(-2, 1, 8); scene.add(pointLight);
+  const goldLight = new THREE.PointLight(0xf5bd5c, 28, 70); goldLight.position.set(7, 6, 4); scene.add(goldLight);
   const magentaLight = new THREE.PointLight(0xee5aa7, 5, 45); magentaLight.position.set(-7, 5, 2); scene.add(magentaLight);
 
   const starPositions = new Float32Array(900 * 3);
@@ -44,7 +44,7 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
     starPositions[index + 2] = radius * Math.cos(phi);
   }
   const starsGeometry = new THREE.BufferGeometry(); starsGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
-  const stars = new THREE.Points(starsGeometry, new THREE.PointsMaterial({ color: 0x5ad8f3, size: .045, transparent: true, opacity: .22, blending: THREE.AdditiveBlending, depthWrite: false })); scene.add(stars);
+  const stars = new THREE.Points(starsGeometry, new THREE.PointsMaterial({ color: 0x5ad8f3, size: .052, transparent: true, opacity: .34, blending: THREE.AdditiveBlending, depthWrite: false })); scene.add(stars);
 
   const glowCanvas = document.createElement('canvas'); glowCanvas.width = 256; glowCanvas.height = 256;
   const glowContext = glowCanvas.getContext('2d');
@@ -53,8 +53,8 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
   glowGradient.addColorStop(.22, 'rgba(59,190,225,.23)'); glowGradient.addColorStop(.52, 'rgba(25,117,158,.045)'); glowGradient.addColorStop(1, 'rgba(0,0,0,0)');
   glowContext.fillStyle = glowGradient; glowContext.fillRect(0, 0, 256, 256);
   const glowTexture = new THREE.CanvasTexture(glowCanvas); glowTexture.colorSpace = THREE.SRGBColorSpace;
-  const coreGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture, color: 0xa8f7ff, transparent: true, opacity: .42, blending: THREE.AdditiveBlending, depthWrite: false }));
-  coreGlow.scale.set(8.4, 8.4, 1); world.add(coreGlow);
+  const coreGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture, color: 0xa8f7ff, transparent: true, opacity: .58, blending: THREE.AdditiveBlending, depthWrite: false }));
+  coreGlow.scale.set(9.25, 9.25, 1); world.add(coreGlow);
 
   const core = new THREE.Mesh(
     new THREE.IcosahedronGeometry(1.05, 3),
@@ -113,7 +113,7 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
   brainGeometry.setAttribute('aFrom', new THREE.BufferAttribute(Float32Array.from(baseFormation), 3));
   brainGeometry.setAttribute('aTo', new THREE.BufferAttribute(Float32Array.from(baseFormation), 3));
   brainGeometry.setAttribute('color', new THREE.Float32BufferAttribute(brainColors, 3));
-  const brainMaterial = new THREE.PointsMaterial({ size: .078, vertexColors: true, transparent: true, opacity: .76, sizeAttenuation: true, blending: THREE.AdditiveBlending, depthWrite: false });
+  const brainMaterial = new THREE.PointsMaterial({ size: .094, vertexColors: true, transparent: true, opacity: .92, sizeAttenuation: true, blending: THREE.AdditiveBlending, depthWrite: false });
   brainMaterial.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = { value: 0 };
     shader.uniforms.uMorph = { value: 1 };
@@ -139,7 +139,7 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
     const color = index % 5 === 0 ? palette[1] : index % 7 === 0 ? palette[3] : new THREE.Color(0xc9fbff); sparkColors.push(color.r, color.g, color.b);
   }
   const sparkGeometry = new THREE.BufferGeometry(); sparkGeometry.setAttribute('position', new THREE.Float32BufferAttribute(sparkPositions, 3)); sparkGeometry.setAttribute('color', new THREE.Float32BufferAttribute(sparkColors, 3));
-  const sparks = new THREE.Points(sparkGeometry, new THREE.PointsMaterial({ size: .045, vertexColors: true, transparent: true, opacity: .38, blending: THREE.AdditiveBlending, depthWrite: false })); world.add(sparks);
+  const sparks = new THREE.Points(sparkGeometry, new THREE.PointsMaterial({ size: .058, vertexColors: true, transparent: true, opacity: .58, blending: THREE.AdditiveBlending, depthWrite: false })); world.add(sparks);
 
   const filamentPositions = []; const filamentColors = [];
   for (let index = 0; index < 56; index += 1) {
@@ -153,7 +153,7 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
     }
   }
   const filamentGeometry = new THREE.BufferGeometry(); filamentGeometry.setAttribute('position', new THREE.Float32BufferAttribute(filamentPositions, 3)); filamentGeometry.setAttribute('color', new THREE.Float32BufferAttribute(filamentColors, 3));
-  const filamentMaterial = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: .1, blending: THREE.AdditiveBlending, depthWrite: false });
+  const filamentMaterial = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: .17, blending: THREE.AdditiveBlending, depthWrite: false });
   const filaments = new THREE.LineSegments(filamentGeometry, filamentMaterial); world.add(filaments);
 
   const orbitalRings = [];
@@ -172,7 +172,7 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
   let knowledge = { nodes: [], links: [], summary: {} };
   let selected = null;
   let focusPoint = new THREE.Vector3(0, 0, 0);
-  let targetDistance = 23;
+  let targetDistance = 21.5;
   let dragging = false;
   let previousPointer = null;
   let gesturePinched = false;
@@ -187,7 +187,7 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
     from.array.set(currentFormation); to.array.set(next); from.needsUpdate = true; to.needsUpdate = true;
     currentFormation = next; activeMode = mode; morphProgress = 0;
     const color = modeColors[mode]; pointLight.color.setHex(color); core.material.emissive.setHex(color); coreRing.material.color.setHex(color); coreGlow.material.color.setHex(color);
-    orbitalRings[0]?.material.color.setHex(color); targetDistance = mode === 'research' ? 25 : mode === 'printer' ? 21 : 23; focusPoint.set(0, 0, 0);
+    orbitalRings[0]?.material.color.setHex(color); targetDistance = mode === 'research' ? 23 : mode === 'printer' ? 20 : 21.5; focusPoint.set(0, 0, 0);
     onStatus(`MATRIX // ${mode.toUpperCase()}`); return mode;
   }
 
@@ -252,7 +252,7 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
   function selectMesh(mesh) {
     if (!mesh) return false;
     if (selected) { selected.scale.setScalar(1); selected.material.emissiveIntensity = selected.userData.node.system ? 1.15 : .55; }
-    selected = mesh; selected.scale.setScalar(2.15); selected.material.emissiveIntensity = 3.2;
+    selected = mesh; selected.scale.setScalar(1.62); selected.material.emissiveIntensity = 2.7;
     focusPoint.copy(selected.position); targetDistance = Math.max(11, Math.min(22, 13 + selected.position.length() * .18));
     setInspector(selected.userData.node); onStatus(`FOCUS // ${selected.userData.node.name}`); return true;
   }
@@ -312,8 +312,8 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
     brainCloud.scale.set(breath * (1 + Math.sin(elapsed * .39) * .018), breath * (1 + Math.sin(elapsed * .53 + 1) * .022), breath);
     brainCloud.rotation.y = elapsed * .025; brainCloud.rotation.x = Math.sin(elapsed * .11) * .075;
     sparks.rotation.y = -elapsed * .032; sparks.rotation.z = Math.sin(elapsed * .21) * .055;
-    filaments.rotation.y = elapsed * .014; filaments.rotation.x = Math.sin(elapsed * .16) * .045; filamentMaterial.opacity = .075 + Math.sin(elapsed * 1.34) * .025;
-    coreGlow.material.opacity = .31 + Math.sin(elapsed * 1.45) * .08; coreGlow.scale.setScalar(8.1 + Math.sin(elapsed * 1.08) * .42);
+    filaments.rotation.y = elapsed * .014; filaments.rotation.x = Math.sin(elapsed * .16) * .045; filamentMaterial.opacity = .13 + Math.sin(elapsed * 1.34) * .035;
+    coreGlow.material.opacity = .46 + Math.sin(elapsed * 1.45) * .1; coreGlow.scale.setScalar(9.05 + Math.sin(elapsed * 1.08) * .5);
     orbitalRings.forEach((ring, index) => { ring.rotation.z += (index % 2 ? -1 : 1) * (.00042 + index * .00008); });
     ticks.rotation.z = -elapsed * .03;
     stars.rotation.y = elapsed * .004;
@@ -333,4 +333,3 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
 
   return { focusFromText, gesture, resize, setMode, selectById: (id) => selectMesh(meshById.get(id)), get selected() { return selected?.userData?.node || null; }, get mode() { return activeMode; } };
 }
-

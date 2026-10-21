@@ -31,7 +31,7 @@ for (const shard of shards) { const stats = await fs.stat(path.join(modelDirecto
 const handModel = await fs.readFile(path.join(project, 'public', 'models', 'hand-landmarker', 'hand_landmarker.task'));
 assert.equal(handModel.length, 7819105, 'Unexpected hand landmark model size.');
 
-assert.equal(packageJson.version, '2.5.0');
+assert.equal(packageJson.version, '3.0.0');
 assert.match(server, /app\.get\('\/settings'/);
 assert.match(server, /v1\/traces\?limit=40/);
 assert.match(server, /timingSafeEqual/);
@@ -49,6 +49,7 @@ for (const mode of ['system', 'docker', 'printer', 'agents', 'research', 'memory
 assert.match(client, /activateCoreMode/);
 assert.match(client, /button\[data-core-mode\]/);
 assert.doesNotMatch(client, /\$\$\('\[data-core-mode\]'\)/);
+assert.match(client, /activateCoreMode\(button\.dataset\.coreMode, \{ focus: true \}\)/);
 assert.match(galaxy, /formationFor/);
 assert.match(galaxy, /uMorph/);
 assert.match(html, /class="reactor-shell"/);
@@ -63,6 +64,10 @@ assert.match(settingsClient, /UNSAVED PROFILE CHANGES/);
 assert.match(settingsClient, /Saved device \(currently unavailable\)/);
 assert.match(settingsClient, /Sensor configuration changed/);
 assert.match(css, /v2\.5 configuration core/);
+assert.match(css, /v3\.0 cinematic neural command deck/);
+assert.match(html, /id="reactor-scan"/);
+assert.match(html, /class="constellation-labels"/);
+assert.match(client, /pulseCore/);
 assert.match(settingsClient, /exact:\s*settings\.browserCamera/);
 assert.match(settingsClient, /exact:\s*settings\.browserMicrophone/);
 assert.match(settingsClient, /modelUrl: '\/models\/coco-ssd\/model\.json'/);
@@ -97,4 +102,3 @@ console.log(`Verified ${shards.length} local person-model shards (${(modelBytes 
 console.log(`Verified local MediaPipe hand model (${(handModel.length / 1024 / 1024).toFixed(1)} MiB).`);
 console.log('Verified no-scroll 3D file galaxy, hidden settings, exact camera selection, gesture sensitivity, and live preview.');
 console.log('Verified session-gated dashboard, PIN-gated fixed printer/maintenance actions, and secret-file exclusions.');
-
