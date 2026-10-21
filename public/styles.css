@@ -19,6 +19,94 @@
   --accent: var(--cyan);
 }
 
+/* v3.1 single-screen neural field — canvas only, no visible dashboard copy */
+.command-page.visual-only {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  margin: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 48%, rgba(20, 82, 98, .18), transparent 38%),
+    linear-gradient(155deg, #010609 0%, #031016 48%, #010507 100%);
+}
+
+.visual-only .backdrop,
+.visual-only .scanline,
+.visual-only .topbar,
+.visual-only .telemetry,
+.visual-only .agents,
+.visual-only .operations,
+.visual-only .conversation,
+.visual-only .mode-console,
+.visual-only .core-copy,
+.visual-only .constellation-labels,
+.visual-only .reactor-shell,
+.visual-only .core-crosshair,
+.visual-only .orbital-label,
+.visual-only .galaxy-toolbar,
+.visual-only .node-inspector,
+.visual-only .gesture-feed,
+.visual-only .wake-flash,
+.visual-only .holo-floor,
+.visual-only .fullscreen-gate {
+  display: none !important;
+}
+
+.visual-only .command-shell,
+.visual-only .command-grid,
+.visual-only .neural,
+.visual-only .core-stage {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  min-width: 0;
+  min-height: 0;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  clip-path: none;
+  box-shadow: none;
+  background: transparent;
+  overflow: hidden;
+}
+
+.visual-only .command-shell,
+.visual-only .command-grid,
+.visual-only .neural {
+  display: block;
+}
+
+.visual-only .neural::before,
+.visual-only .neural::after,
+.visual-only .core-stage::before,
+.visual-only .core-stage::after {
+  display: none !important;
+}
+
+.visual-only #brain-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 100%;
+  min-height: 100%;
+  opacity: 1;
+  filter: saturate(1.08) contrast(1.04);
+  touch-action: none;
+  cursor: grab;
+}
+
+.visual-only #brain-canvas:active { cursor: grabbing; }
+
 * { box-sizing: border-box; }
 html, body { margin: 0; width: 100%; min-height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); }
 button, input, select, textarea { font: inherit; }

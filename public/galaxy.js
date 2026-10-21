@@ -222,10 +222,6 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
       if (node.system) {
         const ring = new THREE.Mesh(new THREE.TorusGeometry(radius * 1.7, .015, 5, 36), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .4 }));
         ring.userData.link = true; ring.position.copy(mesh.position); ring.rotation.x = Math.PI / 2; world.add(ring);
-        const labelCanvas = document.createElement('canvas'); labelCanvas.width = 320; labelCanvas.height = 64; const labelContext = labelCanvas.getContext('2d');
-        labelContext.clearRect(0, 0, 320, 64); labelContext.font = '500 20px monospace'; labelContext.fillStyle = `#${color.toString(16).padStart(6, '0')}`; labelContext.fillText(node.name, 8, 39);
-        const texture = new THREE.CanvasTexture(labelCanvas); texture.colorSpace = THREE.SRGBColorSpace;
-        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, opacity: .48, depthWrite: false })); sprite.scale.set(3.3, .66, 1); sprite.position.copy(mesh.position).add(new THREE.Vector3(.55, .52, 0)); sprite.userData.link = true; world.add(sprite);
       }
     });
     const positionPairs = [];

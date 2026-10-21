@@ -5,10 +5,10 @@ import { fileURLToPath } from 'node:url';
 
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (file) => fs.readFile(path.join(project, file), 'utf8');
-const [html, settingsHtml, client, settingsClient, authClient, css, server, helper, gitignore, packageRaw, galaxy, gestures, printerClient, knowledgeIndex] = await Promise.all([
+const [html, settingsHtml, client, settingsClient, authClient, css, server, helper, gitignore, packageRaw, galaxy, gestures, printerClient, knowledgeIndex, agentRouter] = await Promise.all([
   read('public/index.html'), read('public/settings.html'), read('public/app.js'), read('public/settings.js'),
   read('public/auth.js'), read('public/styles.css'), read('server.mjs'), read('scripts/jarvis-service-control.sh'), read('.gitignore'), read('package.json'),
-  read('public/galaxy.js'), read('public/gesture-controller.js'), read('lib/printer-client.mjs'), read('lib/knowledge-index.mjs')
+  read('public/galaxy.js'), read('public/gesture-controller.js'), read('lib/printer-client.mjs'), read('lib/knowledge-index.mjs'), read('lib/agent-router.mjs')
 ]);
 const packageJson = JSON.parse(packageRaw);
 
@@ -31,7 +31,7 @@ for (const shard of shards) { const stats = await fs.stat(path.join(modelDirecto
 const handModel = await fs.readFile(path.join(project, 'public', 'models', 'hand-landmarker', 'hand_landmarker.task'));
 assert.equal(handModel.length, 7819105, 'Unexpected hand landmark model size.');
 
-assert.equal(packageJson.version, '3.0.0');
+assert.equal(packageJson.version, '3.1.0');
 assert.match(server, /app\.get\('\/settings'/);
 assert.match(server, /v1\/traces\?limit=40/);
 assert.match(server, /timingSafeEqual/);
@@ -65,6 +65,14 @@ assert.match(settingsClient, /Saved device \(currently unavailable\)/);
 assert.match(settingsClient, /Sensor configuration changed/);
 assert.match(css, /v2\.5 configuration core/);
 assert.match(css, /v3\.0 cinematic neural command deck/);
+assert.match(html, /class="command-page visual-only"/);
+assert.match(css, /v3\.1 single-screen neural field/);
+assert.doesNotMatch(galaxy, /fillText\(/);
+assert.match(server, /const primaryModel = resolvePrimaryModel\(process\.env\)/);
+assert.match(server, /const models = \{ primary: primaryModel \}/);
+assert.match(server, /routePrompt\(prompt, primaryModel\)/);
+for (const role of ['JARVIS', 'CODEX', 'PROSPECTOR', 'SENTINEL', 'ARCHIVIST', 'FABRICATOR', 'LINK']) assert.match(agentRouter, new RegExp(`name: '${role}'`));
+assert.match(client, /routeModes\[result\.route\]/);
 assert.match(html, /id="reactor-scan"/);
 assert.match(html, /class="constellation-labels"/);
 assert.match(client, /pulseCore/);

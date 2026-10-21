@@ -1,6 +1,14 @@
-# OpenJarvis Pi Command Center 3.0.0
+# OpenJarvis Pi Command Center 3.1.0
 
-A private, Pi-first JARVIS operations screen for OpenJarvis, Ollama, Docker, Google connectors, cameras, microphones, and guarded maintenance. The dashboard stays inside a single fullscreen viewport without page scrolling and now uses a much brighter cinematic instrument language based on the supplied homemade-JARVIS picture references.
+A private, Pi-first JARVIS visualization for OpenJarvis, Ollama, Docker, Google connectors, cameras, microphones, and guarded maintenance. The main route is now exactly one fullscreen neural field with no visible words, panels, cards, labels, or command bar.
+
+## What is new in 3.1
+
+- **One screen only** — `/` renders only the living Three.js orbital particle field from the supplied reference crop. Every dashboard rail, metric card, header, footer, label, and text overlay is hidden.
+- **No text inside the 3D scene** — system names are no longer drawn as canvas sprites. The visual is particles, wireframe geometry, paths, rings, and floating nodes only.
+- **One model, multiple specialist AIs** — one `JARVIS_MODEL` powers JARVIS, CODEX, PROSPECTOR, SENTINEL, ARCHIVIST, FABRICATOR, and LINK roles.
+- **Automatic role switching** — each request is classified locally and routed to the best specialist role without loading or swapping a second model. The particle formation and color change with the selected role.
+- **Controls remain private** — `/settings`, authenticated APIs, voice/talkback, sensor selection, printer safeguards, and maintenance safeguards remain available without cluttering the main visual.
 
 ## What is new in 3.0
 

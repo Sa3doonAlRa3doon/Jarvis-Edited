@@ -56,6 +56,11 @@ const coreModes = {
   memory: { layer: '06', link: 'ARCHIVE', health: 'PRIVATE', kicker: 'PERSISTENT LOCAL ARCHIVE', title: 'MEMORY', subtitle: 'COMPRESSED CONTEXT // PRIVATE STORAGE' }
 };
 
+const routeModes = {
+  GENERAL: 'system', CODEACT: 'agents', RESEARCH: 'research', MONITOR: 'docker',
+  MEMORY: 'memory', FABRICATOR: 'printer', CONNECTOR: 'system'
+};
+
 function activateCoreMode(mode, { focus = false } = {}) {
   const config = coreModes[mode] || coreModes.system; const changed = state.coreMode !== mode;
   state.coreMode = mode; document.body.dataset.coreMode = mode;
@@ -317,7 +322,7 @@ async function sendPrompt(prompt) {
   try {
     const result = await json('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: text, history: state.history.slice(0, -1) }) });
     ui.route.textContent = result.route;
-    if (result.route === 'CODEACT') activateCoreMode('agents'); else if (result.route === 'RESEARCH') activateCoreMode('research');
+    activateCoreMode(routeModes[result.route] || 'system');
     state.lastAssistant = result.content; appendMessage('assistant', result.content, result.source); state.history.push({ role: 'assistant', content: result.content }); state.history = state.history.slice(-16); void speak(result.content);
   } catch (error) { appendMessage('error', error.message); }
   finally { ui.send.disabled = false; ui.send.innerHTML = '<span>RUN</span><b>EXECUTE</b>'; state.neuralEnergy = .42; }

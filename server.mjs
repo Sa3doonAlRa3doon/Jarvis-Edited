@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
+import { agentRoles, resolvePrimaryModel, routePrompt } from './lib/agent-router.mjs';
 import { EventStore } from './lib/event-store.mjs';
 import { buildKnowledgeIndex } from './lib/knowledge-index.mjs';
 import { PrinterClient } from './lib/printer-client.mjs';
@@ -34,11 +35,8 @@ let knowledgeCache = null;
 const wakeEventToken = crypto.randomBytes(32).toString('hex');
 const dashboardAccessPin = String(process.env.DASHBOARD_ACCESS_PIN || process.env.OPS_CONTROL_PIN || '');
 const helperPath = process.env.OPS_HELPER_PATH || '/usr/local/sbin/jarvis-service-control';
-const models = {
-  general: process.env.GENERAL_MODEL || 'qwen3.5:4b',
-  coding: process.env.CODING_MODEL || 'qwen2.5-coder:7b',
-  reasoning: process.env.REASONING_MODEL || 'qwen3.5:9b'
-};
+const primaryModel = resolvePrimaryModel(process.env);
+const models = { primary: primaryModel };
 
 function asBool(value, fallback = false) {
   if (value == null || value === '') return fallback;
@@ -119,10 +117,7 @@ async function googleConnectorStatus() {
   };
 }
 function routeModel(prompt) {
-  const text = String(prompt).toLowerCase();
-  if (/\b(code|coding|javascript|typescript|python|node\.?js|react|sql|bug|debug|function|class|api|git|docker|container|linux command|program)\b/.test(text)) return { model: models.coding, route: 'CODEACT' };
-  if (/\b(analy[sz]e|reason|research|compare|strategy|architecture|calculate|equation|math|investigate|sources|citations?)\b/.test(text) || text.length > 700) return { model: models.reasoning, route: 'RESEARCH' };
-  return { model: models.general, route: 'GENERAL' };
+  return routePrompt(prompt, primaryModel);
 }
 
 function traceAgentName(trace) {
@@ -301,7 +296,7 @@ function enforceSameOrigin(request, response, next) {
   response.status(403).json({ error: 'Cross-origin mutation blocked.' });
 }
 app.use('/api', enforceSameOrigin);
-app.get('/api/health', (_request, response) => response.json({ status: 'ok', version: '3.0.0' }));
+app.get('/api/health', (_request, response) => response.json({ status: 'ok', version: '3.1.0' }));
 app.get('/api/auth/status', (request, response) => response.json({ required: Boolean(dashboardAccessPin), authenticated: dashboardAuthenticated(request) }));
 app.post('/api/auth/login', (request, response) => {
   if (!dashboardAccessPin) { response.json({ ok: true, required: false }); return; }
@@ -321,7 +316,7 @@ app.post('/api/auth/logout', (request, response) => {
 });
 app.use('/api', requireDashboardAuth);
 
-app.get('/api/config', (_request, response) => response.json({ name: 'JARVIS', version: '3.0.0', ttsMode: process.env.TTS_MODE || 'local', fishVoiceId: process.env.FISH_AUDIO_VOICE_ID || '', models, timezone: 'Asia/Dubai', piOnly: true, operationsEnabled: Boolean(process.env.OPS_CONTROL_PIN), printerConfigured: printerClient.configured }));
+app.get('/api/config', (_request, response) => response.json({ name: 'JARVIS', version: '3.1.0', ttsMode: process.env.TTS_MODE || 'local', fishVoiceId: process.env.FISH_AUDIO_VOICE_ID || '', model: primaryModel, models, agents: Object.fromEntries(Object.entries(agentRoles).map(([route, role]) => [route, role.name])), timezone: 'Asia/Dubai', piOnly: true, operationsEnabled: Boolean(process.env.OPS_CONTROL_PIN), printerConfigured: printerClient.configured }));
 app.get('/api/metrics', async (_request, response) => response.json(await systemMetrics()));
 app.get('/api/storage', async (_request, response) => response.json({ devices: await storageDevices() }));
 app.get('/api/docker', async (_request, response) => response.json(await dockerSummary()));
@@ -435,7 +430,8 @@ app.post('/api/chat', async (request, response) => {
   if (/\b(printer|print|printing|klipper|moonraker|nozzle|bed|gcode|time left|eta)\b/i.test(prompt)) {
     liveContext += `\nLive read-only 3D printer context (never claim or execute a printer action):\n${JSON.stringify(printerSnapshot).slice(0, 5000)}`;
   }
-  const messages = [{ role: 'system', content: `You are JARVIS, a private assistant running on a Raspberry Pi 5. Be precise, calm, helpful, and concise. Never claim a tool or maintenance action succeeded unless the provided result confirms it. You may explain Docker state from supplied read-only context, but never invent containers or metrics.${liveContext}` },
+  const activeRole = agentRoles[selected.route] || agentRoles.GENERAL;
+  const messages = [{ role: 'system', content: `You are JARVIS, a private assistant running on a Raspberry Pi 5. You are currently operating through the ${activeRole.name} specialist role. ${activeRole.instruction} Be precise, calm, helpful, and concise. Never claim a tool or maintenance action succeeded unless the provided result confirms it. You may explain Docker state from supplied read-only context, but never invent containers or metrics. Every specialist role uses the same local model: ${primaryModel}.${liveContext}` },
     ...history.filter((item) => ['user', 'assistant'].includes(item?.role) && typeof item?.content === 'string').map((item) => ({ role: item.role, content: cleanText(item.content, 6000) })), { role: 'user', content: prompt }];
   try {
     const result = await fetchJson(`${openJarvisUrl}/v1/chat/completions`, { method: 'POST', headers: openJarvisHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ model: selected.model, messages, stream: false }) }, 180_000);
@@ -496,7 +492,7 @@ async function monitorTick() {
   } catch {}
 }
 
-await eventStore.init(); await loadSettings(); await eventStore.append('boot', 'JARVIS command center starting', { version: '3.0.0', platform: process.platform });
+await eventStore.init(); await loadSettings(); await eventStore.append('boot', 'JARVIS command center starting', { version: '3.1.0', platform: process.platform });
 const server = app.listen(port, host, async () => {
   console.log(`JARVIS Command Center listening at http://${host}:${port}`); console.log(`OpenJarvis: ${openJarvisUrl} | Ollama: ${ollamaUrl}`);
   await startWakeListener(); void monitorTick(); void refreshPrinterStatus();
