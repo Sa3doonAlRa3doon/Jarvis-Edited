@@ -1,6 +1,6 @@
 {
   "name": "openjarvis-pi-command-center",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "private": true,
   "description": "Private Pi 5 JARVIS with one full-screen neural field and one local model that automatically switches specialist roles",
   "type": "module",
@@ -9,7 +9,7 @@
     "assets": "node scripts/install-model.mjs",
     "postinstall": "node scripts/install-model.mjs",
     "start": "node server.mjs",
-    "check": "node --check server.mjs && node --check lib/event-store.mjs && node --check lib/system-probe.mjs && node --check lib/printer-client.mjs && node --check lib/knowledge-index.mjs && node --check public/app.js && node --check public/galaxy.js && node --check public/gesture-controller.js && node --check public/settings.js && node --test tests/*.test.mjs && node scripts/verify.mjs"
+    "check": "node --check server.mjs && node --check lib/event-store.mjs && node --check lib/system-probe.mjs && node --check lib/printer-client.mjs && node --check lib/knowledge-index.mjs && node --check public/app.js && node --check public/galaxy.js && node --check public/gesture-controller.js && node --check public/voice-utils.js && node --check public/voice-controller.js && node --check public/settings.js && node --test tests/*.test.mjs && node scripts/verify.mjs"
   },
   "engines": {
     "node": ">=20"

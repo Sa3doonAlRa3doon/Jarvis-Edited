@@ -1,6 +1,16 @@
-# OpenJarvis Pi Command Center 3.1.0
+# OpenJarvis Pi Command Center 3.2.0
 
 A private, Pi-first JARVIS visualization for OpenJarvis, Ollama, Docker, Google connectors, cameras, microphones, and guarded maintenance. The main route is now exactly one fullscreen neural field with no visible words, panels, cards, labels, or command bar.
+
+## What is new in 3.2
+
+- **Actual spoken commands** — the browser voice core now listens continuously after permission is granted, recognizes up to five alternatives, waits for `Hey Jarvis` or `Jarvis`, joins nearby final transcript segments, suppresses duplicate echoes, and sends the spoken command through the same guarded chat route as typed input.
+- **More accurate wake matching** — configurable wake phrases, language/accent, confidence floor, end-of-command silence, common Jarvis mishearing correction, and false-trigger protection are available only in `/settings`.
+- **Adaptive acoustic processing** — exact-device VAD and clap analysis now learns the room noise floor and supports echo cancellation, noise suppression, auto gain, sharper double-clap impulse checks, and talkback-aware listening pauses.
+- **Configurable talkback** — choose an installed system voice, rate, pitch, volume, wake acknowledgement, and optional barge-in. Fish Audio remains an optional server-side mode with automatic local browser-voice fallback.
+- **Voice-reactive neural field** — the text-free particle scene changes light intensity, particle size, glow, and motion while listening, hearing, armed, thinking, speaking, or reporting an error.
+- **Smoother camera gestures** — pointer movement, pinch state, and two-hand zoom now use temporal smoothing, pinch hysteresis, and lost-frame tolerance to reduce jitter.
+- **Permission-safe auto start** — microphone and camera listeners auto-start only when the matching permission has already been granted. With the fullscreen page focused, press `V` for voice, `G` for gestures, or `Esc` to stop both without adding visible controls.
 
 ## What is new in 3.1
 
@@ -53,7 +63,7 @@ The 2.2 neural visualization and every existing local operation remain included:
 
 - **True fullscreen HUD** — `/` is edge-to-edge with no outer webpage gutters. The compact top-right control invokes the browser Fullscreen API; installed/mobile launches use a fullscreen web-app manifest. Browsers require a user press and do not permit pages to silently force fullscreen.
 - **Interactive 3D knowledge galaxy** — a local Three.js scene combines a dense cyan/gold/magenta neural core, orbital calibration rings, system clusters, and metadata-only folder/file nodes. Drag to orbit, scroll to zoom, click a node, or mention a file/system name in chat and the camera flies to it.
-- **Camera gesture controls** — the official MediaPipe Hand Landmarker runs locally in the browser. The selected browser camera supports pointer movement, pinch-to-select, pinch-drag rotation, and two-hand zoom. The camera starts only after **Enable Gestures** is pressed.
+- **Camera gesture controls** — the official MediaPipe Hand Landmarker runs locally in the browser. The selected browser camera supports pointer movement, pinch-to-select, pinch-drag rotation, and two-hand zoom. It auto-starts only after camera permission already exists; press `G` on the fullscreen page to start or stop it manually.
 - **Moonraker printer telemetry** — the bottom HUD shows printer state, active file, progress, estimated time left, and nozzle/bed temperatures from the fixed `PRINTER_URL`. The server polls once every two seconds and streams normalized state to the screen.
 - **Guarded print controls** — pause, resume, and cancel use fixed Moonraker endpoints. They require the operations PIN plus `PAUSE PRINT`, `RESUME PRINT`, or `CANCEL PRINT`; chat can open the confirmation screen but cannot execute an action automatically.
 - **Private knowledge indexing** — only server-configured roots are scanned. The browser receives names and metadata, never file contents; hidden, dependency, data, credential, token, key, and secret paths are excluded, and symlinks are ignored.
@@ -160,11 +170,12 @@ The tunnel is optional for viewing the Pi dashboard and selecting Pi-attached de
 
 Open `/settings`, choose **This browser** for laptop testing or **Raspberry Pi 5 hardware** for Pi devices, select the exact camera/microphone, then save.
 
-- Browser mode requests permission only after **Start sensors** is pressed.
-- The main screen requests camera permission separately only after **Enable Gestures** is pressed. Select the exact **Browser / Gesture Camera** in `/settings`; this is also how Ubuntu/Chromium on the Pi selects one camera while leaving other cameras untouched.
+- Browser mode requests camera and microphone permission only after **Start calibration**, **Test recognition**, `V`, or `G` is deliberately used.
+- After permission has been granted, the main screen can safely auto-start the enabled listener on later visits. Select the exact **Browser / Gesture Camera** in `/settings`; this is also how Ubuntu/Chromium on the Pi selects one camera while leaving other cameras untouched.
 - Pi mode uses the selected `/dev/video*` and `plughw:CARD,DEVICE` paths only.
 - Person detection runs the TensorFlow.js COCO-SSD model locally. The release ZIP includes it; GitHub installs download the official model shards once during `npm install`, verify their hashes, and then run offline.
-- Voice activity and double-clap detection analyze signal levels; audio is not saved.
+- Voice activity and double-clap detection analyze signal levels locally; audio is not saved. Browser speech transcription uses the browser's installed speech-recognition provider and may use the operating-system default microphone even though VAD and clap analysis stay locked to the selected device.
+- Open **Voice Core** in `/settings` to test recognition and talkback, choose English US/UK/UAE or Arabic UAE, set wake aliases, and tune confidence and command-end silence.
 - The Pi `hey jarvis` model runs fully locally through openWakeWord. Its own documentation notes that saying only “Jarvis” may work but has a higher false-reject rate, so “Hey Jarvis” is the reliable phrase. See [openWakeWord’s Hey Jarvis model documentation](https://github.com/dscripka/openWakeWord/blob/main/docs/models/hey_jarvis.md).
 - A high wake threshold reduces false activations; noisy rooms may need a higher clap threshold.
 - Pinch sensitivity is adjustable in `/settings`. A larger value accepts a wider thumb-to-index gap; start near 42% and tune it for camera distance and lighting.

@@ -1,3 +1,5 @@
+import { normalizeWakePhrases, selectRecognitionAlternative } from './voice-utils.js';
+
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 const form = $('#settings-form');
@@ -8,6 +10,10 @@ const ui = {
   browserDeviceCount: $('#browser-device-count'), piDeviceCount: $('#pi-device-count'), refreshDevices: $('#refresh-devices'),
   personDetection: $('#person-detection'), voiceActivity: $('#voice-activity'), wakeWord: $('#wake-word'), doubleClap: $('#double-clap'), gestureControl: $('#gesture-control'), autoSpeak: $('#auto-speak'), autoRepair: $('#auto-repair'),
   personThreshold: $('#person-threshold'), micSensitivity: $('#mic-sensitivity'), wakeSensitivity: $('#wake-sensitivity'), clapSensitivity: $('#clap-sensitivity'), gestureSensitivity: $('#gesture-sensitivity'), doubleClapWindow: $('#double-clap-window'), scanInterval: $('#scan-interval'), accent: $('#accent'),
+  voiceLanguage: $('#voice-language'), wakePhrases: $('#wake-phrases'), recognitionConfidence: $('#recognition-confidence'), commandSilence: $('#command-silence'),
+  voiceAutoStart: $('#voice-auto-start'), echoCancellation: $('#echo-cancellation'), noiseSuppression: $('#noise-suppression'), autoGainControl: $('#auto-gain-control'), bargeIn: $('#barge-in'),
+  ttsVoice: $('#tts-voice'), ttsRate: $('#tts-rate'), ttsPitch: $('#tts-pitch'), ttsVolume: $('#tts-volume'), wakeResponse: $('#wake-response'),
+  speechSupport: $('#speech-support'), voiceTranscript: $('#voice-transcript'), voiceConfidence: $('#voice-confidence'), testRecognition: $('#test-recognition'), testTalkback: $('#test-talkback'),
   cameraPreview: $('#camera-preview'), video: $('#camera-video'), image: $('#pi-camera-image'), canvas: $('#sensor-canvas'), placeholder: $('#camera-placeholder'), cameraSource: $('#camera-source'),
   personReadout: $('#person-readout'), micReadout: $('#mic-readout'), micMeter: $('#mic-meter'), wakeReadout: $('#wake-readout'), sensorState: $('#sensor-state'), sensorGuidance: $('#sensor-guidance'),
   start: $('#start-sensors'), stop: $('#stop-sensors'), testWake: $('#test-wake'), googleGrid: $('#google-grid'), googleNote: $('#google-note'), googleState: $('#google-state'),
@@ -18,12 +24,16 @@ const ui = {
 const recommendedProfile = {
   personDetection: true, voiceActivity: true, wakeWord: true, doubleClap: true, gestureControl: true, autoSpeak: true,
   personThreshold: 0.55, micSensitivity: 0.18, wakeSensitivity: 0.55, clapSensitivity: 0.34,
-  gestureSensitivity: 0.42, doubleClapWindow: 700, scanInterval: 900, accent: '#64e8ff'
+  gestureSensitivity: 0.42, doubleClapWindow: 700, scanInterval: 900, accent: '#64e8ff',
+  voiceLanguage: 'en-US', wakePhrases: ['hey jarvis', 'jarvis'], recognitionConfidence: .35, commandSilenceMs: 700,
+  voiceAutoStart: true, echoCancellation: true, noiseSuppression: true, autoGainControl: true, bargeIn: false,
+  ttsVoice: '', ttsRate: 1.02, ttsPitch: .92, ttsVolume: 1, wakeResponse: 'Yes?'
 };
 
 const state = {
   savedSettings: {}, currentSection: 'devices', media: null, stream: null, audioContext: null, analyser: null,
-  animation: 0, detector: null, detectTimer: 0, piTimer: 0, lastClap: 0, clapAbove: false, sensorsActive: false, dirty: false
+  animation: 0, detector: null, detectTimer: 0, piTimer: 0, lastClap: 0, clapAbove: false, sensorsActive: false, dirty: false,
+  testRecognition: null, testRecognitionTimer: 0, noiseFloor: .008, lastAudioLevel: 0
 };
 
 const valueBindings = [
@@ -33,7 +43,12 @@ const valueBindings = [
   ['clapSensitivity', 'clap-sensitivity-output', (value) => `${Math.round(value * 100)}%`],
   ['gestureSensitivity', 'gesture-sensitivity-output', (value) => `${Math.round(value * 100)}%`],
   ['doubleClapWindow', 'double-clap-window-output', (value) => `${value} ms`],
-  ['scanInterval', 'scan-interval-output', (value) => `${value} ms`]
+  ['scanInterval', 'scan-interval-output', (value) => `${value} ms`],
+  ['recognitionConfidence', 'recognition-confidence-output', (value) => `${Math.round(value * 100)}%`],
+  ['commandSilence', 'command-silence-output', (value) => `${value} ms`],
+  ['ttsRate', 'tts-rate-output', (value) => `${value.toFixed(2)}×`],
+  ['ttsPitch', 'tts-pitch-output', (value) => `${value.toFixed(2)}`],
+  ['ttsVolume', 'tts-volume-output', (value) => `${Math.round(value * 100)}%`]
 ];
 
 async function json(url, options) {
@@ -66,7 +81,11 @@ function currentSettings() {
     doubleClap: ui.doubleClap.checked, gestureControl: ui.gestureControl.checked, autoSpeak: ui.autoSpeak.checked, autoRepair: ui.autoRepair.checked,
     personThreshold: Number(ui.personThreshold.value), micSensitivity: Number(ui.micSensitivity.value),
     wakeSensitivity: Number(ui.wakeSensitivity.value), clapSensitivity: Number(ui.clapSensitivity.value), gestureSensitivity: Number(ui.gestureSensitivity.value),
-    doubleClapWindow: Number(ui.doubleClapWindow.value), scanInterval: Number(ui.scanInterval.value), accent: ui.accent.value
+    doubleClapWindow: Number(ui.doubleClapWindow.value), scanInterval: Number(ui.scanInterval.value), accent: ui.accent.value,
+    voiceLanguage: ui.voiceLanguage.value, wakePhrases: normalizeWakePhrases(ui.wakePhrases.value), recognitionConfidence: Number(ui.recognitionConfidence.value),
+    commandSilenceMs: Number(ui.commandSilence.value), voiceAutoStart: ui.voiceAutoStart.checked, echoCancellation: ui.echoCancellation.checked,
+    noiseSuppression: ui.noiseSuppression.checked, autoGainControl: ui.autoGainControl.checked, bargeIn: ui.bargeIn.checked,
+    ttsVoice: ui.ttsVoice.value, ttsRate: Number(ui.ttsRate.value), ttsPitch: Number(ui.ttsPitch.value), ttsVolume: Number(ui.ttsVolume.value), wakeResponse: ui.wakeResponse.value.trim()
   };
 }
 
@@ -102,14 +121,19 @@ function previewSettings() {
 }
 
 function applySettings(settings, { saved = false, message = '' } = {}) {
+  ui.wakePhrases.value = normalizeWakePhrases(settings.wakePhrases).join(', ');
+  if (settings.ttsVoice && ![...ui.ttsVoice.options].some((item) => item.value === settings.ttsVoice)) ui.ttsVoice.append(option(settings.ttsVoice, `Saved voice (currently unavailable): ${settings.ttsVoice}`));
   for (const [key, element] of [
     ['source', ui.source], ['browserCamera', ui.browserCamera], ['browserMicrophone', ui.browserMicrophone], ['piCamera', ui.piCamera], ['piMicrophone', ui.piMicrophone],
     ['personThreshold', ui.personThreshold], ['micSensitivity', ui.micSensitivity], ['wakeSensitivity', ui.wakeSensitivity], ['clapSensitivity', ui.clapSensitivity],
-    ['gestureSensitivity', ui.gestureSensitivity], ['doubleClapWindow', ui.doubleClapWindow], ['scanInterval', ui.scanInterval], ['accent', ui.accent]
+    ['gestureSensitivity', ui.gestureSensitivity], ['doubleClapWindow', ui.doubleClapWindow], ['scanInterval', ui.scanInterval], ['accent', ui.accent],
+    ['voiceLanguage', ui.voiceLanguage], ['recognitionConfidence', ui.recognitionConfidence], ['commandSilenceMs', ui.commandSilence],
+    ['ttsVoice', ui.ttsVoice], ['ttsRate', ui.ttsRate], ['ttsPitch', ui.ttsPitch], ['ttsVolume', ui.ttsVolume], ['wakeResponse', ui.wakeResponse]
   ]) element.value = settings[key] ?? '';
   for (const [key, element] of [
     ['personDetection', ui.personDetection], ['voiceActivity', ui.voiceActivity], ['wakeWord', ui.wakeWord], ['doubleClap', ui.doubleClap],
-    ['gestureControl', ui.gestureControl], ['autoSpeak', ui.autoSpeak], ['autoRepair', ui.autoRepair]
+    ['gestureControl', ui.gestureControl], ['autoSpeak', ui.autoSpeak], ['autoRepair', ui.autoRepair], ['voiceAutoStart', ui.voiceAutoStart],
+    ['echoCancellation', ui.echoCancellation], ['noiseSuppression', ui.noiseSuppression], ['autoGainControl', ui.autoGainControl], ['bargeIn', ui.bargeIn]
   ]) element.checked = Boolean(settings[key]);
   if (saved) state.savedSettings = { ...settings };
   updateOutputs();
@@ -154,6 +178,49 @@ async function enumerateBrowserDevices() {
   fillSelect(ui.browserCamera, cameras.map((item, index) => ({ id: item.deviceId, label: item.label || `Browser camera ${index + 1}` })), 'Default browser camera', draft.browserCamera);
   fillSelect(ui.browserMicrophone, microphones.map((item, index) => ({ id: item.deviceId, label: item.label || `Browser microphone ${index + 1}` })), 'Default browser microphone', draft.browserMicrophone);
   ui.browserDeviceCount.textContent = `${cameras.length} CAM / ${microphones.length} MIC`;
+}
+
+function loadSpeechVoices(selected = ui.ttsVoice.value) {
+  if (!('speechSynthesis' in window)) { ui.ttsVoice.disabled = true; ui.testTalkback.disabled = true; return; }
+  const voices = speechSynthesis.getVoices(); const items = voices.map((voice) => ({ id: voice.voiceURI, label: `${voice.name} // ${voice.lang}${voice.localService ? ' // LOCAL' : ''}` }));
+  fillSelect(ui.ttsVoice, items, 'System default voice', selected);
+}
+
+function stopRecognitionTest(message = '') {
+  clearTimeout(state.testRecognitionTimer);
+  const recognition = state.testRecognition; state.testRecognition = null;
+  if (recognition) { recognition.onend = null; try { recognition.abort(); } catch {} }
+  ui.testRecognition.textContent = 'TEST RECOGNITION'; ui.testRecognition.classList.remove('active');
+  if (message) ui.voiceConfidence.textContent = message;
+}
+
+function testRecognition() {
+  if (state.testRecognition) { stopRecognitionTest('Recognition test stopped.'); return; }
+  const RecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!RecognitionClass) { ui.voiceTranscript.textContent = 'NOT SUPPORTED'; ui.voiceConfidence.textContent = 'Use Chromium on the laptop or Pi.'; return; }
+  const recognition = new RecognitionClass(); state.testRecognition = recognition;
+  recognition.continuous = false; recognition.interimResults = true; recognition.maxAlternatives = 5; recognition.lang = ui.voiceLanguage.value || 'en-US';
+  ui.voiceTranscript.textContent = 'LISTENING…'; ui.voiceConfidence.textContent = 'Say “Hey Jarvis, show system status”.'; ui.testRecognition.textContent = 'STOP TEST'; ui.testRecognition.classList.add('active');
+  recognition.onresult = (event) => {
+    const result = event.results[event.results.length - 1]; const alternatives = Array.from({ length: result.length }, (_, index) => result[index]);
+    const selected = selectRecognitionAlternative(alternatives, { wakePhrases: normalizeWakePhrases(ui.wakePhrases.value), wakeSensitivity: Number(ui.wakeSensitivity.value), recognitionConfidence: Number(ui.recognitionConfidence.value), preferWake: ui.wakeWord.checked });
+    ui.voiceTranscript.textContent = selected.transcript || 'NO TRANSCRIPT';
+    ui.voiceConfidence.textContent = `${result.isFinal ? 'FINAL' : 'INTERIM'} // ${selected.confidenceKnown ? `${Math.round(selected.confidence * 100)}% CONFIDENCE` : 'CONFIDENCE UNAVAILABLE'} // ${selected.wake.detected ? 'WAKE MATCH' : 'NO WAKE MATCH'}`;
+  };
+  recognition.onerror = (event) => { ui.voiceTranscript.textContent = 'RECOGNITION ERROR'; stopRecognitionTest(event.error.replaceAll('-', ' ').toUpperCase()); };
+  recognition.onend = () => { if (state.testRecognition === recognition) stopRecognitionTest('Recognition test complete.'); };
+  try { recognition.start(); state.testRecognitionTimer = setTimeout(() => stopRecognitionTest('Timed out after 12 seconds.'), 12_000); }
+  catch (error) { ui.voiceTranscript.textContent = 'START FAILED'; stopRecognitionTest(error.message); }
+}
+
+function testTalkback() {
+  if (!('speechSynthesis' in window)) { ui.voiceConfidence.textContent = 'Speech synthesis is unavailable in this browser.'; return; }
+  speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance('Voice core calibrated. I am ready.');
+  utterance.rate = Number(ui.ttsRate.value); utterance.pitch = Number(ui.ttsPitch.value); utterance.volume = Number(ui.ttsVolume.value); utterance.lang = ui.voiceLanguage.value;
+  const voice = speechSynthesis.getVoices().find((item) => item.voiceURI === ui.ttsVoice.value || item.name === ui.ttsVoice.value); if (voice) utterance.voice = voice;
+  utterance.onstart = () => { ui.voiceTranscript.textContent = 'TALKBACK ACTIVE'; ui.voiceConfidence.textContent = voice ? `${voice.name} // ${voice.lang}` : 'System default voice'; };
+  utterance.onend = () => { ui.voiceTranscript.textContent = 'TALKBACK COMPLETE'; };
+  speechSynthesis.speak(utterance);
 }
 
 async function loadDeviceLists(selections = currentSettings()) {
@@ -269,20 +336,28 @@ function monitorAudio() {
   let sum = 0;
   for (const sample of samples) { const value = (sample - 128) / 128; sum += value * value; }
   const level = Math.sqrt(sum / samples.length);
-  const shown = Math.min(100, Math.round(level * 250));
+  const shown = Math.min(100, Math.round(level * 420));
   ui.micReadout.textContent = `${shown}%`;
   ui.micMeter.style.setProperty('--level', `${shown}%`);
   const settings = currentSettings();
   const now = performance.now();
-  if (settings.doubleClap && level > settings.clapSensitivity && !state.clapAbove) {
+  const voiceThreshold = Math.max(.012, state.noiseFloor * 2.8, settings.micSensitivity * .2);
+  const voiceActive = level > voiceThreshold;
+  if (!voiceActive) state.noiseFloor = state.noiseFloor * .985 + level * .015;
+  if (settings.voiceActivity && voiceActive && !state.clapAbove) ui.wakeReadout.textContent = 'VOICE ACTIVITY';
+  else if (settings.voiceActivity && !state.lastClap) ui.wakeReadout.textContent = settings.doubleClap ? 'CLAP LISTENER' : settings.wakeWord ? 'WAKE ARMED' : 'SENSORS ON';
+  const clapThreshold = Math.max(settings.clapSensitivity, state.noiseFloor * 7.5);
+  const impulse = level > clapThreshold && level > state.lastAudioLevel * 1.32;
+  if (settings.doubleClap && impulse && !state.clapAbove) {
     state.clapAbove = true;
     if (state.lastClap && now - state.lastClap <= settings.doubleClapWindow) {
       ui.wakeReadout.textContent = 'DOUBLE CLAP'; ui.wakeReadout.style.color = '#71ffca'; state.lastClap = 0;
       setTimeout(() => { ui.wakeReadout.style.color = ''; }, 1400);
     } else state.lastClap = now;
   }
-  if (level < settings.clapSensitivity * .55) state.clapAbove = false;
+  if (level < clapThreshold * .52) state.clapAbove = false;
   if (state.lastClap && now - state.lastClap > settings.doubleClapWindow) state.lastClap = 0;
+  state.lastAudioLevel = level;
   state.animation = requestAnimationFrame(monitorAudio);
 }
 
@@ -293,7 +368,11 @@ async function startBrowserSensors() {
   if (!needsVideo && !needsAudio) throw new Error('Enable at least one camera or microphone listener in Perception.');
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('This browser does not expose camera or microphone access.');
   const video = needsVideo ? { deviceId: settings.browserCamera ? { exact: settings.browserCamera } : undefined } : false;
-  const audio = needsAudio ? { deviceId: settings.browserMicrophone ? { exact: settings.browserMicrophone } : undefined, echoCancellation: true, noiseSuppression: true } : false;
+  const audio = needsAudio ? {
+    deviceId: settings.browserMicrophone ? { exact: settings.browserMicrophone } : undefined,
+    channelCount: { ideal: 1 }, sampleRate: { ideal: 16000 }, echoCancellation: settings.echoCancellation,
+    noiseSuppression: settings.noiseSuppression, autoGainControl: settings.autoGainControl
+  } : false;
   state.stream = await navigator.mediaDevices.getUserMedia({ video, audio });
   await enumerateBrowserDevices();
   if (video) {
@@ -368,7 +447,7 @@ function onFormInput(event) {
   updateOutputs();
   updateDirty();
   previewSettings();
-  if (state.sensorsActive && (event.target.matches('[data-sensor-source]') || event.target.name === 'source-card' || ['person-detection', 'voice-activity', 'wake-word', 'double-clap', 'gesture-control'].includes(event.target.id))) {
+  if (state.sensorsActive && (event.target.matches('[data-sensor-source]') || event.target.name === 'source-card' || ['person-detection', 'voice-activity', 'wake-word', 'double-clap', 'gesture-control', 'echo-cancellation', 'noise-suppression', 'auto-gain-control'].includes(event.target.id))) {
     stopSensors({ quiet: true });
     setMessage('Sensor configuration changed. Calibration stopped safely; restart it to test the new profile.');
   } else if (state.dirty) setMessage('Unsaved changes are live in the preview. Save to apply them on the Pi.');
@@ -407,6 +486,8 @@ for (const button of $$('[data-accent]')) button.addEventListener('click', () =>
 
 ui.start.addEventListener('click', () => void startSensors());
 ui.stop.addEventListener('click', () => stopSensors());
+ui.testRecognition.addEventListener('click', testRecognition);
+ui.testTalkback.addEventListener('click', testTalkback);
 ui.testWake.addEventListener('click', async () => {
   try {
     await json('/api/wake/test', { method: 'POST' });
@@ -428,16 +509,21 @@ ui.openPreview.addEventListener('click', () => window.open('/', '_blank', 'noope
 ui.preview.addEventListener('load', previewSettings);
 
 window.addEventListener('beforeunload', (event) => {
-  stopSensors({ quiet: true });
+  stopSensors({ quiet: true }); stopRecognitionTest(); window.speechSynthesis?.cancel?.();
   if (state.dirty) { event.preventDefault(); event.returnValue = ''; }
 });
+
+if ('speechSynthesis' in window) speechSynthesis.addEventListener('voiceschanged', () => loadSpeechVoices(ui.ttsVoice.value));
 
 async function init() {
   try {
     await window.ensureDashboardAuthentication?.();
     const [settings, status, config] = await Promise.all([json('/api/settings'), json('/api/status'), json('/api/config')]);
-    ui.version.textContent = config.version || '3.1.0';
+    ui.version.textContent = config.version || '3.2.0';
     ui.node.textContent = config.piOnly ? 'PI-5' : 'LOCAL';
+    const recognitionSupported = Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
+    ui.speechSupport.textContent = recognitionSupported ? 'READY' : 'AUDIO ONLY'; ui.speechSupport.classList.toggle('active', recognitionSupported);
+    loadSpeechVoices(settings.ttsVoice || '');
     state.savedSettings = { ...settings };
     await loadDeviceLists(settings);
     renderGoogle(status.google || {});

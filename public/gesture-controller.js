@@ -11,6 +11,7 @@ export class GestureController {
   constructor({ video, canvas, cursor, onGesture = () => {}, onStatus = () => {} }) {
     this.video = video; this.canvas = canvas; this.cursor = cursor; this.onGesture = onGesture; this.onStatus = onStatus;
     this.landmarker = null; this.stream = null; this.raf = 0; this.lastVideoTime = -1; this.lastDetectionAt = 0; this.sensitivity = .42;
+    this.smoothed = null; this.pinched = false; this.smoothedSpread = 0; this.missingFrames = 0;
   }
 
   async load() {
@@ -26,7 +27,7 @@ export class GestureController {
   }
 
   async start({ deviceId = '', sensitivity = .42 } = {}) {
-    await this.stop(); this.sensitivity = Number(sensitivity) || .42; await this.load();
+    await this.stop(); this.sensitivity = Number(sensitivity) || .42; this.smoothed = null; this.pinched = false; this.smoothedSpread = 0; this.missingFrames = 0; await this.load();
     this.stream = await navigator.mediaDevices.getUserMedia({
       video: { deviceId: deviceId ? { exact: deviceId } : undefined, width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24, max: 30 } },
       audio: false
@@ -48,17 +49,26 @@ export class GestureController {
   loop = () => {
     if (!this.stream) return;
     const now = performance.now();
-    if (this.video.readyState >= 2 && this.video.currentTime !== this.lastVideoTime && now - this.lastDetectionAt >= 75) {
+    if (this.video.readyState >= 2 && this.video.currentTime !== this.lastVideoTime && now - this.lastDetectionAt >= 66) {
       this.lastVideoTime = this.video.currentTime; this.lastDetectionAt = now;
       const result = this.landmarker.detectForVideo(this.video, now); const hands = result.landmarks || []; this.draw(hands);
       if (hands.length) {
-        const hand = hands[0]; const x = 1 - hand[8].x; const y = hand[8].y; const threshold = .035 + this.sensitivity * .085;
-        const pinched = distance(hand[4], hand[8]) < threshold;
+        this.missingFrames = 0;
+        const hand = hands[0]; const rawX = 1 - hand[8].x; const rawY = hand[8].y; const smoothing = this.pinched ? .2 : .32;
+        if (!this.smoothed) this.smoothed = { x: rawX, y: rawY };
+        this.smoothed.x += (rawX - this.smoothed.x) * smoothing; this.smoothed.y += (rawY - this.smoothed.y) * smoothing;
+        const x = this.smoothed.x; const y = this.smoothed.y; const threshold = .035 + this.sensitivity * .085; const pinchDistance = distance(hand[4], hand[8]);
+        if (!this.pinched && pinchDistance < threshold * .92) this.pinched = true;
+        else if (this.pinched && pinchDistance > threshold * 1.28) this.pinched = false;
         let spread = 0;
-        if (hands.length > 1) spread = distance(hands[0][9], hands[1][9]);
-        this.cursor.hidden = false; this.cursor.classList.toggle('pinched', pinched); this.cursor.style.left = `${x * 100}%`; this.cursor.style.top = `${y * 100}%`;
-        this.onGesture({ x, y, pinched, hands: hands.length, spread }); this.onStatus(pinched ? 'PINCH // GRAB' : `${hands.length} HAND${hands.length > 1 ? 'S' : ''} TRACKED`);
-      } else { this.cursor.hidden = true; this.onStatus('SHOW HAND TO CAMERA'); }
+        if (hands.length > 1) { const rawSpread = distance(hands[0][9], hands[1][9]); this.smoothedSpread += (rawSpread - this.smoothedSpread) * .22; spread = this.smoothedSpread; }
+        else this.smoothedSpread *= .82;
+        this.cursor.hidden = false; this.cursor.classList.toggle('pinched', this.pinched); this.cursor.style.left = `${x * 100}%`; this.cursor.style.top = `${y * 100}%`;
+        this.onGesture({ x, y, pinched: this.pinched, hands: hands.length, spread }); this.onStatus(this.pinched ? 'PINCH // GRAB' : `${hands.length} HAND${hands.length > 1 ? 'S' : ''} TRACKED`);
+      } else {
+        this.missingFrames += 1;
+        if (this.missingFrames > 3) { this.cursor.hidden = true; this.pinched = false; this.smoothed = null; this.onStatus('SHOW HAND TO CAMERA'); }
+      }
     }
     this.raf = requestAnimationFrame(this.loop);
   };
@@ -68,6 +78,7 @@ export class GestureController {
     if (this.video) { this.video.pause(); this.video.srcObject = null; this.video.hidden = true; }
     if (this.canvas) { this.canvas.getContext('2d').clearRect(0, 0, this.canvas.width, this.canvas.height); this.canvas.hidden = true; }
     if (this.cursor) this.cursor.hidden = true;
+    this.smoothed = null; this.pinched = false; this.smoothedSpread = 0; this.missingFrames = 0;
     this.onStatus('GESTURE STANDBY');
   }
 

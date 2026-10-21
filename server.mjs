@@ -49,13 +49,21 @@ function safeNumber(value, fallback, min, max) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? clamp(parsed, min, max) : fallback;
 }
+function wakePhrases(value) {
+  const source = Array.isArray(value) ? value : String(value || '').split(',');
+  const phrases = source.map((item) => cleanText(item, 40).toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 8);
+  return [...new Set(phrases.length ? phrases : ['hey jarvis', 'jarvis'])];
+}
 
 const defaultSettings = {
   source: 'browser', browserCamera: '', browserMicrophone: '', piCamera: '', piMicrophone: '',
   personDetection: true, voiceActivity: true, wakeWord: true, doubleClap: true,
   autoSpeak: true, autoRepair: asBool(process.env.AUTO_REPAIR_ENABLED, process.platform === 'linux'), personThreshold: 0.55,
   micSensitivity: 0.18, wakeSensitivity: 0.55, clapSensitivity: 0.34,
-  doubleClapWindow: 700, scanInterval: 900, gestureControl: true, gestureSensitivity: 0.42, accent: '#64e8ff'
+  doubleClapWindow: 700, scanInterval: 900, gestureControl: true, gestureSensitivity: 0.42, accent: '#64e8ff',
+  voiceLanguage: 'en-US', wakePhrases: ['hey jarvis', 'jarvis'], recognitionConfidence: 0.35, commandSilenceMs: 700,
+  voiceAutoStart: true, echoCancellation: true, noiseSuppression: true, autoGainControl: true, bargeIn: false,
+  ttsVoice: '', ttsRate: 1.02, ttsPitch: 0.92, ttsVolume: 1, wakeResponse: 'Yes?'
 };
 let settings = { ...defaultSettings };
 
@@ -76,7 +84,16 @@ function validateSettings(input = {}) {
     gestureControl: input.gestureControl !== false,
     gestureSensitivity: safeNumber(input.gestureSensitivity, defaultSettings.gestureSensitivity, 0.18, 0.8),
     doubleClapWindow: Math.round(safeNumber(input.doubleClapWindow, defaultSettings.doubleClapWindow, 300, 1500)),
-    scanInterval: Math.round(safeNumber(input.scanInterval, defaultSettings.scanInterval, 300, 4000)), accent
+    scanInterval: Math.round(safeNumber(input.scanInterval, defaultSettings.scanInterval, 300, 4000)), accent,
+    voiceLanguage: /^[a-z]{2,3}(?:-[A-Z]{2})?$/.test(String(input.voiceLanguage || '')) ? String(input.voiceLanguage) : defaultSettings.voiceLanguage,
+    wakePhrases: wakePhrases(input.wakePhrases),
+    recognitionConfidence: safeNumber(input.recognitionConfidence, defaultSettings.recognitionConfidence, 0.1, 0.95),
+    commandSilenceMs: Math.round(safeNumber(input.commandSilenceMs, defaultSettings.commandSilenceMs, 300, 1800)),
+    voiceAutoStart: input.voiceAutoStart !== false, echoCancellation: input.echoCancellation !== false,
+    noiseSuppression: input.noiseSuppression !== false, autoGainControl: input.autoGainControl !== false, bargeIn: input.bargeIn === true,
+    ttsVoice: cleanText(input.ttsVoice, 180), ttsRate: safeNumber(input.ttsRate, defaultSettings.ttsRate, 0.7, 1.4),
+    ttsPitch: safeNumber(input.ttsPitch, defaultSettings.ttsPitch, 0.6, 1.3), ttsVolume: safeNumber(input.ttsVolume, defaultSettings.ttsVolume, 0.2, 1),
+    wakeResponse: input.wakeResponse == null ? defaultSettings.wakeResponse : cleanText(input.wakeResponse, 60)
   };
 }
 async function loadSettings() {
@@ -296,7 +313,7 @@ function enforceSameOrigin(request, response, next) {
   response.status(403).json({ error: 'Cross-origin mutation blocked.' });
 }
 app.use('/api', enforceSameOrigin);
-app.get('/api/health', (_request, response) => response.json({ status: 'ok', version: '3.1.0' }));
+app.get('/api/health', (_request, response) => response.json({ status: 'ok', version: '3.2.0' }));
 app.get('/api/auth/status', (request, response) => response.json({ required: Boolean(dashboardAccessPin), authenticated: dashboardAuthenticated(request) }));
 app.post('/api/auth/login', (request, response) => {
   if (!dashboardAccessPin) { response.json({ ok: true, required: false }); return; }
@@ -316,7 +333,7 @@ app.post('/api/auth/logout', (request, response) => {
 });
 app.use('/api', requireDashboardAuth);
 
-app.get('/api/config', (_request, response) => response.json({ name: 'JARVIS', version: '3.1.0', ttsMode: process.env.TTS_MODE || 'local', fishVoiceId: process.env.FISH_AUDIO_VOICE_ID || '', model: primaryModel, models, agents: Object.fromEntries(Object.entries(agentRoles).map(([route, role]) => [route, role.name])), timezone: 'Asia/Dubai', piOnly: true, operationsEnabled: Boolean(process.env.OPS_CONTROL_PIN), printerConfigured: printerClient.configured }));
+app.get('/api/config', (_request, response) => response.json({ name: 'JARVIS', version: '3.2.0', ttsMode: process.env.TTS_MODE || 'local', fishVoiceId: process.env.FISH_AUDIO_VOICE_ID || '', model: primaryModel, models, agents: Object.fromEntries(Object.entries(agentRoles).map(([route, role]) => [route, role.name])), timezone: 'Asia/Dubai', piOnly: true, operationsEnabled: Boolean(process.env.OPS_CONTROL_PIN), printerConfigured: printerClient.configured }));
 app.get('/api/metrics', async (_request, response) => response.json(await systemMetrics()));
 app.get('/api/storage', async (_request, response) => response.json({ devices: await storageDevices() }));
 app.get('/api/docker', async (_request, response) => response.json(await dockerSummary()));

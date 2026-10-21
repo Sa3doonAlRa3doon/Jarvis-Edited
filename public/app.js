@@ -1,5 +1,6 @@
 import { createKnowledgeGalaxy } from './galaxy.js';
 import { GestureController } from './gesture-controller.js';
+import { VoiceController } from './voice-controller.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -35,10 +36,9 @@ const state = {
   config: null, settings: null, metrics: null, status: null, storage: [], docker: null,
   agents: { lanes: { code: [], research: [], monitor: [] }, traces: [] }, events: [], eventSummary: {},
   history: [], lane: 'code', operation: null, operationKind: 'system', operationStatus: null, lastAssistant: '',
-  galaxy: null, gesture: null, printer: { configured: false, online: false, state: 'checking' },
+  galaxy: null, gesture: null, voice: null, printer: { configured: false, online: false, state: 'checking' },
   chart: { cpu: Array(52).fill(0), ram: Array(52).fill(0), gpu: Array(52).fill(0) },
-  clap: { stream: null, context: null, analyser: null, raf: 0, firstAt: 0, above: false },
-  neuralEnergy: 0.22, coreMode: 'system'
+  neuralEnergy: 0.22, coreMode: 'system', voiceState: 'standby', voiceLevel: 0
 };
 
 const laneLabels = {
@@ -286,23 +286,52 @@ function appendMessage(role, content, source = '') {
   ui.messages.append(article); ui.messages.scrollTop = ui.messages.scrollHeight;
 }
 
+function updateVoiceVisual(mode = 'standby', level = state.voiceLevel) {
+  state.voiceState = mode; state.voiceLevel = Number(level) || 0; document.body.dataset.voiceState = mode;
+  ui.voiceButton?.classList.toggle('listening', state.voice?.active && ['listening', 'hearing', 'armed'].includes(mode));
+  ui.voiceButton?.classList.toggle('speaking', mode === 'speaking');
+  ui.voiceButton?.setAttribute('aria-pressed', String(Boolean(state.voice?.active)));
+  state.galaxy?.setActivity(mode, state.voiceLevel);
+}
+
+function selectBrowserVoice() {
+  if (!('speechSynthesis' in window)) return null;
+  const voices = speechSynthesis.getVoices(); const selected = state.settings?.ttsVoice;
+  return voices.find((voice) => voice.voiceURI === selected || voice.name === selected)
+    || voices.find((voice) => voice.lang === state.settings?.voiceLanguage)
+    || voices.find((voice) => voice.lang?.startsWith(String(state.settings?.voiceLanguage || 'en').split('-')[0]))
+    || voices[0] || null;
+}
+
 async function speak(text) {
   if (!state.settings?.autoSpeak || !text) return;
+  state.voice?.setSpeaking(true); updateVoiceVisual('speaking', .72);
   if (state.config?.ttsMode === 'fish') {
     try {
       const response = await fetch('/api/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, mode: 'fish' }) });
-      if (response.ok) { const audio = new Audio(URL.createObjectURL(await response.blob())); await audio.play(); return; }
+      if (response.ok) {
+        const url = URL.createObjectURL(await response.blob()); const audio = new Audio(url); audio.volume = Number(state.settings?.ttsVolume ?? 1);
+        await new Promise((resolve, reject) => { audio.onended = resolve; audio.onerror = reject; audio.play().catch(reject); });
+        URL.revokeObjectURL(url); state.voice?.setSpeaking(false); return;
+      }
     } catch {}
   }
   if ('speechSynthesis' in window) {
-    speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance(text); utterance.rate = 1.02; utterance.pitch = .92; speechSynthesis.speak(utterance);
+    await new Promise((resolve) => {
+      speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance(String(text).slice(0, 1800));
+      utterance.rate = Number(state.settings?.ttsRate ?? 1.02); utterance.pitch = Number(state.settings?.ttsPitch ?? .92); utterance.volume = Number(state.settings?.ttsVolume ?? 1);
+      const voice = selectBrowserVoice(); if (voice) utterance.voice = voice;
+      utterance.onend = resolve; utterance.onerror = resolve; speechSynthesis.speak(utterance);
+    });
   }
+  state.voice?.setSpeaking(false);
 }
 
 function handleWake(event) {
   ui.wakeFlash.classList.remove('active'); void ui.wakeFlash.offsetWidth; ui.wakeFlash.classList.add('active');
   ui.wakeState.textContent = event?.detail?.kind === 'double_clap' ? 'CLAP' : 'HEARD'; state.neuralEnergy = 1;
-  ui.prompt.focus(); void speak('Yes?');
+  updateVoiceVisual('armed', 1);
+  if (!isEmbeddedPreview() && state.settings?.wakeResponse) void speak(state.settings.wakeResponse);
   setTimeout(() => { ui.wakeState.textContent = state.status?.wake?.ready ? 'LISTENING' : 'STANDBY'; }, 2200);
 }
 
@@ -318,42 +347,21 @@ async function sendPrompt(prompt) {
     openPrinterAction(directPrinterAction); return;
   }
   appendMessage('user', text); state.history.push({ role: 'user', content: text }); state.history = state.history.slice(-16);
-  ui.prompt.value = ''; ui.send.disabled = true; ui.send.innerHTML = '<span>LINK</span><b>RUNNING</b>'; state.neuralEnergy = .95;
+  ui.prompt.value = ''; ui.send.disabled = true; ui.send.innerHTML = '<span>LINK</span><b>RUNNING</b>'; state.neuralEnergy = .95; updateVoiceVisual('processing', .92);
   try {
     const result = await json('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: text, history: state.history.slice(0, -1) }) });
     ui.route.textContent = result.route;
     activateCoreMode(routeModes[result.route] || 'system');
     state.lastAssistant = result.content; appendMessage('assistant', result.content, result.source); state.history.push({ role: 'assistant', content: result.content }); state.history = state.history.slice(-16); void speak(result.content);
   } catch (error) { appendMessage('error', error.message); }
-  finally { ui.send.disabled = false; ui.send.innerHTML = '<span>RUN</span><b>EXECUTE</b>'; state.neuralEnergy = .42; }
+  finally { ui.send.disabled = false; ui.send.innerHTML = '<span>RUN</span><b>EXECUTE</b>'; state.neuralEnergy = .42; if (state.voiceState !== 'speaking') updateVoiceVisual(state.voice?.active ? 'listening' : 'standby', .18); }
 }
 
-async function toggleBrowserClap() {
-  if (state.clap.stream) { stopBrowserClap(); return; }
+async function toggleVoice() {
+  if (!state.voice) return;
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: state.settings?.browserMicrophone ? { deviceId: { exact: state.settings.browserMicrophone }, echoCancellation: true, noiseSuppression: true } : true, video: false });
-    const context = new AudioContext(); const analyser = context.createAnalyser(); analyser.fftSize = 1024; context.createMediaStreamSource(stream).connect(analyser);
-    Object.assign(state.clap, { stream, context, analyser, firstAt: 0, above: false }); ui.voiceButton.classList.add('listening'); ui.voiceButton.title = 'Browser double-clap listener active'; monitorBrowserClap();
-  } catch (error) { appendMessage('error', `Microphone unavailable: ${error.message}`); }
-}
-function monitorBrowserClap() {
-  if (!state.clap.analyser) return;
-  const samples = new Uint8Array(state.clap.analyser.fftSize); state.clap.analyser.getByteTimeDomainData(samples);
-  let sum = 0; for (const sample of samples) { const value = (sample - 128) / 128; sum += value * value; }
-  const level = Math.sqrt(sum / samples.length); const threshold = state.settings?.clapSensitivity || .34; const now = performance.now();
-  if (level > threshold && !state.clap.above) {
-    state.clap.above = true;
-    const windowMs = state.settings?.doubleClapWindow || 700;
-    if (state.clap.firstAt && now - state.clap.firstAt <= windowMs) { state.clap.firstAt = 0; handleWake({ detail: { kind: 'double_clap' } }); }
-    else state.clap.firstAt = now;
-  }
-  if (level < threshold * .55) state.clap.above = false;
-  if (state.clap.firstAt && now - state.clap.firstAt > (state.settings?.doubleClapWindow || 700)) state.clap.firstAt = 0;
-  state.clap.raf = requestAnimationFrame(monitorBrowserClap);
-}
-function stopBrowserClap() {
-  cancelAnimationFrame(state.clap.raf); state.clap.stream?.getTracks().forEach((track) => track.stop()); state.clap.context?.close();
-  Object.assign(state.clap, { stream: null, context: null, analyser: null, raf: 0, firstAt: 0, above: false }); ui.voiceButton.classList.remove('listening'); ui.voiceButton.title = 'Enable browser double-clap listener';
+    await state.voice.toggle(state.settings); ui.voiceButton.title = state.voice.active ? 'Stop JARVIS voice listener' : 'Start JARVIS voice listener';
+  } catch (error) { appendMessage('error', `Microphone unavailable: ${error.message}`); updateVoiceVisual('error', 1); }
 }
 
 function isEmbeddedPreview() { try { return window.self !== window.top; } catch { return true; } }
@@ -446,9 +454,18 @@ async function toggleGestures() {
   finally { ui.gestureButton.disabled = false; }
 }
 
+async function autoStartGesturesIfGranted() {
+  if (isEmbeddedPreview() || state.settings?.source !== 'browser' || state.settings?.gestureControl === false || !navigator.permissions?.query) return false;
+  try {
+    const permission = await navigator.permissions.query({ name: 'camera' });
+    if (permission.state !== 'granted') return false;
+    await toggleGestures(); return Boolean(state.gesture?.active);
+  } catch { return false; }
+}
+
 ui.composer.addEventListener('submit', (event) => { event.preventDefault(); void sendPrompt(ui.prompt.value); });
 ui.prompt.addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); ui.composer.requestSubmit(); } });
-ui.voiceButton.addEventListener('click', () => void toggleBrowserClap());
+ui.voiceButton.addEventListener('click', () => void toggleVoice());
 $$('[data-prompt]').forEach((button) => button.addEventListener('click', () => void sendPrompt(button.dataset.prompt)));
 $$('button[data-core-mode]').forEach((button) => button.addEventListener('click', () => activateCoreMode(button.dataset.coreMode, { focus: true })));
 $$('.lane-tabs button').forEach((button) => button.addEventListener('click', () => { state.lane = button.dataset.lane; renderLane(); }));
@@ -463,8 +480,14 @@ ui.operationClose.addEventListener('click', () => ui.operationDialog.close());
 window.addEventListener('resize', () => { syncFullscreenUi(); drawTelemetry(); });
 document.addEventListener('fullscreenchange', syncFullscreenUi);
 document.addEventListener('webkitfullscreenchange', syncFullscreenUi);
-window.addEventListener('message', (event) => { if (event.origin === location.origin && event.data?.type === 'jarvis-settings-preview') { state.settings = { ...state.settings, ...event.data.settings }; document.documentElement.style.setProperty('--accent', state.settings.accent); } });
-window.addEventListener('beforeunload', () => { stopBrowserClap(); void state.gesture?.stop(); });
+window.addEventListener('message', (event) => { if (event.origin === location.origin && event.data?.type === 'jarvis-settings-preview') { state.settings = { ...state.settings, ...event.data.settings }; state.voice?.configure(state.settings); document.documentElement.style.setProperty('--accent', state.settings.accent); } });
+window.addEventListener('keydown', (event) => {
+  if (event.target?.matches('input,textarea,select')) return;
+  if (event.key.toLowerCase() === 'v') void toggleVoice();
+  if (event.key.toLowerCase() === 'g') void toggleGestures();
+  if (event.key === 'Escape') { void state.voice?.stop(); void state.gesture?.stop(); }
+});
+window.addEventListener('beforeunload', () => { void state.voice?.stop(); void state.gesture?.stop(); });
 
 async function init() {
   updateClock(); setInterval(updateClock, 1000);
@@ -476,10 +499,22 @@ async function init() {
   if (settings.status === 'fulfilled') { state.settings = settings.value; document.documentElement.style.setProperty('--accent', state.settings.accent); }
   state.galaxy = await createKnowledgeGalaxy({ canvas: ui.brain, inspector: ui.nodeInspector, onStatus: (message) => { ui.galaxyState.textContent = message; } });
   activateCoreMode('system');
+  state.voice = new VoiceController({
+    onState: (mode) => updateVoiceVisual(mode),
+    onLevel: ({ level }) => { state.voiceLevel = level; state.galaxy?.setAudioLevel(level); },
+    onWake: (detail) => handleWake({ detail }),
+    onCommand: (command) => void sendPrompt(command),
+    onTranscript: ({ text, final }) => { if (final && ui.prompt) ui.prompt.value = text; },
+    onError: (error) => { appendMessage('error', error.message); updateVoiceVisual('error', 1); }
+  });
+  state.voice.configure(state.settings || {});
+  updateVoiceVisual('standby', .12);
   state.gesture = new GestureController({
     video: ui.gestureVideo, canvas: ui.gestureCanvas, cursor: ui.gestureCursor,
     onGesture: (gesture) => state.galaxy?.gesture(gesture), onStatus: (message) => { ui.gestureState.textContent = message; }
   });
+  if (!isEmbeddedPreview()) void state.voice.autoStartIfGranted(state.settings).catch(() => {});
+  if (!isEmbeddedPreview()) void autoStartGesturesIfGranted();
   await Promise.all([refreshFast(), refreshSlow()]);
   setInterval(() => void refreshFast(), 2500); setInterval(() => void refreshSlow(), 7000);
 }

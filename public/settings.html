@@ -17,7 +17,7 @@
       </div>
       <div class="settings-health" aria-label="System context">
         <span><i class="pulse-dot"></i> LOCAL NODE <b id="settings-node">PI-5</b></span>
-        <span>BUILD <b id="settings-version">3.1.0</b></span>
+        <span>BUILD <b id="settings-version">3.2.0</b></span>
         <span>PROFILE <b id="settings-profile">LOADING</b></span>
       </div>
       <div class="settings-header-actions">
@@ -36,8 +36,9 @@
           <button type="button" class="active" data-target="devices"><span>01</span><b>DEVICE BUS</b><small>Sensor host &amp; hardware</small></button>
           <button type="button" data-target="sensors"><span>02</span><b>LIVE SENSORS</b><small>Camera &amp; audio test</small></button>
           <button type="button" data-target="perception"><span>03</span><b>PERCEPTION</b><small>Detection &amp; wake controls</small></button>
-          <button type="button" data-target="interface"><span>04</span><b>INTERFACE</b><small>HUD appearance</small></button>
-          <button type="button" data-target="integrations"><span>05</span><b>INTEGRATIONS</b><small>Private Google bridge</small></button>
+          <button type="button" data-target="voice"><span>04</span><b>VOICE CORE</b><small>Recognition &amp; talkback</small></button>
+          <button type="button" data-target="interface"><span>05</span><b>INTERFACE</b><small>HUD appearance</small></button>
+          <button type="button" data-target="integrations"><span>06</span><b>INTEGRATIONS</b><small>Private Google bridge</small></button>
         </div>
         <div class="settings-nav-footer">
           <span>ACCESS PATH</span><code>/settings</code>
@@ -116,8 +117,41 @@
             </div>
           </section>
 
+          <section class="settings-section" data-section="voice" data-search="voice speech recognition accuracy language wake phrase confidence silence echo noise gain talkback tts voice rate pitch volume barge microphone">
+            <div class="settings-section-head"><div><span>SECTION 04</span><h2>VOICE INTELLIGENCE CORE</h2><p>Tune wake matching, command transcription, acoustic cleanup, and JARVIS talkback.</p></div><span class="section-state" id="speech-support">CHECKING</span></div>
+            <div class="voice-status-card">
+              <div><span>LIVE TRANSCRIPT</span><b id="voice-transcript">VOICE TEST STANDBY</b><small id="voice-confidence">No speech sample captured</small></div>
+              <i aria-hidden="true"><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b></i>
+            </div>
+            <div class="settings-grid voice-grid">
+              <label class="setting" data-search="speech language accent locale"><span>RECOGNITION LANGUAGE</span><select id="voice-language"><option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="en-AE">English (UAE)</option><option value="ar-AE">Arabic (UAE)</option></select><small>Choose the language and accent closest to your speech.</small></label>
+              <label class="setting" data-search="wake phrase jarvis aliases"><span>WAKE PHRASES</span><input id="wake-phrases" type="text" maxlength="160" placeholder="hey jarvis, jarvis"><small>Comma-separated phrases; common Jarvis mishearings are corrected automatically.</small></label>
+              <label class="setting" data-search="talkback voice speaker"><span>LOCAL TALKBACK VOICE</span><select id="tts-voice"><option value="">System default voice</option></select><small>Uses an installed browser or operating-system voice.</small></label>
+              <label class="setting" data-search="wake response acknowledgement"><span>WAKE ACKNOWLEDGEMENT</span><input id="wake-response" type="text" maxlength="60" placeholder="Yes?"><small>Short reply after JARVIS or a double clap. Leave blank for silent wake.</small></label>
+            </div>
+            <div class="toggle-grid voice-toggles">
+              <label class="switch" data-search="voice automatic start permission"><span><b>AUTO-START WHEN ALLOWED</b><small>Starts only after microphone permission was already granted</small></span><input id="voice-auto-start" type="checkbox"><i></i></label>
+              <label class="switch" data-search="echo cancellation"><span><b>ECHO CANCELLATION</b><small>Reduces speaker feedback into the microphone</small></span><input id="echo-cancellation" type="checkbox"><i></i></label>
+              <label class="switch" data-search="noise suppression"><span><b>NOISE SUPPRESSION</b><small>Reduces fans and steady room noise</small></span><input id="noise-suppression" type="checkbox"><i></i></label>
+              <label class="switch" data-search="automatic gain control"><span><b>AUTO GAIN CONTROL</b><small>Balances quiet and loud speech</small></span><input id="auto-gain-control" type="checkbox"><i></i></label>
+              <label class="switch" data-search="barge interrupt talkback"><span><b>BARGE-IN</b><small>Allow speech while JARVIS is talking; may increase echo</small></span><input id="barge-in" type="checkbox"><i></i></label>
+            </div>
+            <div class="calibration-grid voice-calibration">
+              <label class="setting" data-search="recognition confidence accuracy"><span>MINIMUM SPEECH CONFIDENCE <output id="recognition-confidence-output"></output></span><input id="recognition-confidence" type="range" min="0.1" max="0.95" step="0.05"><small>Raise this if background speech becomes commands.</small></label>
+              <label class="setting" data-search="command silence debounce pause"><span>COMMAND END SILENCE <output id="command-silence-output"></output></span><input id="command-silence" type="range" min="300" max="1800" step="50"><small>Wait time used to join nearby final transcript segments.</small></label>
+              <label class="setting" data-search="speech speed rate"><span>TALKBACK SPEED <output id="tts-rate-output"></output></span><input id="tts-rate" type="range" min="0.7" max="1.4" step="0.01"><small>Speaking speed for the local voice.</small></label>
+              <label class="setting" data-search="speech pitch"><span>TALKBACK PITCH <output id="tts-pitch-output"></output></span><input id="tts-pitch" type="range" min="0.6" max="1.3" step="0.01"><small>Lower values create a deeper JARVIS tone.</small></label>
+              <label class="setting full" data-search="speech volume"><span>TALKBACK VOLUME <output id="tts-volume-output"></output></span><input id="tts-volume" type="range" min="0.2" max="1" step="0.05"><small>Browser voice volume, independent from the Pi master volume.</small></label>
+            </div>
+            <div class="voice-actions">
+              <button class="sensor-button primary" id="test-recognition" type="button">TEST RECOGNITION</button>
+              <button class="sensor-button" id="test-talkback" type="button">TEST TALKBACK</button>
+              <p>Recognition quality is tested in this browser. The exact selected input powers level, VAD, and clap analysis; Chromium speech recognition may still follow the operating-system default microphone.</p>
+            </div>
+          </section>
+
           <section class="settings-section" data-section="interface" data-search="interface hud accent color preview screen appearance cyan gold">
-            <div class="settings-section-head"><div><span>SECTION 04</span><h2>INTERFACE SIGNATURE</h2><p>Tune the command screen without leaving this protected route.</p></div><span class="section-state">LIVE PREVIEW</span></div>
+            <div class="settings-section-head"><div><span>SECTION 05</span><h2>INTERFACE SIGNATURE</h2><p>Tune the command screen without leaving this protected route.</p></div><span class="section-state">LIVE PREVIEW</span></div>
             <div class="accent-control">
               <label class="setting" data-search="hud accent color"><span>HUD ACCENT COLOR</span><input id="accent" type="color"><small>Updates the reactor and telemetry highlights immediately.</small></label>
               <div class="accent-presets" role="group" aria-label="Accent presets">
@@ -131,7 +165,7 @@
           </section>
 
           <section class="settings-section" data-section="integrations" data-search="google integration drive gmail calendar tasks contacts oauth private">
-            <div class="settings-section-head"><div><span>SECTION 05</span><h2>PRIVATE INTEGRATION BRIDGE</h2><p>Read-only status of the Google connectors installed in OpenJarvis on the Pi.</p></div><span class="section-state" id="google-state">CHECKING</span></div>
+            <div class="settings-section-head"><div><span>SECTION 06</span><h2>PRIVATE INTEGRATION BRIDGE</h2><p>Read-only status of the Google connectors installed in OpenJarvis on the Pi.</p></div><span class="section-state" id="google-state">CHECKING</span></div>
             <div class="google-grid" id="google-grid"></div>
             <div class="privacy-callout google"><b>CREDENTIAL ISOLATION</b><p id="google-note">Google access belongs to OpenJarvis on the Pi. Credentials never enter this browser or the dashboard package.</p></div>
           </section>

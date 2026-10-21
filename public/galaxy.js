@@ -79,6 +79,10 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
   let currentFormation = Float32Array.from(baseFormation);
   let activeMode = 'system';
   let morphProgress = 1;
+  let activityMode = 'standby';
+  let audioLevel = 0;
+  let targetAudioLevel = 0;
+  let activityBoost = 0;
 
   function formationFor(mode) {
     if (mode === 'system') return Float32Array.from(baseFormation);
@@ -179,6 +183,20 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
   let gesturePrevious = null;
 
   const modeColors = { system: 0x64e8ff, docker: 0x71ffca, printer: 0xf5bd5c, agents: 0xee76b8, research: 0x84f6d5, memory: 0x92b8ff };
+  const activityColors = { hearing: 0x71ffca, armed: 0xf5bd5c, processing: 0xee76b8, speaking: 0x64e8ff, error: 0xff657f };
+
+  function applyCoreColor(color) {
+    pointLight.color.setHex(color); core.material.emissive.setHex(color); coreRing.material.color.setHex(color); coreGlow.material.color.setHex(color); orbitalRings[0]?.material.color.setHex(color);
+  }
+
+  function setAudioLevel(value = 0) { targetAudioLevel = Math.min(1, Math.max(0, Number(value) || 0)); }
+
+  function setActivity(mode = 'standby', intensity = 0) {
+    activityMode = mode;
+    activityBoost = Math.max(activityBoost, Math.min(1, Math.max(0, Number(intensity) || 0)));
+    applyCoreColor(activityColors[mode] || modeColors[activeMode]);
+    return activityMode;
+  }
 
   function setMode(mode = 'system') {
     if (!Object.hasOwn(modeColors, mode)) mode = 'system';
@@ -186,8 +204,8 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
     const from = brainGeometry.getAttribute('aFrom'); const to = brainGeometry.getAttribute('aTo');
     from.array.set(currentFormation); to.array.set(next); from.needsUpdate = true; to.needsUpdate = true;
     currentFormation = next; activeMode = mode; morphProgress = 0;
-    const color = modeColors[mode]; pointLight.color.setHex(color); core.material.emissive.setHex(color); coreRing.material.color.setHex(color); coreGlow.material.color.setHex(color);
-    orbitalRings[0]?.material.color.setHex(color); targetDistance = mode === 'research' ? 23 : mode === 'printer' ? 20 : 21.5; focusPoint.set(0, 0, 0);
+    const color = activityColors[activityMode] || modeColors[mode]; applyCoreColor(color);
+    targetDistance = mode === 'research' ? 23 : mode === 'printer' ? 20 : 21.5; focusPoint.set(0, 0, 0);
     onStatus(`MATRIX // ${mode.toUpperCase()}`); return mode;
   }
 
@@ -301,15 +319,22 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
   const clock = new THREE.Clock();
   function animate() {
     const elapsed = clock.getElapsedTime();
+    audioLevel += (targetAudioLevel - audioLevel) * .18;
+    activityBoost *= .965;
+    const activeDrive = Math.max(audioLevel, activityBoost);
+    const stateDrive = activityMode === 'processing' ? .62 : activityMode === 'speaking' ? .48 : activityMode === 'armed' ? .72 : activityMode === 'error' ? .8 : 0;
+    const drive = Math.max(activeDrive, stateDrive);
     morphProgress = Math.min(1, morphProgress + .018);
-    core.rotation.x = elapsed * .08; core.rotation.y = elapsed * .16; coreRing.rotation.z = elapsed * .11;
+    core.rotation.x = elapsed * (.08 + drive * .08); core.rotation.y = elapsed * (.16 + drive * .16); coreRing.rotation.z = elapsed * (.11 + drive * .2);
     if (brainMaterial.userData.shader) { brainMaterial.userData.shader.uniforms.uTime.value = elapsed; brainMaterial.userData.shader.uniforms.uMorph.value = morphProgress; }
-    const breath = 1 + Math.sin(elapsed * 1.12) * .018;
+    const breath = 1 + Math.sin(elapsed * (1.12 + drive * 1.4)) * (.018 + drive * .032) + drive * .045;
     brainCloud.scale.set(breath * (1 + Math.sin(elapsed * .39) * .018), breath * (1 + Math.sin(elapsed * .53 + 1) * .022), breath);
     brainCloud.rotation.y = elapsed * .025; brainCloud.rotation.x = Math.sin(elapsed * .11) * .075;
-    sparks.rotation.y = -elapsed * .032; sparks.rotation.z = Math.sin(elapsed * .21) * .055;
+    brainMaterial.size = .094 + drive * .038; brainMaterial.opacity = Math.min(1, .88 + drive * .12);
+    sparks.rotation.y = -elapsed * (.032 + drive * .08); sparks.rotation.z = Math.sin(elapsed * .21) * (.055 + drive * .04); sparks.material.opacity = Math.min(.92, .52 + drive * .4);
     filaments.rotation.y = elapsed * .014; filaments.rotation.x = Math.sin(elapsed * .16) * .045; filamentMaterial.opacity = .13 + Math.sin(elapsed * 1.34) * .035;
-    coreGlow.material.opacity = .46 + Math.sin(elapsed * 1.45) * .1; coreGlow.scale.setScalar(9.05 + Math.sin(elapsed * 1.08) * .5);
+    coreGlow.material.opacity = Math.min(.9, .46 + Math.sin(elapsed * 1.45) * .1 + drive * .24); coreGlow.scale.setScalar(9.05 + Math.sin(elapsed * 1.08) * .5 + drive * 2.1);
+    core.material.emissiveIntensity = 1.35 + drive * 3.4; coreRing.material.opacity = .28 + drive * .46; pointLight.intensity = 68 + drive * 88;
     orbitalRings.forEach((ring, index) => { ring.rotation.z += (index % 2 ? -1 : 1) * (.00042 + index * .00008); });
     ticks.rotation.z = -elapsed * .03;
     stars.rotation.y = elapsed * .004;
@@ -327,5 +352,5 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
   try { knowledge = await fetch('/api/knowledge').then((response) => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); }); buildGraph(); }
   catch (error) { onStatus(`INDEX OFFLINE // ${error.message}`); knowledge = { nodes: [], links: [], summary: {} }; buildGraph(); }
 
-  return { focusFromText, gesture, resize, setMode, selectById: (id) => selectMesh(meshById.get(id)), get selected() { return selected?.userData?.node || null; }, get mode() { return activeMode; } };
+  return { focusFromText, gesture, resize, setMode, setActivity, setAudioLevel, selectById: (id) => selectMesh(meshById.get(id)), get selected() { return selected?.userData?.node || null; }, get mode() { return activeMode; }, get activity() { return activityMode; } };
 }
