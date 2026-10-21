@@ -8,6 +8,7 @@ const targetDirectory = path.join(project, 'public', 'models', 'coco-ssd');
 const baseUrl = 'https://storage.googleapis.com/tfjs-models/savedmodel/ssdlite_mobilenet_v2';
 
 const assets = [
+  ['model.json', 527315, '3770b2528339b1e3340cb74360e1e40401816b009779aeb8d0cce3a4353ea3a9'],
   ['group1-shard1of5', 4194304, '0e7af0f713e98521252321f7f84892c31cefccccec3ac64c84e5065b75ed5646'],
   ['group1-shard2of5', 4194304, '74cc6cfc2c4510c9cd81b8ad4cebf6f6a8f305119bb365ce0eb96276da38519a'],
   ['group1-shard3of5', 4194304, '50383033f893eae136392a403e8f70ade5efd90867df5695c4ca5ac640e14f38'],
