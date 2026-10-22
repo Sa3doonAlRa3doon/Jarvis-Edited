@@ -32,7 +32,7 @@ for (const shard of shards) { const stats = await fs.stat(path.join(modelDirecto
 const handModel = await fs.readFile(path.join(project, 'public', 'models', 'hand-landmarker', 'hand_landmarker.task'));
 assert.equal(handModel.length, 7819105, 'Unexpected hand landmark model size.');
 
-assert.equal(packageJson.version, '3.2.0');
+assert.equal(packageJson.version, '3.3.0');
 assert.match(server, /app\.get\('\/settings'/);
 assert.match(server, /v1\/traces\?limit=40/);
 assert.match(server, /timingSafeEqual/);
@@ -80,12 +80,20 @@ assert.match(voiceController, /maxAlternatives = 5/);
 assert.match(voiceController, /echoCancellation/);
 assert.match(voiceController, /noiseSuppression/);
 assert.match(voiceController, /isDuplicateCommand/);
+assert.match(voiceController, /processLocally/);
+assert.match(voiceController, /SpeechRecognitionPhrase/);
+assert.match(voiceController, /startRecognitionWithTrack/);
 assert.match(voiceUtils, /findWakePhrase/);
 assert.match(voiceUtils, /selectRecognitionAlternative/);
+assert.match(voiceUtils, /normalizeVocabulary/);
+assert.match(voiceUtils, /\\p\{L\}/);
 assert.match(settingsHtml, /id="voice-language"/);
+assert.match(settingsHtml, /id="voice-vocabulary"/);
+assert.match(settingsHtml, /id="prefer-local-recognition"/);
 assert.match(settingsHtml, /id="test-recognition"/);
 assert.match(settingsHtml, /id="tts-voice"/);
-assert.match(server, /version: '3\.2\.0'/);
+assert.match(server, /const appVersion = '3\.3\.0'/);
+assert.match(client, /refreshFastPending/);
 assert.match(html, /id="reactor-scan"/);
 assert.match(html, /class="constellation-labels"/);
 assert.match(client, /pulseCore/);
@@ -126,3 +134,4 @@ console.log(`Verified ${shards.length} local person-model shards (${(modelBytes 
 console.log(`Verified local MediaPipe hand model (${(handModel.length / 1024 / 1024).toFixed(1)} MiB).`);
 console.log('Verified no-scroll 3D file galaxy, hidden settings, smoothed gestures, voice recognition controls, and live preview.');
 console.log('Verified session-gated dashboard, PIN-gated fixed printer/maintenance actions, and secret-file exclusions.');
+

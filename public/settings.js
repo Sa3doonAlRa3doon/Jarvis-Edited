@@ -1,4 +1,7 @@
-import { normalizeWakePhrases, selectRecognitionAlternative } from './voice-utils.js';
+import {
+  DEFAULT_VOICE_VOCABULARY, normalizeVocabulary, normalizeWakePhrases, selectRecognitionAlternative
+} from './voice-utils.js';
+import { configureRecognitionCapabilities, startRecognitionWithTrack } from './voice-controller.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -10,8 +13,8 @@ const ui = {
   browserDeviceCount: $('#browser-device-count'), piDeviceCount: $('#pi-device-count'), refreshDevices: $('#refresh-devices'),
   personDetection: $('#person-detection'), voiceActivity: $('#voice-activity'), wakeWord: $('#wake-word'), doubleClap: $('#double-clap'), gestureControl: $('#gesture-control'), autoSpeak: $('#auto-speak'), autoRepair: $('#auto-repair'),
   personThreshold: $('#person-threshold'), micSensitivity: $('#mic-sensitivity'), wakeSensitivity: $('#wake-sensitivity'), clapSensitivity: $('#clap-sensitivity'), gestureSensitivity: $('#gesture-sensitivity'), doubleClapWindow: $('#double-clap-window'), scanInterval: $('#scan-interval'), accent: $('#accent'),
-  voiceLanguage: $('#voice-language'), wakePhrases: $('#wake-phrases'), recognitionConfidence: $('#recognition-confidence'), commandSilence: $('#command-silence'),
-  voiceAutoStart: $('#voice-auto-start'), echoCancellation: $('#echo-cancellation'), noiseSuppression: $('#noise-suppression'), autoGainControl: $('#auto-gain-control'), bargeIn: $('#barge-in'),
+  voiceLanguage: $('#voice-language'), wakePhrases: $('#wake-phrases'), voiceVocabulary: $('#voice-vocabulary'), recognitionConfidence: $('#recognition-confidence'), commandSilence: $('#command-silence'),
+  voiceAutoStart: $('#voice-auto-start'), preferLocalRecognition: $('#prefer-local-recognition'), echoCancellation: $('#echo-cancellation'), noiseSuppression: $('#noise-suppression'), autoGainControl: $('#auto-gain-control'), bargeIn: $('#barge-in'),
   ttsVoice: $('#tts-voice'), ttsRate: $('#tts-rate'), ttsPitch: $('#tts-pitch'), ttsVolume: $('#tts-volume'), wakeResponse: $('#wake-response'),
   speechSupport: $('#speech-support'), voiceTranscript: $('#voice-transcript'), voiceConfidence: $('#voice-confidence'), testRecognition: $('#test-recognition'), testTalkback: $('#test-talkback'),
   cameraPreview: $('#camera-preview'), video: $('#camera-video'), image: $('#pi-camera-image'), canvas: $('#sensor-canvas'), placeholder: $('#camera-placeholder'), cameraSource: $('#camera-source'),
@@ -25,15 +28,15 @@ const recommendedProfile = {
   personDetection: true, voiceActivity: true, wakeWord: true, doubleClap: true, gestureControl: true, autoSpeak: true,
   personThreshold: 0.55, micSensitivity: 0.18, wakeSensitivity: 0.55, clapSensitivity: 0.34,
   gestureSensitivity: 0.42, doubleClapWindow: 700, scanInterval: 900, accent: '#64e8ff',
-  voiceLanguage: 'en-US', wakePhrases: ['hey jarvis', 'jarvis'], recognitionConfidence: .35, commandSilenceMs: 700,
-  voiceAutoStart: true, echoCancellation: true, noiseSuppression: true, autoGainControl: true, bargeIn: false,
+  voiceLanguage: 'en-US', wakePhrases: ['hey jarvis', 'jarvis', 'جارفيس', 'يا جارفيس'], voiceVocabulary: DEFAULT_VOICE_VOCABULARY, recognitionConfidence: .35, commandSilenceMs: 700,
+  voiceAutoStart: true, preferLocalRecognition: true, echoCancellation: true, noiseSuppression: true, autoGainControl: true, bargeIn: false,
   ttsVoice: '', ttsRate: 1.02, ttsPitch: .92, ttsVolume: 1, wakeResponse: 'Yes?'
 };
 
 const state = {
   savedSettings: {}, currentSection: 'devices', media: null, stream: null, audioContext: null, analyser: null,
   animation: 0, detector: null, detectTimer: 0, piTimer: 0, lastClap: 0, clapAbove: false, sensorsActive: false, dirty: false,
-  testRecognition: null, testRecognitionTimer: 0, noiseFloor: .008, lastAudioLevel: 0
+  testRecognition: null, testRecognitionStream: null, testRecognitionPending: false, testRecognitionTimer: 0, speechCheck: 0, noiseFloor: .008, lastAudioLevel: 0
 };
 
 const valueBindings = [
@@ -82,8 +85,8 @@ function currentSettings() {
     personThreshold: Number(ui.personThreshold.value), micSensitivity: Number(ui.micSensitivity.value),
     wakeSensitivity: Number(ui.wakeSensitivity.value), clapSensitivity: Number(ui.clapSensitivity.value), gestureSensitivity: Number(ui.gestureSensitivity.value),
     doubleClapWindow: Number(ui.doubleClapWindow.value), scanInterval: Number(ui.scanInterval.value), accent: ui.accent.value,
-    voiceLanguage: ui.voiceLanguage.value, wakePhrases: normalizeWakePhrases(ui.wakePhrases.value), recognitionConfidence: Number(ui.recognitionConfidence.value),
-    commandSilenceMs: Number(ui.commandSilence.value), voiceAutoStart: ui.voiceAutoStart.checked, echoCancellation: ui.echoCancellation.checked,
+    voiceLanguage: ui.voiceLanguage.value, wakePhrases: normalizeWakePhrases(ui.wakePhrases.value), voiceVocabulary: normalizeVocabulary(ui.voiceVocabulary.value), recognitionConfidence: Number(ui.recognitionConfidence.value),
+    commandSilenceMs: Number(ui.commandSilence.value), voiceAutoStart: ui.voiceAutoStart.checked, preferLocalRecognition: ui.preferLocalRecognition.checked, echoCancellation: ui.echoCancellation.checked,
     noiseSuppression: ui.noiseSuppression.checked, autoGainControl: ui.autoGainControl.checked, bargeIn: ui.bargeIn.checked,
     ttsVoice: ui.ttsVoice.value, ttsRate: Number(ui.ttsRate.value), ttsPitch: Number(ui.ttsPitch.value), ttsVolume: Number(ui.ttsVolume.value), wakeResponse: ui.wakeResponse.value.trim()
   };
@@ -122,6 +125,7 @@ function previewSettings() {
 
 function applySettings(settings, { saved = false, message = '' } = {}) {
   ui.wakePhrases.value = normalizeWakePhrases(settings.wakePhrases).join(', ');
+  ui.voiceVocabulary.value = normalizeVocabulary(settings.voiceVocabulary ?? DEFAULT_VOICE_VOCABULARY).join(', ');
   if (settings.ttsVoice && ![...ui.ttsVoice.options].some((item) => item.value === settings.ttsVoice)) ui.ttsVoice.append(option(settings.ttsVoice, `Saved voice (currently unavailable): ${settings.ttsVoice}`));
   for (const [key, element] of [
     ['source', ui.source], ['browserCamera', ui.browserCamera], ['browserMicrophone', ui.browserMicrophone], ['piCamera', ui.piCamera], ['piMicrophone', ui.piMicrophone],
@@ -132,7 +136,7 @@ function applySettings(settings, { saved = false, message = '' } = {}) {
   ]) element.value = settings[key] ?? '';
   for (const [key, element] of [
     ['personDetection', ui.personDetection], ['voiceActivity', ui.voiceActivity], ['wakeWord', ui.wakeWord], ['doubleClap', ui.doubleClap],
-    ['gestureControl', ui.gestureControl], ['autoSpeak', ui.autoSpeak], ['autoRepair', ui.autoRepair], ['voiceAutoStart', ui.voiceAutoStart],
+    ['gestureControl', ui.gestureControl], ['autoSpeak', ui.autoSpeak], ['autoRepair', ui.autoRepair], ['voiceAutoStart', ui.voiceAutoStart], ['preferLocalRecognition', ui.preferLocalRecognition],
     ['echoCancellation', ui.echoCancellation], ['noiseSuppression', ui.noiseSuppression], ['autoGainControl', ui.autoGainControl], ['bargeIn', ui.bargeIn]
   ]) element.checked = Boolean(settings[key]);
   if (saved) state.savedSettings = { ...settings };
@@ -186,31 +190,76 @@ function loadSpeechVoices(selected = ui.ttsVoice.value) {
   fillSelect(ui.ttsVoice, items, 'System default voice', selected);
 }
 
+async function refreshSpeechSupport() {
+  const check = ++state.speechCheck;
+  const RecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!RecognitionClass) {
+    ui.speechSupport.textContent = 'AUDIO ONLY'; ui.speechSupport.classList.remove('active');
+    ui.speechSupport.title = 'Speech recognition is unavailable in this browser.'; return;
+  }
+  let label = 'BROWSER READY'; let detail = 'Browser speech provider available.';
+  if (ui.preferLocalRecognition.checked && typeof RecognitionClass.available === 'function') {
+    try {
+      const availability = await Promise.race([
+        RecognitionClass.available({ langs: [ui.voiceLanguage.value || 'en-US'], processLocally: true }),
+        new Promise((resolve) => setTimeout(() => resolve('unknown'), 900))
+      ]);
+      if (availability === 'available') { label = 'LOCAL READY'; detail = 'Installed on-device language pack is ready.'; }
+      else if (availability === 'downloadable') { label = 'PACK NEEDED'; detail = 'An on-device language pack is available but not installed.'; }
+      else if (availability === 'downloading') { label = 'PACK LOADING'; detail = 'The browser is preparing its on-device language pack.'; }
+      else detail = 'On-device recognition is unavailable for this language; safe browser fallback remains enabled.';
+    } catch { detail = 'Local capability check failed; safe browser fallback remains enabled.'; }
+  }
+  if (check !== state.speechCheck) return;
+  ui.speechSupport.textContent = label; ui.speechSupport.classList.add('active'); ui.speechSupport.title = detail;
+}
+
 function stopRecognitionTest(message = '') {
   clearTimeout(state.testRecognitionTimer);
   const recognition = state.testRecognition; state.testRecognition = null;
   if (recognition) { recognition.onend = null; try { recognition.abort(); } catch {} }
+  state.testRecognitionStream?.getTracks().forEach((track) => track.stop()); state.testRecognitionStream = null; state.testRecognitionPending = false;
   ui.testRecognition.textContent = 'TEST RECOGNITION'; ui.testRecognition.classList.remove('active');
   if (message) ui.voiceConfidence.textContent = message;
 }
 
-function testRecognition() {
+async function testRecognition() {
   if (state.testRecognition) { stopRecognitionTest('Recognition test stopped.'); return; }
+  if (state.testRecognitionPending) return;
   const RecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!RecognitionClass) { ui.voiceTranscript.textContent = 'NOT SUPPORTED'; ui.voiceConfidence.textContent = 'Use Chromium on the laptop or Pi.'; return; }
-  const recognition = new RecognitionClass(); state.testRecognition = recognition;
-  recognition.continuous = false; recognition.interimResults = true; recognition.maxAlternatives = 5; recognition.lang = ui.voiceLanguage.value || 'en-US';
-  ui.voiceTranscript.textContent = 'LISTENING…'; ui.voiceConfidence.textContent = 'Say “Hey Jarvis, show system status”.'; ui.testRecognition.textContent = 'STOP TEST'; ui.testRecognition.classList.add('active');
-  recognition.onresult = (event) => {
-    const result = event.results[event.results.length - 1]; const alternatives = Array.from({ length: result.length }, (_, index) => result[index]);
-    const selected = selectRecognitionAlternative(alternatives, { wakePhrases: normalizeWakePhrases(ui.wakePhrases.value), wakeSensitivity: Number(ui.wakeSensitivity.value), recognitionConfidence: Number(ui.recognitionConfidence.value), preferWake: ui.wakeWord.checked });
-    ui.voiceTranscript.textContent = selected.transcript || 'NO TRANSCRIPT';
-    ui.voiceConfidence.textContent = `${result.isFinal ? 'FINAL' : 'INTERIM'} // ${selected.confidenceKnown ? `${Math.round(selected.confidence * 100)}% CONFIDENCE` : 'CONFIDENCE UNAVAILABLE'} // ${selected.wake.detected ? 'WAKE MATCH' : 'NO WAKE MATCH'}`;
-  };
-  recognition.onerror = (event) => { ui.voiceTranscript.textContent = 'RECOGNITION ERROR'; stopRecognitionTest(event.error.replaceAll('-', ' ').toUpperCase()); };
-  recognition.onend = () => { if (state.testRecognition === recognition) stopRecognitionTest('Recognition test complete.'); };
-  try { recognition.start(); state.testRecognitionTimer = setTimeout(() => stopRecognitionTest('Timed out after 12 seconds.'), 12_000); }
-  catch (error) { ui.voiceTranscript.textContent = 'START FAILED'; stopRecognitionTest(error.message); }
+  state.testRecognitionPending = true; ui.testRecognition.disabled = true; ui.voiceTranscript.textContent = 'OPENING MICROPHONE…';
+  try {
+    const settings = currentSettings();
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error('Microphone access is unavailable in this browser.');
+    state.testRecognitionStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        deviceId: settings.browserMicrophone ? { exact: settings.browserMicrophone } : undefined,
+        channelCount: { ideal: 1 }, sampleRate: { ideal: 16000 },
+        echoCancellation: settings.echoCancellation, noiseSuppression: settings.noiseSuppression, autoGainControl: settings.autoGainControl
+      },
+      video: false
+    });
+    const recognition = new RecognitionClass(); state.testRecognition = recognition;
+    recognition.continuous = false; recognition.interimResults = true; recognition.maxAlternatives = 5; recognition.lang = settings.voiceLanguage || 'en-US';
+    const mode = await configureRecognitionCapabilities(recognition, RecognitionClass, {
+      language: recognition.lang, preferLocalRecognition: settings.preferLocalRecognition,
+      wakePhrases: settings.wakePhrases, voiceVocabulary: settings.voiceVocabulary
+    });
+    ui.voiceTranscript.textContent = 'LISTENING…'; ui.voiceConfidence.textContent = `${mode === 'local' ? 'ON-DEVICE' : 'BROWSER PROVIDER'} // Say “Hey Jarvis, show system status”.`; ui.testRecognition.textContent = 'STOP TEST'; ui.testRecognition.classList.add('active');
+    recognition.onresult = (event) => {
+      const result = event.results[event.results.length - 1]; const alternatives = Array.from({ length: result.length }, (_, index) => result[index]);
+      const selected = selectRecognitionAlternative(alternatives, { wakePhrases: settings.wakePhrases, wakeSensitivity: settings.wakeSensitivity, recognitionConfidence: settings.recognitionConfidence, preferWake: settings.wakeWord });
+      ui.voiceTranscript.textContent = selected.transcript || 'NO TRANSCRIPT';
+      ui.voiceConfidence.textContent = `${mode === 'local' ? 'ON-DEVICE' : 'BROWSER'} // ${result.isFinal ? 'FINAL' : 'INTERIM'} // ${selected.confidenceKnown ? `${Math.round(selected.confidence * 100)}% CONFIDENCE` : 'CONFIDENCE UNAVAILABLE'} // ${selected.wake.detected ? 'WAKE MATCH' : 'NO WAKE MATCH'}`;
+    };
+    recognition.onerror = (event) => { ui.voiceTranscript.textContent = 'RECOGNITION ERROR'; stopRecognitionTest(event.error.replaceAll('-', ' ').toUpperCase()); };
+    recognition.onend = () => { if (state.testRecognition === recognition) stopRecognitionTest('Recognition test complete.'); };
+    startRecognitionWithTrack(recognition, state.testRecognitionStream.getAudioTracks()[0]);
+    state.testRecognitionTimer = setTimeout(() => stopRecognitionTest('Timed out after 12 seconds.'), 12_000);
+  } catch (error) {
+    ui.voiceTranscript.textContent = 'START FAILED'; stopRecognitionTest(error.message);
+  } finally { state.testRecognitionPending = false; ui.testRecognition.disabled = false; }
 }
 
 function testTalkback() {
@@ -447,6 +496,7 @@ function onFormInput(event) {
   updateOutputs();
   updateDirty();
   previewSettings();
+  if (event.target === ui.voiceLanguage || event.target === ui.preferLocalRecognition) void refreshSpeechSupport();
   if (state.sensorsActive && (event.target.matches('[data-sensor-source]') || event.target.name === 'source-card' || ['person-detection', 'voice-activity', 'wake-word', 'double-clap', 'gesture-control', 'echo-cancellation', 'noise-suppression', 'auto-gain-control'].includes(event.target.id))) {
     stopSensors({ quiet: true });
     setMessage('Sensor configuration changed. Calibration stopped safely; restart it to test the new profile.');
@@ -486,7 +536,7 @@ for (const button of $$('[data-accent]')) button.addEventListener('click', () =>
 
 ui.start.addEventListener('click', () => void startSensors());
 ui.stop.addEventListener('click', () => stopSensors());
-ui.testRecognition.addEventListener('click', testRecognition);
+ui.testRecognition.addEventListener('click', () => void testRecognition());
 ui.testTalkback.addEventListener('click', testTalkback);
 ui.testWake.addEventListener('click', async () => {
   try {
@@ -519,15 +569,14 @@ async function init() {
   try {
     await window.ensureDashboardAuthentication?.();
     const [settings, status, config] = await Promise.all([json('/api/settings'), json('/api/status'), json('/api/config')]);
-    ui.version.textContent = config.version || '3.2.0';
+    ui.version.textContent = config.version || '3.3.0';
     ui.node.textContent = config.piOnly ? 'PI-5' : 'LOCAL';
-    const recognitionSupported = Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
-    ui.speechSupport.textContent = recognitionSupported ? 'READY' : 'AUDIO ONLY'; ui.speechSupport.classList.toggle('active', recognitionSupported);
     loadSpeechVoices(settings.ttsVoice || '');
     state.savedSettings = { ...settings };
     await loadDeviceLists(settings);
     renderGoogle(status.google || {});
     applySettings(settings, { saved: true, message: 'Configuration profile loaded. Live preview link is active.' });
+    await refreshSpeechSupport();
     setStatus('READY', 'ready');
   } catch (error) {
     setStatus('LOAD ERROR', 'error');
@@ -536,3 +585,4 @@ async function init() {
 }
 
 void init();
+

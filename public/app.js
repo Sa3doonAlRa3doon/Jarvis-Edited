@@ -38,7 +38,8 @@ const state = {
   history: [], lane: 'code', operation: null, operationKind: 'system', operationStatus: null, lastAssistant: '',
   galaxy: null, gesture: null, voice: null, printer: { configured: false, online: false, state: 'checking' },
   chart: { cpu: Array(52).fill(0), ram: Array(52).fill(0), gpu: Array(52).fill(0) },
-  neuralEnergy: 0.22, coreMode: 'system', voiceState: 'standby', voiceLevel: 0
+  neuralEnergy: 0.22, coreMode: 'system', voiceState: 'standby', voiceLevel: 0,
+  refreshFastPending: false, refreshSlowPending: false
 };
 
 const laneLabels = {
@@ -430,16 +431,24 @@ function startPrinterStream() {
   source.addEventListener('error', () => { if (source.readyState === EventSource.CLOSED) setTimeout(() => void json('/api/printer/status').then(renderPrinter).catch(() => {}), 2500); });
 }
 
-async function refreshFast() {
-  const [metrics, status] = await Promise.allSettled([json('/api/metrics'), json('/api/status')]);
-  if (metrics.status === 'fulfilled') renderMetrics(metrics.value);
-  if (status.status === 'fulfilled') renderStatus(status.value);
+async function refreshFast({ force = false } = {}) {
+  if (state.refreshFastPending || document.hidden && !force) return;
+  state.refreshFastPending = true;
+  try {
+    const [metrics, status] = await Promise.allSettled([json('/api/metrics'), json('/api/status')]);
+    if (metrics.status === 'fulfilled') renderMetrics(metrics.value);
+    if (status.status === 'fulfilled') renderStatus(status.value);
+  } finally { state.refreshFastPending = false; }
 }
-async function refreshSlow() {
-  const [storage, docker, agents] = await Promise.allSettled([json('/api/storage'), json('/api/docker'), json('/api/agents')]);
-  if (storage.status === 'fulfilled') renderStorage(storage.value.devices || []);
-  if (docker.status === 'fulfilled') renderDocker(docker.value);
-  if (agents.status === 'fulfilled') renderAgents(agents.value);
+async function refreshSlow({ force = false } = {}) {
+  if (state.refreshSlowPending || document.hidden && !force) return;
+  state.refreshSlowPending = true;
+  try {
+    const [storage, docker, agents] = await Promise.allSettled([json('/api/storage'), json('/api/docker'), json('/api/agents')]);
+    if (storage.status === 'fulfilled') renderStorage(storage.value.devices || []);
+    if (docker.status === 'fulfilled') renderDocker(docker.value);
+    if (agents.status === 'fulfilled') renderAgents(agents.value);
+  } finally { state.refreshSlowPending = false; }
 }
 
 async function toggleGestures() {
@@ -488,6 +497,9 @@ window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') { void state.voice?.stop(); void state.gesture?.stop(); }
 });
 window.addEventListener('beforeunload', () => { void state.voice?.stop(); void state.gesture?.stop(); });
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) { void refreshFast({ force: true }); void refreshSlow({ force: true }); }
+});
 
 async function init() {
   updateClock(); setInterval(updateClock, 1000);
@@ -515,8 +527,9 @@ async function init() {
   });
   if (!isEmbeddedPreview()) void state.voice.autoStartIfGranted(state.settings).catch(() => {});
   if (!isEmbeddedPreview()) void autoStartGesturesIfGranted();
-  await Promise.all([refreshFast(), refreshSlow()]);
+  await Promise.all([refreshFast({ force: true }), refreshSlow({ force: true })]);
   setInterval(() => void refreshFast(), 2500); setInterval(() => void refreshSlow(), 7000);
 }
 
 void init();
+

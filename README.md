@@ -1,6 +1,15 @@
-# OpenJarvis Pi Command Center 3.2.0
+# OpenJarvis Pi Command Center 3.3.0
 
 A private, Pi-first JARVIS visualization for OpenJarvis, Ollama, Docker, Google connectors, cameras, microphones, and guarded maintenance. The main route is now exactly one fullscreen neural field with no visible words, panels, cards, labels, or command bar.
+
+## What is new in 3.3
+
+- **Arabic and multilingual commands actually survive processing** — Unicode letters and numbers are preserved instead of being stripped by the English-only transcript cleaner. Arabic wake phrases (`جارفيس`, `يا جارفيس`) are included in the default profile.
+- **On-device recognition preference** — compatible browsers use an already-installed local language pack. If the experimental capability or pack is unavailable, JARVIS safely falls back to the browser speech provider instead of breaking voice control.
+- **JARVIS vocabulary biasing** — editable terms such as OpenJarvis, Ollama, Docker, Moonraker, Klipper, Raspberry Pi, CodeAct, and OpenHands receive contextual recognition weight when supported.
+- **Better microphone targeting** — the exact selected microphone track is passed to speech recognition on compatible browsers; unsupported browsers retain a safe provider-default fallback.
+- **More reliable Pi operation** — audio analysis reuses its sample buffer, status refreshes cannot overlap, and expensive polling pauses while the dashboard tab is hidden, then refreshes immediately when visible again.
+- **Expanded automated coverage** — tests now cover Arabic normalization/wake extraction, vocabulary deduplication, contextual phrase boosts, local-recognition selection, and selected-track fallback behavior.
 
 ## What is new in 3.2
 
@@ -300,3 +309,4 @@ npm.cmd start
 ```
 
 Open the command screen and `/settings`. Pi-only maintenance and openWakeWord controls correctly stay unavailable on Windows; system telemetry, the UI, live preview, browser camera/person detection, browser microphone level, local double-clap detection, and any reachable OpenJarvis/Ollama services can still be tested.
+

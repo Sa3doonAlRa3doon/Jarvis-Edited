@@ -1,10 +1,47 @@
 import {
-  DEFAULT_WAKE_PHRASES, findWakePhrase, isDuplicateCommand, normalizeTranscript,
-  normalizeWakePhrases, selectRecognitionAlternative
+  DEFAULT_VOICE_VOCABULARY, DEFAULT_WAKE_PHRASES, findWakePhrase, isDuplicateCommand,
+  normalizeTranscript, normalizeVocabulary, normalizeWakePhrases, recognitionPhraseSpecs,
+  selectRecognitionAlternative
 } from './voice-utils.js';
 
 const Recognition = () => window.SpeechRecognition || window.webkitSpeechRecognition || null;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
+
+export async function configureRecognitionCapabilities(recognition, RecognitionClass, {
+  language = 'en-US', preferLocalRecognition = true, wakePhrases = DEFAULT_WAKE_PHRASES,
+  voiceVocabulary = DEFAULT_VOICE_VOCABULARY, timeoutMs = 800
+} = {}) {
+  let mode = 'browser';
+  if (preferLocalRecognition && 'processLocally' in recognition && typeof RecognitionClass?.available === 'function') {
+    let timeout = 0;
+    try {
+      const availability = await Promise.race([
+        RecognitionClass.available({ langs: [language], processLocally: true }),
+        new Promise((resolve) => { timeout = globalThis.setTimeout(() => resolve('unknown'), timeoutMs); })
+      ]);
+      if (availability === 'available') { recognition.processLocally = true; mode = 'local'; }
+    } catch {}
+    finally { globalThis.clearTimeout(timeout); }
+  }
+  try {
+    const PhraseClass = globalThis.SpeechRecognitionPhrase;
+    if ('phrases' in recognition && typeof PhraseClass === 'function') {
+      recognition.phrases = recognitionPhraseSpecs(wakePhrases, voiceVocabulary)
+        .map(({ phrase, boost }) => new PhraseClass(phrase, boost));
+    }
+  } catch {}
+  return mode;
+}
+
+export function startRecognitionWithTrack(recognition, track) {
+  if (track?.readyState === 'live') {
+    try { recognition.start(track); return true; }
+    catch (error) {
+      if (!['TypeError', 'NotSupportedError'].includes(error.name)) throw error;
+    }
+  }
+  recognition.start(); return false;
+}
 
 export class VoiceController {
   constructor({ onState = () => {}, onLevel = () => {}, onWake = () => {}, onCommand = () => {}, onTranscript = () => {}, onError = () => {} } = {}) {
@@ -13,7 +50,8 @@ export class VoiceController {
     this.running = false; this.shouldRun = false; this.speaking = false; this.restartTimer = 0; this.restartDelay = 240;
     this.noiseFloor = .008; this.firstClapAt = 0; this.clapAbove = false; this.clapCooldownUntil = 0;
     this.armedUntil = 0; this.lastWakeAt = 0; this.lastCommand = ''; this.lastCommandAt = 0; this.pending = []; this.commandTimer = 0;
-    this.lastLevel = 0; this.lastVoiceState = false;
+    this.lastLevel = 0; this.lastVoiceState = false; this.audioSamples = null; this.preparingRecognition = false;
+    this.recognitionMode = 'browser'; this.localRecognitionDisabled = false;
   }
 
   configure(settings = {}) {
@@ -21,9 +59,11 @@ export class VoiceController {
       browserMicrophone: '', wakeWord: true, doubleClap: true, wakePhrases: DEFAULT_WAKE_PHRASES,
       wakeSensitivity: .55, recognitionConfidence: .35, commandSilenceMs: 700, micSensitivity: .18,
       clapSensitivity: .34, doubleClapWindow: 700, echoCancellation: true, noiseSuppression: true,
-      autoGainControl: true, voiceLanguage: 'en-US', bargeIn: false, ...settings
+      autoGainControl: true, voiceLanguage: 'en-US', bargeIn: false, preferLocalRecognition: true,
+      voiceVocabulary: DEFAULT_VOICE_VOCABULARY, ...settings
     };
     this.settings.wakePhrases = normalizeWakePhrases(this.settings.wakePhrases);
+    this.settings.voiceVocabulary = normalizeVocabulary(this.settings.voiceVocabulary);
     if (this.recognition) this.recognition.lang = this.settings.voiceLanguage;
   }
 
@@ -46,7 +86,7 @@ export class VoiceController {
       this.analyser = this.context.createAnalyser(); this.analyser.fftSize = 2048; this.analyser.smoothingTimeConstant = .28;
       this.context.createMediaStreamSource(this.stream).connect(this.analyser); this.monitorAudio();
     }
-    this.shouldRun = true; this.running = true; this.restartDelay = 240; this.startRecognition(); this.onState('listening');
+    this.shouldRun = true; this.running = true; this.restartDelay = 240; void this.startRecognition(); this.onState('listening');
   }
 
   async autoStartIfGranted(settings = this.settings) {
@@ -59,10 +99,11 @@ export class VoiceController {
     } catch { return false; }
   }
 
-  startRecognition() {
-    if (!this.shouldRun || this.speaking && !this.settings.bargeIn || this.recognition) return;
+  async startRecognition() {
+    if (!this.shouldRun || this.speaking && !this.settings.bargeIn || this.recognition || this.preparingRecognition) return;
     const RecognitionClass = Recognition();
     if (!RecognitionClass) { this.onState('audio-only'); return; }
+    this.preparingRecognition = true;
     const recognition = new RecognitionClass();
     recognition.continuous = true; recognition.interimResults = true; recognition.maxAlternatives = 5; recognition.lang = this.settings.voiceLanguage || 'en-US';
     recognition.onstart = () => { this.restartDelay = 240; this.onState('listening'); };
@@ -70,6 +111,10 @@ export class VoiceController {
     recognition.onspeechend = () => this.onState('listening');
     recognition.onresult = (event) => this.handleRecognitionResult(event);
     recognition.onerror = (event) => {
+      if (event.error === 'language-not-supported' && this.recognitionMode === 'local') {
+        this.localRecognitionDisabled = true; this.recognitionMode = 'browser';
+        return;
+      }
       const fatal = ['not-allowed', 'service-not-allowed', 'audio-capture'].includes(event.error);
       if (fatal) {
         this.shouldRun = false;
@@ -82,13 +127,30 @@ export class VoiceController {
       if (this.shouldRun && (!this.speaking || this.settings.bargeIn)) this.scheduleRecognitionRestart();
     };
     this.recognition = recognition;
-    try { recognition.start(); }
-    catch (error) { this.recognition = null; this.scheduleRecognitionRestart(); if (error.name !== 'InvalidStateError') this.onError(error); }
+    this.recognitionMode = await configureRecognitionCapabilities(recognition, RecognitionClass, {
+      language: recognition.lang,
+      preferLocalRecognition: this.settings.preferLocalRecognition && !this.localRecognitionDisabled,
+      wakePhrases: this.settings.wakePhrases,
+      voiceVocabulary: this.settings.voiceVocabulary
+    });
+    this.preparingRecognition = false;
+    if (!this.shouldRun || this.recognition !== recognition || this.speaking && !this.settings.bargeIn) {
+      if (this.recognition === recognition) this.recognition = null;
+      return;
+    }
+    try {
+      const track = this.stream?.getAudioTracks?.()[0];
+      startRecognitionWithTrack(recognition, track);
+    } catch (error) {
+      if (this.recognition === recognition) this.recognition = null;
+      this.scheduleRecognitionRestart();
+      if (error.name !== 'InvalidStateError') this.onError(error);
+    }
   }
 
   scheduleRecognitionRestart() {
     clearTimeout(this.restartTimer);
-    this.restartTimer = window.setTimeout(() => this.startRecognition(), this.restartDelay);
+    this.restartTimer = window.setTimeout(() => void this.startRecognition(), this.restartDelay);
     this.restartDelay = Math.min(4200, Math.round(this.restartDelay * 1.7));
   }
 
@@ -137,7 +199,8 @@ export class VoiceController {
 
   monitorAudio = () => {
     if (!this.analyser) return;
-    const samples = new Uint8Array(this.analyser.fftSize); this.analyser.getByteTimeDomainData(samples);
+    if (!this.audioSamples || this.audioSamples.length !== this.analyser.fftSize) this.audioSamples = new Uint8Array(this.analyser.fftSize);
+    const samples = this.audioSamples; this.analyser.getByteTimeDomainData(samples);
     let sum = 0; let peak = 0;
     for (const sample of samples) { const value = Math.abs((sample - 128) / 128); sum += value * value; peak = Math.max(peak, value); }
     const rms = Math.sqrt(sum / samples.length); const now = performance.now();
@@ -167,7 +230,7 @@ export class VoiceController {
       this.onState('speaking');
       if (!this.settings.bargeIn) { clearTimeout(this.restartTimer); try { this.recognition?.abort(); } catch {} }
     } else if (this.shouldRun) {
-      this.onState('listening'); this.restartDelay = 240; this.startRecognition();
+      this.onState('listening'); this.restartDelay = 240; void this.startRecognition();
     }
   }
 
@@ -175,7 +238,7 @@ export class VoiceController {
     this.shouldRun = false; this.running = false; this.speaking = false;
     clearTimeout(this.restartTimer); clearTimeout(this.commandTimer); cancelAnimationFrame(this.raf);
     try { this.recognition?.abort(); } catch {}
-    this.recognition = null; this.pending = []; this.stream?.getTracks().forEach((track) => track.stop()); this.stream = null; this.analyser = null;
+    this.recognition = null; this.preparingRecognition = false; this.pending = []; this.stream?.getTracks().forEach((track) => track.stop()); this.stream = null; this.analyser = null; this.audioSamples = null;
     if (this.context) await this.context.close().catch(() => {});
     this.context = null; this.onLevel({ level: 0, rms: 0, peak: 0, noiseFloor: this.noiseFloor, voiceActive: false }); this.onState('standby');
   }
@@ -184,3 +247,4 @@ export class VoiceController {
   get active() { return this.running; }
   get recognitionAvailable() { return Boolean(Recognition()); }
 }
+

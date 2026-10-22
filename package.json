@@ -1,6 +1,6 @@
 {
   "name": "openjarvis-pi-command-center",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "private": true,
   "description": "Private Pi 5 JARVIS with one full-screen neural field and one local model that automatically switches specialist roles",
   "type": "module",
@@ -26,3 +26,4 @@
     "argparse": "2.0.1"
   }
 }
+
