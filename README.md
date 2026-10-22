@@ -1,6 +1,15 @@
-# OpenJarvis Pi Command Center 3.3.0
+# OpenJarvis Pi Command Center 3.4.0
 
 A private, Pi-first JARVIS visualization for OpenJarvis, Ollama, Docker, Google connectors, cameras, microphones, and guarded maintenance. The main route is now exactly one fullscreen neural field with no visible words, panels, cards, labels, or command bar.
+
+## What is new in 3.4
+
+- **One-click local speech pack setup** — `/settings` now shows an install control only when the browser reports that an on-device pack is downloadable for the selected language. Downloads happen only after that explicit click.
+- **Local speech permission policy** — same-origin camera, microphone, and on-device speech capabilities are explicitly allowed while geolocation stays disabled.
+- **No overlapping printer probes** — a slow or powered-off Moonraker device can no longer stack multiple two-second status requests on the Pi.
+- **No overlapping monitor passes** — Docker, Ollama, OpenJarvis, operations, trace, and auto-repair monitoring stays single-flight even when a check takes longer than its interval.
+- **Bounded browser polling** — telemetry requests now time out and recover instead of leaving a refresh lane permanently stuck; hidden-tab polling remains paused.
+- **Safer recognition startup** — browser recognition-constructor failures enter the existing bounded retry path instead of leaving voice control stuck in a preparing state.
 
 ## What is new in 3.3
 

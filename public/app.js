@@ -131,6 +131,12 @@ async function json(url, options) {
   return payload;
 }
 
+async function pollJson(url, timeoutMs) {
+  const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try { return await json(url, { signal: controller.signal }); }
+  finally { clearTimeout(timer); }
+}
+
 function updateClock() {
   const now = new Date();
   ui.clock.textContent = now.toLocaleTimeString('en-GB', { timeZone: 'Asia/Dubai', hour12: false });
@@ -435,7 +441,7 @@ async function refreshFast({ force = false } = {}) {
   if (state.refreshFastPending || document.hidden && !force) return;
   state.refreshFastPending = true;
   try {
-    const [metrics, status] = await Promise.allSettled([json('/api/metrics'), json('/api/status')]);
+    const [metrics, status] = await Promise.allSettled([pollJson('/api/metrics', 6000), pollJson('/api/status', 7000)]);
     if (metrics.status === 'fulfilled') renderMetrics(metrics.value);
     if (status.status === 'fulfilled') renderStatus(status.value);
   } finally { state.refreshFastPending = false; }
@@ -444,7 +450,7 @@ async function refreshSlow({ force = false } = {}) {
   if (state.refreshSlowPending || document.hidden && !force) return;
   state.refreshSlowPending = true;
   try {
-    const [storage, docker, agents] = await Promise.allSettled([json('/api/storage'), json('/api/docker'), json('/api/agents')]);
+    const [storage, docker, agents] = await Promise.allSettled([pollJson('/api/storage', 8000), pollJson('/api/docker', 10_000), pollJson('/api/agents', 8000)]);
     if (storage.status === 'fulfilled') renderStorage(storage.value.devices || []);
     if (docker.status === 'fulfilled') renderDocker(docker.value);
     if (agents.status === 'fulfilled') renderAgents(agents.value);

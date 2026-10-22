@@ -16,7 +16,7 @@ const ui = {
   voiceLanguage: $('#voice-language'), wakePhrases: $('#wake-phrases'), voiceVocabulary: $('#voice-vocabulary'), recognitionConfidence: $('#recognition-confidence'), commandSilence: $('#command-silence'),
   voiceAutoStart: $('#voice-auto-start'), preferLocalRecognition: $('#prefer-local-recognition'), echoCancellation: $('#echo-cancellation'), noiseSuppression: $('#noise-suppression'), autoGainControl: $('#auto-gain-control'), bargeIn: $('#barge-in'),
   ttsVoice: $('#tts-voice'), ttsRate: $('#tts-rate'), ttsPitch: $('#tts-pitch'), ttsVolume: $('#tts-volume'), wakeResponse: $('#wake-response'),
-  speechSupport: $('#speech-support'), voiceTranscript: $('#voice-transcript'), voiceConfidence: $('#voice-confidence'), testRecognition: $('#test-recognition'), testTalkback: $('#test-talkback'),
+  speechSupport: $('#speech-support'), voiceTranscript: $('#voice-transcript'), voiceConfidence: $('#voice-confidence'), testRecognition: $('#test-recognition'), testTalkback: $('#test-talkback'), installLocalSpeech: $('#install-local-speech'),
   cameraPreview: $('#camera-preview'), video: $('#camera-video'), image: $('#pi-camera-image'), canvas: $('#sensor-canvas'), placeholder: $('#camera-placeholder'), cameraSource: $('#camera-source'),
   personReadout: $('#person-readout'), micReadout: $('#mic-readout'), micMeter: $('#mic-meter'), wakeReadout: $('#wake-readout'), sensorState: $('#sensor-state'), sensorGuidance: $('#sensor-guidance'),
   start: $('#start-sensors'), stop: $('#stop-sensors'), testWake: $('#test-wake'), googleGrid: $('#google-grid'), googleNote: $('#google-note'), googleState: $('#google-state'),
@@ -195,9 +195,10 @@ async function refreshSpeechSupport() {
   const RecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!RecognitionClass) {
     ui.speechSupport.textContent = 'AUDIO ONLY'; ui.speechSupport.classList.remove('active');
-    ui.speechSupport.title = 'Speech recognition is unavailable in this browser.'; return;
+    ui.speechSupport.title = 'Speech recognition is unavailable in this browser.'; ui.installLocalSpeech.hidden = true; return;
   }
   let label = 'BROWSER READY'; let detail = 'Browser speech provider available.';
+  let installVisible = false; let installDisabled = false; let installLabel = 'INSTALL LOCAL SPEECH PACK';
   if (ui.preferLocalRecognition.checked && typeof RecognitionClass.available === 'function') {
     try {
       const availability = await Promise.race([
@@ -205,13 +206,35 @@ async function refreshSpeechSupport() {
         new Promise((resolve) => setTimeout(() => resolve('unknown'), 900))
       ]);
       if (availability === 'available') { label = 'LOCAL READY'; detail = 'Installed on-device language pack is ready.'; }
-      else if (availability === 'downloadable') { label = 'PACK NEEDED'; detail = 'An on-device language pack is available but not installed.'; }
-      else if (availability === 'downloading') { label = 'PACK LOADING'; detail = 'The browser is preparing its on-device language pack.'; }
+      else if (availability === 'downloadable') {
+        label = 'PACK NEEDED'; detail = 'An on-device language pack is available but not installed.';
+        installVisible = typeof RecognitionClass.install === 'function';
+      }
+      else if (availability === 'downloading') {
+        label = 'PACK LOADING'; detail = 'The browser is preparing its on-device language pack.';
+        installVisible = true; installDisabled = true; installLabel = 'LOCAL PACK DOWNLOADING…';
+      }
       else detail = 'On-device recognition is unavailable for this language; safe browser fallback remains enabled.';
     } catch { detail = 'Local capability check failed; safe browser fallback remains enabled.'; }
   }
   if (check !== state.speechCheck) return;
+  ui.installLocalSpeech.hidden = !installVisible; ui.installLocalSpeech.disabled = installDisabled; ui.installLocalSpeech.textContent = installLabel;
   ui.speechSupport.textContent = label; ui.speechSupport.classList.add('active'); ui.speechSupport.title = detail;
+}
+
+async function installLocalSpeechPack() {
+  const RecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (typeof RecognitionClass?.install !== 'function') { setMessage('This browser cannot install local speech packs. Browser-provider fallback remains available.'); return; }
+  const language = ui.voiceLanguage.value || 'en-US';
+  ui.installLocalSpeech.hidden = false; ui.installLocalSpeech.disabled = true; ui.installLocalSpeech.textContent = `INSTALLING ${language}…`;
+  setStatus('INSTALLING', 'loading'); setMessage(`Downloading the ${language} on-device speech pack. Keep this settings tab open.`);
+  try {
+    const installed = await RecognitionClass.install({ langs: [language], processLocally: true });
+    if (!installed) throw new Error(`The ${language} pack is unsupported or its download failed.`);
+    setMessage(`${language} is installed. JARVIS will prefer private on-device recognition for this language.`); setStatus('LOCAL READY', 'ready');
+  } catch (error) {
+    setMessage(`Local speech pack was not installed: ${error.message}`); setStatus('PACK ERROR', 'error');
+  } finally { await refreshSpeechSupport(); }
 }
 
 function stopRecognitionTest(message = '') {
@@ -538,6 +561,7 @@ ui.start.addEventListener('click', () => void startSensors());
 ui.stop.addEventListener('click', () => stopSensors());
 ui.testRecognition.addEventListener('click', () => void testRecognition());
 ui.testTalkback.addEventListener('click', testTalkback);
+ui.installLocalSpeech.addEventListener('click', () => void installLocalSpeechPack());
 ui.testWake.addEventListener('click', async () => {
   try {
     await json('/api/wake/test', { method: 'POST' });
@@ -569,7 +593,7 @@ async function init() {
   try {
     await window.ensureDashboardAuthentication?.();
     const [settings, status, config] = await Promise.all([json('/api/settings'), json('/api/status'), json('/api/config')]);
-    ui.version.textContent = config.version || '3.3.0';
+    ui.version.textContent = config.version || '3.4.0';
     ui.node.textContent = config.piOnly ? 'PI-5' : 'LOCAL';
     loadSpeechVoices(settings.ttsVoice || '');
     state.savedSettings = { ...settings };

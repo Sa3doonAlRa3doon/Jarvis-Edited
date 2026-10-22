@@ -17,7 +17,7 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const appVersion = '3.3.0';
+const appVersion = '3.4.0';
 const host = process.env.HOST || '127.0.0.1';
 const port = Number(process.env.PORT || 8787);
 const openJarvisUrl = (process.env.OPENJARVIS_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
@@ -303,7 +303,7 @@ app.use((request, response, next) => {
   const scriptPolicy = request.path === '/settings' ? "'self' 'unsafe-eval' 'wasm-unsafe-eval'" : "'self' 'wasm-unsafe-eval'";
   response.set({
     'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'SAMEORIGIN', 'Referrer-Policy': 'no-referrer',
-    'Permissions-Policy': 'camera=(self), microphone=(self), geolocation=()',
+    'Permissions-Policy': 'camera=(self), microphone=(self), on-device-speech-recognition=(self), geolocation=()',
     'Content-Security-Policy': `default-src 'self'; script-src ${scriptPolicy}; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'`
   }); next();
 });
@@ -496,14 +496,21 @@ app.use(express.static(path.join(__dirname, 'public'), { etag: true, maxAge: pro
 app.use((error, _request, response, _next) => { console.error('Dashboard request failed:', error.message); response.status(500).json({ error: 'Dashboard request failed.' }); });
 
 let knownTraceIds = new Set(); let traceInitialised = false; let lastHealthSignature = ''; let lastRepairAt = 0;
+let printerRefreshActive = false; let monitorTickActive = false;
 async function refreshPrinterStatus() {
-  const previousSignature = `${printerSnapshot.online}:${printerSnapshot.state}:${printerSnapshot.filename || ''}`;
-  printerSnapshot = await printerClient.status();
-  const nextSignature = `${printerSnapshot.online}:${printerSnapshot.state}:${printerSnapshot.filename || ''}`;
-  for (const push of printerSubscribers) push(printerSnapshot);
-  if (previousSignature !== nextSignature) await eventStore.append('printer', printerSnapshot.online ? `Printer state: ${printerSnapshot.state}` : 'Printer offline', { state: printerSnapshot.state, filename: printerSnapshot.filename || '' });
+  if (printerRefreshActive) return;
+  printerRefreshActive = true;
+  try {
+    const previousSignature = `${printerSnapshot.online}:${printerSnapshot.state}:${printerSnapshot.filename || ''}`;
+    printerSnapshot = await printerClient.status();
+    const nextSignature = `${printerSnapshot.online}:${printerSnapshot.state}:${printerSnapshot.filename || ''}`;
+    for (const push of printerSubscribers) push(printerSnapshot);
+    if (previousSignature !== nextSignature) await eventStore.append('printer', printerSnapshot.online ? `Printer state: ${printerSnapshot.state}` : 'Printer offline', { state: printerSnapshot.state, filename: printerSnapshot.filename || '' });
+  } finally { printerRefreshActive = false; }
 }
 async function monitorTick() {
+  if (monitorTickActive) return;
+  monitorTickActive = true;
   try {
     const [services, agents, operations] = await Promise.all([serviceStatus(), agentSnapshot(), operationStatus()]);
     const signature = JSON.stringify({ jarvis: services.openjarvis.online, ollama: services.ollama.online, maintenance: operations.maintenancePersistent || operations.maintenanceUntilReboot });
@@ -522,6 +529,7 @@ async function monitorTick() {
       catch (error) { await eventStore.append('alert', 'Constrained auto-repair failed', { error: cleanText(error.stderr || error.message, 200) }); }
     }
   } catch {}
+  finally { monitorTickActive = false; }
 }
 
 await eventStore.init(); await loadSettings(); await eventStore.append('boot', 'JARVIS command center starting', { version: appVersion, platform: process.platform });

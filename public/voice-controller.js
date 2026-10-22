@@ -104,7 +104,11 @@ export class VoiceController {
     const RecognitionClass = Recognition();
     if (!RecognitionClass) { this.onState('audio-only'); return; }
     this.preparingRecognition = true;
-    const recognition = new RecognitionClass();
+    let recognition;
+    try { recognition = new RecognitionClass(); }
+    catch (error) {
+      this.preparingRecognition = false; this.onError(error); this.scheduleRecognitionRestart(); return;
+    }
     recognition.continuous = true; recognition.interimResults = true; recognition.maxAlternatives = 5; recognition.lang = this.settings.voiceLanguage || 'en-US';
     recognition.onstart = () => { this.restartDelay = 240; this.onState('listening'); };
     recognition.onspeechstart = () => this.onState('hearing');

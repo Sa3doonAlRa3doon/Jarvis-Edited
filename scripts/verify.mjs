@@ -32,7 +32,7 @@ for (const shard of shards) { const stats = await fs.stat(path.join(modelDirecto
 const handModel = await fs.readFile(path.join(project, 'public', 'models', 'hand-landmarker', 'hand_landmarker.task'));
 assert.equal(handModel.length, 7819105, 'Unexpected hand landmark model size.');
 
-assert.equal(packageJson.version, '3.3.0');
+assert.equal(packageJson.version, '3.4.0');
 assert.match(server, /app\.get\('\/settings'/);
 assert.match(server, /v1\/traces\?limit=40/);
 assert.match(server, /timingSafeEqual/);
@@ -90,10 +90,16 @@ assert.match(voiceUtils, /\\p\{L\}/);
 assert.match(settingsHtml, /id="voice-language"/);
 assert.match(settingsHtml, /id="voice-vocabulary"/);
 assert.match(settingsHtml, /id="prefer-local-recognition"/);
+assert.match(settingsHtml, /id="install-local-speech"/);
+assert.match(settingsClient, /RecognitionClass\.install/);
 assert.match(settingsHtml, /id="test-recognition"/);
 assert.match(settingsHtml, /id="tts-voice"/);
-assert.match(server, /const appVersion = '3\.3\.0'/);
+assert.match(server, /const appVersion = '3\.4\.0'/);
+assert.match(server, /on-device-speech-recognition=\(self\)/);
+assert.match(server, /printerRefreshActive/);
+assert.match(server, /monitorTickActive/);
 assert.match(client, /refreshFastPending/);
+assert.match(client, /pollJson/);
 assert.match(html, /id="reactor-scan"/);
 assert.match(html, /class="constellation-labels"/);
 assert.match(client, /pulseCore/);
