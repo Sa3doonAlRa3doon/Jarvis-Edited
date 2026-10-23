@@ -1,6 +1,21 @@
-# OpenJarvis Pi Command Center 3.4.0
+# OpenJarvis Pi Command Center 3.6.3
 
 A private, Pi-first JARVIS visualization for OpenJarvis, Ollama, Docker, Google connectors, cameras, microphones, and guarded maintenance. The main route is now exactly one fullscreen neural field with no visible words, panels, cards, labels, or command bar.
+
+### 3.6 sensor and voice repair
+
+- Invalid saved browser device values such as `undefined` are cleaned automatically, and stale camera/microphone selections retry once with the browser default instead of failing after permission is granted.
+- Calibration now confirms the actual opened video/audio track labels, resumes the browser audio context, and reports permission, missing-device, and busy-device failures in plain language.
+- Fish Audio voice `612b878b113047d9a770c069c8b4fdfe` is the configured primary JARVIS voice with `s2.1-pro-free`; if its server-side API key is absent or Fish is unavailable, JARVIS immediately falls back to the selected local system voice.
+- Chromium's optional phrase-bias failure no longer disables recognition. Repeated browser-provider network failures enter audio-only mode without a retry storm and point directly to the explicit on-device language-pack installer in `/settings`.
+
+## What is new in 3.5
+
+- **Built-in JARVIS Search** — press `Ctrl/Cmd + K` or `/`, or long-press the neural field on touchscreens, to open a temporary command palette. Nothing is added to the resting fullscreen scene.
+- **One searchable local index** — search intelligence layers, settings, live services, installed Ollama models, Docker containers, storage devices, and private knowledge/file nodes already exposed to the dashboard.
+- **Search-to-AI fallback** — when a local destination is not enough, send the exact search text through the existing guarded local JARVIS chat route without adding a second model.
+- **Voice search commands** — say `Open search`, `Search dashboard for …`, or `Find in JARVIS …`; voice and typed searches share the same result index.
+- **Direct settings links** — search results can open the exact hidden settings section for devices, sensors, perception, voice, interface, or integrations.
 
 ## What is new in 3.4
 
@@ -25,7 +40,9 @@ A private, Pi-first JARVIS visualization for OpenJarvis, Ollama, Docker, Google 
 - **Actual spoken commands** — the browser voice core now listens continuously after permission is granted, recognizes up to five alternatives, waits for `Hey Jarvis` or `Jarvis`, joins nearby final transcript segments, suppresses duplicate echoes, and sends the spoken command through the same guarded chat route as typed input.
 - **More accurate wake matching** — configurable wake phrases, language/accent, confidence floor, end-of-command silence, common Jarvis mishearing correction, and false-trigger protection are available only in `/settings`.
 - **Adaptive acoustic processing** — exact-device VAD and clap analysis now learns the room noise floor and supports echo cancellation, noise suppression, auto gain, sharper double-clap impulse checks, and talkback-aware listening pauses.
-- **Configurable talkback** — choose an installed system voice, rate, pitch, volume, wake acknowledgement, and optional barge-in. Fish Audio remains an optional server-side mode with automatic local browser-voice fallback.
+- **Voice-locked talkback** — Fish Audio wake replies retry once and never silently change into an unrelated browser voice. Browser fallback is opt-in with `ALLOW_BROWSER_TTS_FALLBACK=true`.
+- **Reliable fullscreen talkback** — Fish audio is decoded through the microphone's active Web Audio engine instead of relying only on browser autoplay. If a fresh browser still requires activation, the reply is queued and the neural field pulses until the first click anywhere on the screen.
+- **Restart-safe dashboard sessions** — authenticated browser sessions use a signed secret stored only under ignored `data/`, so service restarts no longer leave an apparently live dashboard with silently unauthorized voice requests.
 - **Voice-reactive neural field** — the text-free particle scene changes light intensity, particle size, glow, and motion while listening, hearing, armed, thinking, speaking, or reporting an error.
 - **Smoother camera gestures** — pointer movement, pinch state, and two-hand zoom now use temporal smoothing, pinch hysteresis, and lost-frame tolerance to reduce jitter.
 - **Permission-safe auto start** — microphone and camera listeners auto-start only when the matching permission has already been granted. With the fullscreen page focused, press `V` for voice, `G` for gestures, or `Esc` to stop both without adding visible controls.
@@ -318,4 +335,3 @@ npm.cmd start
 ```
 
 Open the command screen and `/settings`. Pi-only maintenance and openWakeWord controls correctly stay unavailable on Windows; system telemetry, the UI, live preview, browser camera/person detection, browser microphone level, local double-clap detection, and any reachable OpenJarvis/Ollama services can still be tested.
-

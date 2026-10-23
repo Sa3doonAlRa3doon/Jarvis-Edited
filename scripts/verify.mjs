@@ -5,10 +5,10 @@ import { fileURLToPath } from 'node:url';
 
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (file) => fs.readFile(path.join(project, file), 'utf8');
-const [html, settingsHtml, client, settingsClient, authClient, css, server, helper, gitignore, packageRaw, galaxy, gestures, voiceController, voiceUtils, printerClient, knowledgeIndex, agentRouter] = await Promise.all([
+const [html, settingsHtml, client, settingsClient, authClient, css, server, helper, gitignore, packageRaw, galaxy, gestures, voiceController, voiceUtils, searchUtils, printerClient, knowledgeIndex, agentRouter] = await Promise.all([
   read('public/index.html'), read('public/settings.html'), read('public/app.js'), read('public/settings.js'),
   read('public/auth.js'), read('public/styles.css'), read('server.mjs'), read('scripts/jarvis-service-control.sh'), read('.gitignore'), read('package.json'),
-  read('public/galaxy.js'), read('public/gesture-controller.js'), read('public/voice-controller.js'), read('public/voice-utils.js'),
+  read('public/galaxy.js'), read('public/gesture-controller.js'), read('public/voice-controller.js'), read('public/voice-utils.js'), read('public/search-utils.js'),
   read('lib/printer-client.mjs'), read('lib/knowledge-index.mjs'), read('lib/agent-router.mjs')
 ]);
 const packageJson = JSON.parse(packageRaw);
@@ -32,7 +32,10 @@ for (const shard of shards) { const stats = await fs.stat(path.join(modelDirecto
 const handModel = await fs.readFile(path.join(project, 'public', 'models', 'hand-landmarker', 'hand_landmarker.task'));
 assert.equal(handModel.length, 7819105, 'Unexpected hand landmark model size.');
 
-assert.equal(packageJson.version, '3.4.0');
+assert.equal(packageJson.version, '3.6.3');
+assert.match(server, /ALLOW_BROWSER_TTS_FALLBACK/);
+assert.match(server, /X-Jarvis-Voice-ID/);
+assert.match(client, /Fish Audio playback failed without changing voices/);
 assert.match(server, /app\.get\('\/settings'/);
 assert.match(server, /v1\/traces\?limit=40/);
 assert.match(server, /timingSafeEqual/);
@@ -68,6 +71,16 @@ assert.match(css, /v2\.5 configuration core/);
 assert.match(css, /v3\.0 cinematic neural command deck/);
 assert.match(html, /class="command-page visual-only"/);
 assert.match(css, /v3\.1 single-screen neural field/);
+assert.match(html, /id="jarvis-search"/);
+assert.match(html, /id="jarvis-search-input"/);
+assert.match(client, /searchCatalog/);
+assert.match(client, /openSearch/);
+assert.match(client, /handleVoiceCommand/);
+assert.match(searchUtils, /normalizeSearchText/);
+assert.match(searchUtils, /fuzzyTermMatch/);
+assert.match(galaxy, /onLongPress/);
+assert.match(galaxy, /getSearchItems/);
+assert.match(css, /v3\.5 transient JARVIS search/);
 assert.doesNotMatch(galaxy, /fillText\(/);
 assert.match(server, /const primaryModel = resolvePrimaryModel\(process\.env\)/);
 assert.match(server, /const models = \{ primary: primaryModel \}/);
@@ -94,7 +107,12 @@ assert.match(settingsHtml, /id="install-local-speech"/);
 assert.match(settingsClient, /RecognitionClass\.install/);
 assert.match(settingsHtml, /id="test-recognition"/);
 assert.match(settingsHtml, /id="tts-voice"/);
-assert.match(server, /const appVersion = '3\.4\.0'/);
+assert.match(server, /wakeResponse: 'Yes sir, how can I help you today\?'/);
+assert.match(settingsHtml, /placeholder="Yes sir, how can I help you today\?"/);
+assert.match(server, /const appVersion = '3\.6\.3'/);
+assert.match(server, /loadDashboardSessionSecret/);
+assert.match(client, /window\.jarvisFetch/);
+assert.match(client, /state\.voice\.playAudio/);
 assert.match(server, /on-device-speech-recognition=\(self\)/);
 assert.match(server, /printerRefreshActive/);
 assert.match(server, /monitorTickActive/);
@@ -103,8 +121,9 @@ assert.match(client, /pollJson/);
 assert.match(html, /id="reactor-scan"/);
 assert.match(html, /class="constellation-labels"/);
 assert.match(client, /pulseCore/);
-assert.match(settingsClient, /exact:\s*settings\.browserCamera/);
-assert.match(settingsClient, /exact:\s*settings\.browserMicrophone/);
+assert.match(settingsClient, /deviceIdConstraint\(settings\.browserCamera\)/);
+assert.match(settingsClient, /deviceIdConstraint\(settings\.browserMicrophone\)/);
+assert.match(settingsClient, /getUserMediaWithFallback/);
 assert.match(settingsClient, /modelUrl: '\/models\/coco-ssd\/model\.json'/);
 assert.match(settingsHtml, /id="gesture-sensitivity"/);
 assert.match(html, /id="gesture-button"/);
@@ -115,7 +134,7 @@ assert.match(css, /\.fullscreen-gate/);
 assert.match(html, /data-printer="cancel"/);
 assert.match(client, /CANCEL PRINT/);
 assert.match(gestures, /HandLandmarker\.createFromOptions/);
-assert.match(gestures, /deviceId:\s*deviceId\s*\?\s*\{ exact: deviceId \}/);
+assert.match(gestures, /deviceIdConstraint\(selectedDevice\)/);
 assert.match(gestures, /threshold \* 1\.28/);
 assert.match(galaxy, /THREE\.WebGLRenderer/);
 assert.match(galaxy, /focusFromText/);
@@ -130,6 +149,7 @@ assert.doesNotMatch(printerClient, /gcode\/script/);
 assert.match(knowledgeIndex, /BLOCKED_NAMES/);
 assert.match(knowledgeIndex, /isSymbolicLink/);
 assert.match(css, /\.command-page\s*\{[^}]*overflow:\s*hidden/s);
+assert.match(css, /\.visual-only\.audio-locked #brain-canvas/);
 assert.match(helper, /SERVICES=\(ollama\.service openjarvis-api\.service hatclanker\.service\)/);
 assert.match(helper, /maintenance\.lock/);
 assert.doesNotMatch(helper, /\beval\b/);
@@ -140,4 +160,3 @@ console.log(`Verified ${shards.length} local person-model shards (${(modelBytes 
 console.log(`Verified local MediaPipe hand model (${(handModel.length / 1024 / 1024).toFixed(1)} MiB).`);
 console.log('Verified no-scroll 3D file galaxy, hidden settings, smoothed gestures, voice recognition controls, and live preview.');
 console.log('Verified session-gated dashboard, PIN-gated fixed printer/maintenance actions, and secret-file exclusions.');
-

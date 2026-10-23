@@ -139,4 +139,3 @@ export function isDuplicateCommand(command, previousCommand, elapsedMs, windowMs
   const current = normalizeTranscript(command); const previous = normalizeTranscript(previousCommand);
   return Boolean(current && previous && (current === previous || similarity(current, previous) >= 0.96));
 }
-

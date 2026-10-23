@@ -44,4 +44,3 @@ test('suppresses repeated command echoes while allowing new commands', () => {
   assert.equal(isDuplicateCommand('show printer status', 'show docker status', 900), false);
   assert.ok(similarity('restart services', 'restart service') > .9);
 });
-

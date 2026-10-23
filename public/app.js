@@ -1,6 +1,7 @@
 import { createKnowledgeGalaxy } from './galaxy.js';
 import { GestureController } from './gesture-controller.js';
 import { VoiceController } from './voice-controller.js';
+import { searchCatalog } from './search-utils.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -29,7 +30,9 @@ const ui = {
   printerState: $('#printer-state'), printerFile: $('#printer-file'), printerEta: $('#printer-eta'),
   printerProgress: $('#printer-progress'), printerPercent: $('#printer-percent'), printerTemps: $('#printer-temps'),
   fullscreenButton: $('#fullscreen-button'), fullscreenGate: $('#fullscreen-gate'), coreLayer: $('#core-layer'),
-  coreLink: $('#core-link'), coreHealth: $('#core-health'), reactorScan: $('#reactor-scan')
+  coreLink: $('#core-link'), coreHealth: $('#core-health'), reactorScan: $('#reactor-scan'),
+  searchDialog: $('#jarvis-search'), searchForm: $('#jarvis-search-form'), searchInput: $('#jarvis-search-input'),
+  searchResults: $('#jarvis-search-results'), searchClose: $('#jarvis-search-close'), searchMode: $('#jarvis-search-mode'), searchCount: $('#jarvis-search-count')
 };
 
 const state = {
@@ -38,8 +41,8 @@ const state = {
   history: [], lane: 'code', operation: null, operationKind: 'system', operationStatus: null, lastAssistant: '',
   galaxy: null, gesture: null, voice: null, printer: { configured: false, online: false, state: 'checking' },
   chart: { cpu: Array(52).fill(0), ram: Array(52).fill(0), gpu: Array(52).fill(0) },
-  neuralEnergy: 0.22, coreMode: 'system', voiceState: 'standby', voiceLevel: 0,
-  refreshFastPending: false, refreshSlowPending: false
+  neuralEnergy: 0.22, coreMode: 'system', voiceState: 'standby', voiceLevel: 0, searchResults: [], searchSelection: 0,
+  refreshFastPending: false, refreshSlowPending: false, pendingSpeech: null, audioPriming: false
 };
 
 const laneLabels = {
@@ -61,6 +64,28 @@ const routeModes = {
   GENERAL: 'system', CODEACT: 'agents', RESEARCH: 'research', MONITOR: 'docker',
   MEMORY: 'memory', FABRICATOR: 'printer', CONNECTOR: 'system'
 };
+
+const dashboardSearchItems = [
+  { id: 'mode-system', label: 'System Core', detail: 'Focus the central JARVIS intelligence', keywords: 'home overview health core', category: 'LAYER 01', kind: 'mode', value: 'system', priority: 100 },
+  { id: 'mode-docker', label: 'Docker Matrix', detail: 'Focus containers and local services', keywords: 'compose container engine services', category: 'LAYER 02', kind: 'mode', value: 'docker', priority: 92 },
+  { id: 'mode-printer', label: 'Fabricator', detail: 'Focus Moonraker and 3D printer telemetry', keywords: 'printer klipper moonraker gcode eta print', category: 'LAYER 03', kind: 'mode', value: 'printer', priority: 90 },
+  { id: 'mode-agents', label: 'Agent Operatives', detail: 'Focus CodeAct and active agent traces', keywords: 'codex code openhands native openhands agents', category: 'LAYER 04', kind: 'mode', value: 'agents', priority: 88 },
+  { id: 'mode-research', label: 'Deep Research', detail: 'Focus sourced research and citations', keywords: 'prospector web sources citations index', category: 'LAYER 05', kind: 'mode', value: 'research', priority: 86 },
+  { id: 'mode-memory', label: 'Second Brain', detail: 'Focus private knowledge and local files', keywords: 'memory archive notes files folders knowledge', category: 'LAYER 06', kind: 'mode', value: 'memory', priority: 84 },
+  { id: 'settings-all', label: 'Configuration Core', detail: 'Open the hidden JARVIS settings screen', keywords: 'settings configuration setup preferences', category: 'SETTINGS', kind: 'navigate', value: '/settings', priority: 82 },
+  { id: 'settings-devices', label: 'Camera and Microphone Settings', detail: 'Choose the exact browser or Raspberry Pi devices', keywords: 'camera microphone device input video audio pi browser', category: 'SETTINGS', kind: 'navigate', value: '/settings#devices', priority: 64 },
+  { id: 'settings-sensors', label: 'Live Sensor Calibration', detail: 'Test camera framing, person lock, and microphone level', keywords: 'sensor test calibration person camera mic', category: 'SETTINGS', kind: 'navigate', value: '/settings#sensors', priority: 63 },
+  { id: 'settings-perception', label: 'Perception Settings', detail: 'Tune gestures, wake word, clap, and detection sensitivity', keywords: 'gesture wake hey jarvis clap person sensitivity', category: 'SETTINGS', kind: 'navigate', value: '/settings#perception', priority: 62 },
+  { id: 'settings-voice', label: 'Voice Core Settings', detail: 'Tune recognition, language, microphone, and talkback', keywords: 'voice speech tts fish audio language wake accuracy', category: 'SETTINGS', kind: 'navigate', value: '/settings#voice', priority: 61 },
+  { id: 'settings-interface', label: 'Interface Settings', detail: 'Change accent and preview the command screen', keywords: 'appearance visual hud color accent preview', category: 'SETTINGS', kind: 'navigate', value: '/settings#interface', priority: 60 },
+  { id: 'settings-integrations', label: 'Google Integrations', detail: 'Inspect the private Google Workspace bridge', keywords: 'gmail drive calendar tasks contacts oauth google', category: 'SETTINGS', kind: 'navigate', value: '/settings#integrations', priority: 59 },
+  { id: 'action-voice', label: 'Toggle Voice Listener', detail: 'Start or stop the selected microphone listener', keywords: 'speak listen microphone wake voice', category: 'ACTION', kind: 'voice', priority: 76 },
+  { id: 'action-gestures', label: 'Toggle Camera Gestures', detail: 'Start or stop local hand tracking', keywords: 'camera hands pinch zoom gesture vision', category: 'ACTION', kind: 'gestures', priority: 72 },
+  { id: 'action-fullscreen', label: 'Toggle Fullscreen', detail: 'Enter or leave the immersive neural display', keywords: 'screen immersive f11 display', category: 'ACTION', kind: 'fullscreen', priority: 68 },
+  { id: 'prompt-health', label: 'Ask for a Health Report', detail: 'CPU, RAM, storage, temperature, and services', keywords: 'system status cpu ram gpu storage temperature', category: 'JARVIS', kind: 'prompt', value: 'Give me a concise health report for this Pi and its services.', priority: 56 },
+  { id: 'prompt-docker', label: 'Ask about Docker', detail: 'Explain containers, resource use, and unhealthy services', keywords: 'docker compose containers status', category: 'JARVIS', kind: 'prompt', value: 'Explain the current Docker containers, resource use, and anything unhealthy.', priority: 54 },
+  { id: 'prompt-printer', label: 'Ask for Print ETA', detail: 'Current print progress, time left, and temperatures', keywords: 'printer print eta time nozzle bed', category: 'JARVIS', kind: 'prompt', value: 'How much time is left on my 3D print and what are the current printer temperatures?', priority: 52 }
+];
 
 function activateCoreMode(mode, { focus = false } = {}) {
   const config = coreModes[mode] || coreModes.system; const changed = state.coreMode !== mode;
@@ -125,7 +150,7 @@ function timeLabel(value) {
   return Number.isNaN(date.getTime()) ? '--:--:--' : date.toLocaleTimeString('en-GB', { hour12: false });
 }
 async function json(url, options) {
-  const response = await fetch(url, options);
+  const response = await (window.jarvisFetch || fetch)(url, options);
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
   return payload;
@@ -136,6 +161,120 @@ async function pollJson(url, timeoutMs) {
   try { return await json(url, { signal: controller.signal }); }
   finally { clearTimeout(timer); }
 }
+
+function liveSearchItems() {
+  const items = [...dashboardSearchItems];
+  const services = state.status?.services || {};
+  const liveServices = [
+    { id: 'openjarvis', label: 'OpenJarvis API', detail: services.openjarvis?.online ? 'Online and reachable' : services.openjarvis?.detail || 'Offline', keywords: 'api agent codeact', value: 'system-agents', mode: 'agents', online: services.openjarvis?.online },
+    { id: 'ollama', label: 'Ollama Runtime', detail: services.ollama?.online ? `${services.ollama.models?.length || 0} local models installed` : 'Offline', keywords: 'model llm local inference', value: 'system-system', mode: 'system', online: services.ollama?.online },
+    { id: 'google', label: 'Google Workspace', detail: state.status?.google?.connected ? 'Private OAuth bridge connected' : 'Not connected', keywords: 'gmail drive calendar tasks contacts oauth', value: 'system-google', mode: 'system', online: state.status?.google?.connected },
+    { id: 'wake', label: 'Wake Listener', detail: state.status?.wake?.ready ? 'Hey JARVIS is listening' : state.status?.wake?.configured ? 'Starting' : 'Standby', keywords: 'voice microphone clap openwakeword', value: 'system-system', mode: 'system', online: state.status?.wake?.ready }
+  ];
+  for (const service of liveServices) items.push({ ...service, id: `live-${service.id}`, category: service.online ? 'ONLINE' : 'OFFLINE', kind: 'node', priority: 48 });
+
+  for (const model of services.ollama?.models || []) items.push({ id: `model-${model}`, label: model, detail: 'Installed local Ollama model', keywords: `ollama llm artificial intelligence ${model}`, category: 'MODEL', kind: 'node', value: 'system-system', mode: 'system', priority: 40 });
+  for (const device of state.storage || []) {
+    const label = device.model || device.name;
+    if (!label) continue;
+    items.push({ id: `storage-${device.name || label}`, label, detail: `${device.mountpoints?.join(', ') || device.type || 'storage'} // ${bytes(device.size)}`, keywords: `disk drive storage volume ${device.transport || ''}`, category: 'STORAGE', kind: 'mode', value: 'system', priority: 32 });
+  }
+  for (const container of state.docker?.containers || []) items.push({
+    id: `container-${container.id || container.name}`, label: container.name || container.id || 'Docker container',
+    detail: `${String(container.state || 'unknown').toUpperCase()} // ${container.cpu || 'CPU --'} // ${container.memoryPercent || container.status || 'MEM --'}`,
+    keywords: `docker compose container ${container.image || ''} ${container.status || ''}`, category: 'CONTAINER', kind: 'mode', value: 'docker', priority: 36
+  });
+  for (const node of state.galaxy?.getSearchItems?.() || []) items.push({ ...node, id: `node-${node.id}`, kind: 'node', value: node.id, mode: node.category === 'KNOWLEDGE' ? 'memory' : '', priority: node.category === 'KNOWLEDGE' ? 30 : 34 });
+
+  return items;
+}
+
+function setSearchSelection(index, { scroll = true } = {}) {
+  if (!state.searchResults.length) { state.searchSelection = 0; return; }
+  state.searchSelection = (index + state.searchResults.length) % state.searchResults.length;
+  const buttons = [...ui.searchResults.querySelectorAll('[data-search-index]')];
+  buttons.forEach((button, itemIndex) => {
+    const selected = itemIndex === state.searchSelection;
+    button.classList.toggle('selected', selected); button.setAttribute('aria-selected', String(selected));
+  });
+  const active = buttons[state.searchSelection];
+  if (active) {
+    ui.searchInput.setAttribute('aria-activedescendant', active.id);
+    if (scroll) active.scrollIntoView({ block: 'nearest' });
+  }
+}
+
+function renderSearchResults({ resetSelection = false } = {}) {
+  const query = ui.searchInput.value.trim();
+  state.searchResults = searchCatalog(liveSearchItems(), query, { limit: query ? 9 : 10 });
+  if (query) state.searchResults.push({ id: 'ask-current-query', label: `Ask JARVIS about “${query.slice(0, 80)}”`, detail: 'Send the full query to the selected local AI role', category: 'LOCAL AI', kind: 'ask', value: query });
+  if (resetSelection) state.searchSelection = 0;
+  state.searchSelection = Math.min(state.searchSelection, Math.max(0, state.searchResults.length - 1));
+  ui.searchMode.textContent = query ? `INDEX QUERY // ${query.slice(0, 40).toUpperCase()}` : 'QUICK ACCESS';
+  ui.searchCount.textContent = `${state.searchResults.length} RESULT${state.searchResults.length === 1 ? '' : 'S'}`;
+  const fragment = document.createDocumentFragment();
+  state.searchResults.forEach((item, index) => {
+    const button = document.createElement('button');
+    button.type = 'button'; button.id = `jarvis-search-result-${index}`; button.dataset.searchIndex = String(index); button.setAttribute('role', 'option');
+    const number = document.createElement('i'); number.textContent = String(index + 1).padStart(2, '0');
+    const copy = document.createElement('span'); const label = document.createElement('strong'); const detail = document.createElement('small');
+    label.textContent = item.label; detail.textContent = item.detail || 'Open'; copy.append(label, detail);
+    const category = document.createElement('b'); category.textContent = item.category || 'INDEX';
+    button.append(number, copy, category);
+    button.addEventListener('pointermove', () => setSearchSelection(index, { scroll: false }));
+    button.addEventListener('click', () => executeSearchItem(item));
+    fragment.append(button);
+  });
+  ui.searchResults.replaceChildren(fragment);
+  setSearchSelection(state.searchSelection, { scroll: false });
+}
+
+function openSearch(initialQuery = '') {
+  if (ui.operationDialog?.open) return false;
+  if (!ui.searchDialog.open) {
+    try { ui.searchDialog.showModal(); }
+    catch { ui.searchDialog.setAttribute('open', ''); }
+  }
+  document.body.dataset.searchOpen = 'true';
+  ui.searchInput.value = String(initialQuery || '').trim(); state.searchSelection = 0;
+  renderSearchResults({ resetSelection: true });
+  state.galaxy?.setActivity('hearing', .35);
+  requestAnimationFrame(() => { ui.searchInput.focus(); ui.searchInput.select(); });
+  return true;
+}
+
+function closeSearch() {
+  if (!ui.searchDialog.open) return;
+  try { ui.searchDialog.close(); } catch { ui.searchDialog.removeAttribute('open'); }
+  delete document.body.dataset.searchOpen;
+  ui.searchInput.removeAttribute('aria-activedescendant');
+  state.galaxy?.setActivity(state.voiceState, state.voiceLevel);
+}
+
+function executeSearchItem(item = state.searchResults[state.searchSelection]) {
+  if (!item) return;
+  closeSearch();
+  if (item.kind === 'navigate') { window.location.assign(item.value); return; }
+  if (item.kind === 'mode') { activateCoreMode(item.value, { focus: true }); return; }
+  if (item.kind === 'node') {
+    if (item.mode) activateCoreMode(item.mode);
+    state.galaxy?.selectById(item.value); return;
+  }
+  if (item.kind === 'voice') { void toggleVoice(); return; }
+  if (item.kind === 'gestures') { void toggleGestures(); return; }
+  if (item.kind === 'fullscreen') { void toggleFullscreen(); return; }
+  if (item.kind === 'prompt' || item.kind === 'ask') void sendPrompt(item.value);
+}
+
+function handleVoiceCommand(command) {
+  const text = String(command || '').trim();
+  if (/^(?:open|show)(?: the)? (?:jarvis )?search$/i.test(text)) { openSearch(); return; }
+  const searchMatch = text.match(/^(?:search (?:the )?dashboard for|find in jarvis)\s+(.+)$/i);
+  if (searchMatch) { openSearch(searchMatch[1]); return; }
+  void sendPrompt(text);
+}
+
+function refreshSearchIfOpen() { if (ui.searchDialog.open) renderSearchResults(); }
 
 function updateClock() {
   const now = new Date();
@@ -193,6 +332,7 @@ function renderStorage(devices) {
     const label = item.model || item.name; const mounts = item.mountpoints?.join(', ') || item.type;
     return `<article class="storage-item"><div><strong>${escapeHtml(label)}</strong><span>${escapeHtml(mounts)} // ${escapeHtml(item.transport || 'local')}</span></div><b>${bytes(used)} / ${bytes(item.size)}</b></article>`;
   }).join('') : '<p class="empty-state">No mounted storage was reported.</p>';
+  refreshSearchIfOpen();
 }
 
 function renderStatus(payload) {
@@ -213,6 +353,7 @@ function renderStatus(payload) {
   ui.wakeState.textContent = payload.wake?.ready ? 'LISTENING' : payload.wake?.configured ? 'STARTING' : 'STANDBY';
   state.neuralEnergy = healthy ? .42 : .18;
   renderOperationStatus(payload.operations);
+  refreshSearchIfOpen();
 }
 
 function renderOperationStatus(operations) {
@@ -224,10 +365,11 @@ function renderOperationStatus(operations) {
 
 function renderDocker(payload) {
   state.docker = payload;
-  if (!payload.available) { ui.dockerSummary.textContent = 'UNAVAILABLE'; ui.dockerList.innerHTML = '<p class="empty-state">Docker engine is not available on this host.</p>'; return; }
+  if (!payload.available) { ui.dockerSummary.textContent = 'UNAVAILABLE'; ui.dockerList.innerHTML = '<p class="empty-state">Docker engine is not available on this host.</p>'; refreshSearchIfOpen(); return; }
   const running = payload.containers.filter((item) => String(item.state).toLowerCase() === 'running').length;
   ui.dockerSummary.textContent = `${running}/${payload.containers.length} RUNNING`;
   ui.dockerList.innerHTML = payload.containers.length ? payload.containers.slice(0, 8).map((item) => `<article class="docker-item"><i class="${String(item.state).toLowerCase() === 'running' ? 'ok' : ''}"></i><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.cpu || item.state)}</span><b>${escapeHtml(item.memoryPercent || item.status)}</b></article>`).join('') : '<p class="empty-state">Docker is online with no containers.</p>';
+  refreshSearchIfOpen();
 }
 
 function renderPrinter(payload) {
@@ -244,6 +386,7 @@ function renderPrinter(payload) {
     const action = button.dataset.printer;
     button.disabled = !online || (action === 'pause' && payload.state !== 'printing') || (action === 'resume' && payload.state !== 'paused') || (action === 'cancel' && !['printing', 'paused'].includes(payload.state));
   });
+  refreshSearchIfOpen();
 }
 
 function renderAgents(payload) {
@@ -310,28 +453,88 @@ function selectBrowserVoice() {
     || voices[0] || null;
 }
 
+const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+async function requestFishSpeech(text) {
+  let lastError = new Error('Fish Audio request failed.');
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await (window.jarvisFetch || fetch)('/api/tts', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, mode: 'fish' })
+      });
+      if (response.ok) return { bytes: await response.arrayBuffer(), contentType: response.headers.get('content-type') || 'audio/mpeg' };
+      const detail = await response.json().catch(() => ({}));
+      const error = new Error(detail.error || `Fish Audio returned HTTP ${response.status}.`);
+      error.status = response.status;
+      throw error;
+    } catch (error) {
+      lastError = error;
+      if (error?.name === 'NotAllowedError' || Number(error?.status) < 500 || attempt === 1) break;
+      await wait(350);
+    }
+  }
+  throw lastError;
+}
+
 async function speak(text) {
   if (!state.settings?.autoSpeak || !text) return;
   state.voice?.setSpeaking(true); updateVoiceVisual('speaking', .72);
-  if (state.config?.ttsMode === 'fish') {
-    try {
-      const response = await fetch('/api/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, mode: 'fish' }) });
-      if (response.ok) {
-        const url = URL.createObjectURL(await response.blob()); const audio = new Audio(url); audio.volume = Number(state.settings?.ttsVolume ?? 1);
-        await new Promise((resolve, reject) => { audio.onended = resolve; audio.onerror = reject; audio.play().catch(reject); });
-        URL.revokeObjectURL(url); state.voice?.setSpeaking(false); return;
+  try {
+    if (state.config?.ttsMode === 'fish') {
+      document.body.dataset.ttsProvider = 'fish';
+      document.body.dataset.ttsVoice = state.config.fishVoiceId || 'unconfigured';
+      document.body.dataset.ttsState = 'requesting';
+      try {
+        const result = await requestFishSpeech(text);
+        document.body.dataset.ttsState = 'playing';
+        if (state.voice?.playAudio) await state.voice.playAudio(result.bytes, Number(state.settings?.ttsVolume ?? 1));
+        else {
+          const url = URL.createObjectURL(new Blob([result.bytes], { type: result.contentType }));
+          const audio = new Audio(url); audio.volume = Number(state.settings?.ttsVolume ?? 1);
+          try { await new Promise((resolve, reject) => { audio.onended = resolve; audio.onerror = reject; audio.play().catch(reject); }); }
+          finally { URL.revokeObjectURL(url); }
+        }
+        state.pendingSpeech = null; document.body.classList.remove('audio-locked'); document.body.dataset.ttsState = 'complete'; return;
+      } catch (error) {
+        if (error?.name === 'NotAllowedError') {
+          state.pendingSpeech = { text }; document.body.classList.add('audio-locked'); document.body.dataset.ttsState = 'blocked'; state.galaxy?.setActivity('armed', 1); return;
+        }
+        document.body.dataset.ttsState = 'error';
+        console.warn(`Fish Audio playback failed without changing voices: ${error?.message || error}`);
+        if (!state.config?.allowBrowserTtsFallback) { state.galaxy?.setActivity('error', 1); return; }
       }
-    } catch {}
+    }
+    if ('speechSynthesis' in window) {
+      document.body.dataset.ttsProvider = 'browser'; document.body.dataset.ttsVoice = selectBrowserVoice()?.voiceURI || 'system-default'; document.body.dataset.ttsState = 'requesting';
+      if (navigator.userActivation && !navigator.userActivation.hasBeenActive) {
+        state.pendingSpeech = { text }; document.body.classList.add('audio-locked'); document.body.dataset.ttsState = 'blocked'; state.galaxy?.setActivity('armed', 1); return;
+      }
+      await new Promise((resolve) => {
+        speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance(String(text).slice(0, 1800));
+        const timeout = setTimeout(resolve, Math.max(6000, Math.min(120_000, String(text).length * 95)));
+        utterance.rate = Number(state.settings?.ttsRate ?? 1.02); utterance.pitch = Number(state.settings?.ttsPitch ?? .92); utterance.volume = Number(state.settings?.ttsVolume ?? 1);
+        const voice = selectBrowserVoice(); if (voice) utterance.voice = voice;
+        utterance.onstart = () => { document.body.dataset.ttsState = 'playing'; };
+        utterance.onend = () => { clearTimeout(timeout); document.body.dataset.ttsState = 'complete'; resolve(); };
+        utterance.onerror = () => { clearTimeout(timeout); document.body.dataset.ttsState = 'error'; resolve(); }; speechSynthesis.speak(utterance);
+      });
+    }
+  } finally {
+    state.voice?.setSpeaking(false);
   }
-  if ('speechSynthesis' in window) {
-    await new Promise((resolve) => {
-      speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance(String(text).slice(0, 1800));
-      utterance.rate = Number(state.settings?.ttsRate ?? 1.02); utterance.pitch = Number(state.settings?.ttsPitch ?? .92); utterance.volume = Number(state.settings?.ttsVolume ?? 1);
-      const voice = selectBrowserVoice(); if (voice) utterance.voice = voice;
-      utterance.onend = resolve; utterance.onerror = resolve; speechSynthesis.speak(utterance);
-    });
-  }
-  state.voice?.setSpeaking(false);
+}
+
+async function unlockAudioFromGesture() {
+  if (state.audioPriming || !state.voice?.primeAudio) return;
+  state.audioPriming = true;
+  try {
+    const ready = await state.voice.primeAudio();
+    if (!ready) return;
+    document.body.classList.remove('audio-locked');
+    const pending = state.pendingSpeech; state.pendingSpeech = null;
+    if (pending?.text) void speak(pending.text);
+  } catch {}
+  finally { state.audioPriming = false; }
 }
 
 function handleWake(event) {
@@ -490,6 +693,11 @@ ui.gestureButton.addEventListener('click', () => void toggleGestures());
 ui.fullscreenButton?.addEventListener('click', () => void toggleFullscreen());
 ui.fullscreenGate?.addEventListener('click', () => void toggleFullscreen());
 ui.reactorScan?.addEventListener('click', pulseCore);
+ui.searchForm.addEventListener('submit', (event) => { event.preventDefault(); executeSearchItem(); });
+ui.searchInput.addEventListener('input', () => renderSearchResults({ resetSelection: true }));
+ui.searchClose.addEventListener('click', closeSearch);
+ui.searchDialog.addEventListener('cancel', (event) => { event.preventDefault(); closeSearch(); });
+ui.searchDialog.addEventListener('pointerdown', (event) => { if (event.target === ui.searchDialog) closeSearch(); });
 ui.operationForm.addEventListener('submit', (event) => { event.preventDefault(); void runOperation(); });
 ui.operationClose.addEventListener('click', () => ui.operationDialog.close());
 window.addEventListener('resize', () => { syncFullscreenUi(); drawTelemetry(); });
@@ -497,12 +705,24 @@ document.addEventListener('fullscreenchange', syncFullscreenUi);
 document.addEventListener('webkitfullscreenchange', syncFullscreenUi);
 window.addEventListener('message', (event) => { if (event.origin === location.origin && event.data?.type === 'jarvis-settings-preview') { state.settings = { ...state.settings, ...event.data.settings }; state.voice?.configure(state.settings); document.documentElement.style.setProperty('--accent', state.settings.accent); } });
 window.addEventListener('keydown', (event) => {
-  if (event.target?.matches('input,textarea,select')) return;
+  const shortcut = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k';
+  if (shortcut) { event.preventDefault(); openSearch(ui.searchDialog.open ? ui.searchInput.value : ''); return; }
+  if (ui.searchDialog.open) {
+    if (event.key === 'ArrowDown') { event.preventDefault(); setSearchSelection(state.searchSelection + 1); }
+    else if (event.key === 'ArrowUp') { event.preventDefault(); setSearchSelection(state.searchSelection - 1); }
+    else if (event.key === 'Escape') { event.preventDefault(); closeSearch(); }
+    return;
+  }
+  const editable = event.target?.matches('input,textarea,select,[contenteditable="true"]');
+  if (!editable && event.key === '/') { event.preventDefault(); openSearch(); return; }
+  if (editable) return;
   if (event.key.toLowerCase() === 'v') void toggleVoice();
   if (event.key.toLowerCase() === 'g') void toggleGestures();
   if (event.key === 'Escape') { void state.voice?.stop(); void state.gesture?.stop(); }
 });
 window.addEventListener('beforeunload', () => { void state.voice?.stop(); void state.gesture?.stop(); });
+document.addEventListener('pointerdown', () => void unlockAudioFromGesture(), { capture: true });
+document.addEventListener('keydown', () => void unlockAudioFromGesture(), { capture: true });
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) { void refreshFast({ force: true }); void refreshSlow({ force: true }); }
 });
@@ -515,14 +735,18 @@ async function init() {
   const [config, settings] = await Promise.allSettled([json('/api/config'), json('/api/settings')]);
   if (config.status === 'fulfilled') state.config = config.value;
   if (settings.status === 'fulfilled') { state.settings = settings.value; document.documentElement.style.setProperty('--accent', state.settings.accent); }
-  state.galaxy = await createKnowledgeGalaxy({ canvas: ui.brain, inspector: ui.nodeInspector, onStatus: (message) => { ui.galaxyState.textContent = message; } });
+  state.galaxy = await createKnowledgeGalaxy({ canvas: ui.brain, inspector: ui.nodeInspector, onStatus: (message) => { ui.galaxyState.textContent = message; }, onLongPress: () => openSearch() });
   activateCoreMode('system');
   state.voice = new VoiceController({
     onState: (mode) => updateVoiceVisual(mode),
     onLevel: ({ level }) => { state.voiceLevel = level; state.galaxy?.setAudioLevel(level); },
     onWake: (detail) => handleWake({ detail }),
-    onCommand: (command) => void sendPrompt(command),
-    onTranscript: ({ text, final }) => { if (final && ui.prompt) ui.prompt.value = text; },
+    onCommand: handleVoiceCommand,
+    onTranscript: ({ text, final }) => {
+      if (!final) return;
+      if (ui.searchDialog.open) { ui.searchInput.value = text; renderSearchResults({ resetSelection: true }); }
+      else if (ui.prompt) ui.prompt.value = text;
+    },
     onError: (error) => { appendMessage('error', error.message); updateVoiceVisual('error', 1); }
   });
   state.voice.configure(state.settings || {});
@@ -538,4 +762,3 @@ async function init() {
 }
 
 void init();
-

@@ -127,8 +127,8 @@
               <label class="setting" data-search="speech language accent locale"><span>RECOGNITION LANGUAGE</span><select id="voice-language"><option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="en-AE">English (UAE)</option><option value="ar-AE">Arabic (UAE)</option></select><small>Choose the language and accent closest to your speech.</small></label>
               <label class="setting" data-search="wake phrase jarvis aliases"><span>WAKE PHRASES</span><input id="wake-phrases" type="text" maxlength="160" placeholder="hey jarvis, jarvis"><small>Comma-separated phrases; common Jarvis mishearings are corrected automatically.</small></label>
               <label class="setting full" data-search="recognition vocabulary bias terms ollama docker moonraker raspberry pi"><span>JARVIS VOCABULARY</span><input id="voice-vocabulary" type="text" maxlength="900" placeholder="OpenJarvis, Ollama, Docker, Moonraker, Raspberry Pi"><small>Comma-separated names receive extra recognition weight when the browser supports contextual biasing.</small></label>
-              <label class="setting" data-search="talkback voice speaker"><span>LOCAL TALKBACK VOICE</span><select id="tts-voice"><option value="">System default voice</option></select><small>Uses an installed browser or operating-system voice.</small></label>
-              <label class="setting" data-search="wake response acknowledgement"><span>WAKE ACKNOWLEDGEMENT</span><input id="wake-response" type="text" maxlength="60" placeholder="Yes?"><small>Short reply after JARVIS or a double clap. Leave blank for silent wake.</small></label>
+              <label class="setting" data-search="talkback voice speaker fish audio"><span>LOCAL FALLBACK VOICE</span><select id="tts-voice"><option value="">System default voice</option></select><small id="tts-provider-note">Used when the primary server voice is unavailable.</small></label>
+              <label class="setting" data-search="wake response acknowledgement"><span>WAKE ACKNOWLEDGEMENT</span><input id="wake-response" type="text" maxlength="60" placeholder="Yes sir, how can I help you today?"><small>Spoken after either “Hey Jarvis” or a double clap. Leave blank for silent wake.</small></label>
             </div>
             <div class="toggle-grid voice-toggles">
               <label class="switch" data-search="voice automatic start permission"><span><b>AUTO-START WHEN ALLOWED</b><small>Starts only after microphone permission was already granted</small></span><input id="voice-auto-start" type="checkbox"><i></i></label>
@@ -158,10 +158,10 @@
             <div class="accent-control">
               <label class="setting" data-search="hud accent color"><span>HUD ACCENT COLOR</span><input id="accent" type="color"><small>Updates the reactor and telemetry highlights immediately.</small></label>
               <div class="accent-presets" role="group" aria-label="Accent presets">
-                <button type="button" data-accent="#64e8ff" style="--swatch:#64e8ff"><i></i> ARC CYAN</button>
-                <button type="button" data-accent="#71ffca" style="--swatch:#71ffca"><i></i> MINT CORE</button>
-                <button type="button" data-accent="#f5bd5c" style="--swatch:#f5bd5c"><i></i> MARK GOLD</button>
-                <button type="button" data-accent="#7d8cff" style="--swatch:#7d8cff"><i></i> NEURAL VIOLET</button>
+                <button class="swatch-cyan" type="button" data-accent="#64e8ff"><i></i> ARC CYAN</button>
+                <button class="swatch-mint" type="button" data-accent="#71ffca"><i></i> MINT CORE</button>
+                <button class="swatch-gold" type="button" data-accent="#f5bd5c"><i></i> MARK GOLD</button>
+                <button class="swatch-violet" type="button" data-accent="#7d8cff"><i></i> NEURAL VIOLET</button>
               </div>
             </div>
             <div class="interface-note"><span>DISPLAY CONTRACT</span><h3>ONE SCREEN. ZERO PAGE SCROLL.</h3><p>The command dashboard remains a full-screen instrument panel. Use the preview viewport controls to inspect laptop and Pi display proportions.</p></div>
@@ -208,4 +208,3 @@
   <script src="/settings.js" type="module"></script>
 </body>
 </html>
-

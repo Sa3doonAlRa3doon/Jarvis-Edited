@@ -9,6 +9,7 @@ import express from 'express';
 import { agentRoles, resolvePrimaryModel, routePrompt } from './lib/agent-router.mjs';
 import { EventStore } from './lib/event-store.mjs';
 import { buildKnowledgeIndex } from './lib/knowledge-index.mjs';
+import { issueDashboardSession, loadDashboardSessionSecret, verifyDashboardSession } from './lib/dashboard-session.mjs';
 import { PrinterClient } from './lib/printer-client.mjs';
 import {
   audioRms, clamp, dockerSummary, linuxCameras, linuxMicrophones,
@@ -17,7 +18,7 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const appVersion = '3.4.0';
+const appVersion = '3.6.3';
 const host = process.env.HOST || '127.0.0.1';
 const port = Number(process.env.PORT || 8787);
 const openJarvisUrl = (process.env.OPENJARVIS_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
@@ -35,6 +36,7 @@ const printerSubscribers = new Set();
 let knowledgeCache = null;
 const wakeEventToken = crypto.randomBytes(32).toString('hex');
 const dashboardAccessPin = String(process.env.DASHBOARD_ACCESS_PIN || process.env.OPS_CONTROL_PIN || '');
+let dashboardSessionSecret = null;
 const helperPath = process.env.OPS_HELPER_PATH || '/usr/local/sbin/jarvis-service-control';
 const primaryModel = resolvePrimaryModel(process.env);
 const models = { primary: primaryModel };
@@ -77,15 +79,20 @@ const defaultSettings = {
   voiceLanguage: 'en-US', wakePhrases: ['hey jarvis', 'jarvis', 'جارفيس', 'يا جارفيس'],
   voiceVocabulary: ['OpenJarvis', 'Ollama', 'Docker', 'Moonraker', 'Klipper', 'Raspberry Pi', 'Tailscale', 'CodeAct', 'OpenHands', 'Hatclanker'], recognitionConfidence: 0.35, commandSilenceMs: 700,
   voiceAutoStart: true, preferLocalRecognition: true, echoCancellation: true, noiseSuppression: true, autoGainControl: true, bargeIn: false,
-  ttsVoice: '', ttsRate: 1.02, ttsPitch: 0.92, ttsVolume: 1, wakeResponse: 'Yes?'
+  ttsVoice: '', ttsRate: 1.02, ttsPitch: 0.92, ttsVolume: 1, wakeResponse: 'Yes sir, how can I help you today?'
 };
 let settings = { ...defaultSettings };
+
+function cleanBrowserDeviceId(value) {
+  const id = cleanText(value, 180);
+  return ['undefined', 'null', 'false', 'nan', '[object object]'].includes(id.toLowerCase()) ? '' : id;
+}
 
 function validateSettings(input = {}) {
   const accent = /^#[0-9a-f]{6}$/i.test(String(input.accent || '')) ? String(input.accent) : defaultSettings.accent;
   return {
     source: input.source === 'pi' ? 'pi' : 'browser',
-    browserCamera: cleanText(input.browserCamera, 180), browserMicrophone: cleanText(input.browserMicrophone, 180),
+    browserCamera: cleanBrowserDeviceId(input.browserCamera), browserMicrophone: cleanBrowserDeviceId(input.browserMicrophone),
     piCamera: /^\/dev\/video\d+$/.test(String(input.piCamera || '')) ? String(input.piCamera) : '',
     piMicrophone: /^plughw:\d+,\d+$/.test(String(input.piMicrophone || '')) ? String(input.piMicrophone) : '',
     personDetection: input.personDetection !== false, voiceActivity: input.voiceActivity !== false,
@@ -222,7 +229,6 @@ function operationRateLimited(key) {
   return recent.length > 8;
 }
 
-const dashboardSessions = new Map();
 const dashboardLoginAttempts = new Map();
 function cookieValue(request, name) {
   const prefix = `${name}=`;
@@ -232,13 +238,10 @@ function cookieValue(request, name) {
   }
   return '';
 }
-function sessionDigest(token) { return crypto.createHash('sha256').update(String(token)).digest('hex'); }
 function dashboardAuthenticated(request) {
   if (!dashboardAccessPin) return true;
   const token = cookieValue(request, 'jarvis_session');
-  const expiresAt = dashboardSessions.get(sessionDigest(token));
-  if (!expiresAt || expiresAt < Date.now()) { if (token) dashboardSessions.delete(sessionDigest(token)); return false; }
-  return true;
+  return verifyDashboardSession(token, dashboardSessionSecret);
 }
 function verifyDashboardPin(input) {
   const actual = String(input || '');
@@ -334,21 +337,18 @@ app.post('/api/auth/login', (request, response) => {
   if (!dashboardAccessPin) { response.json({ ok: true, required: false }); return; }
   if (loginRateLimited(request.ip)) { response.status(429).json({ error: 'Too many login attempts. Wait ten minutes.' }); return; }
   if (!verifyDashboardPin(request.body?.pin)) { response.status(403).json({ error: 'Dashboard PIN is incorrect.' }); return; }
-  const token = crypto.randomBytes(32).toString('base64url');
-  dashboardSessions.set(sessionDigest(token), Date.now() + 12 * 60 * 60_000);
+  const token = issueDashboardSession(dashboardSessionSecret);
   const secure = request.secure || String(request.get('X-Forwarded-Proto') || '').toLowerCase() === 'https';
   response.set('Set-Cookie', `jarvis_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200${secure ? '; Secure' : ''}`);
   response.json({ ok: true, expiresIn: 43200 });
 });
 app.post('/api/auth/logout', (request, response) => {
-  const token = cookieValue(request, 'jarvis_session');
-  if (token) dashboardSessions.delete(sessionDigest(token));
   response.set('Set-Cookie', 'jarvis_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0');
   response.json({ ok: true });
 });
 app.use('/api', requireDashboardAuth);
 
-app.get('/api/config', (_request, response) => response.json({ name: 'JARVIS', version: appVersion, ttsMode: process.env.TTS_MODE || 'local', fishVoiceId: process.env.FISH_AUDIO_VOICE_ID || '', model: primaryModel, models, agents: Object.fromEntries(Object.entries(agentRoles).map(([route, role]) => [route, role.name])), timezone: 'Asia/Dubai', piOnly: true, operationsEnabled: Boolean(process.env.OPS_CONTROL_PIN), printerConfigured: printerClient.configured }));
+app.get('/api/config', (_request, response) => response.json({ name: 'JARVIS', version: appVersion, ttsMode: process.env.TTS_MODE || 'local', fishVoiceId: process.env.FISH_AUDIO_VOICE_ID || '', fishModel: process.env.FISH_AUDIO_MODEL || 's2.1-pro-free', fishConfigured: Boolean(process.env.FISH_AUDIO_API_KEY && process.env.FISH_AUDIO_VOICE_ID), allowBrowserTtsFallback: asBool(process.env.ALLOW_BROWSER_TTS_FALLBACK, false), model: primaryModel, models, agents: Object.fromEntries(Object.entries(agentRoles).map(([route, role]) => [route, role.name])), timezone: 'Asia/Dubai', piOnly: true, operationsEnabled: Boolean(process.env.OPS_CONTROL_PIN), printerConfigured: printerClient.configured }));
 app.get('/api/metrics', async (_request, response) => response.json(await systemMetrics()));
 app.get('/api/storage', async (_request, response) => response.json({ devices: await storageDevices() }));
 app.get('/api/docker', async (_request, response) => response.json(await dockerSummary()));
@@ -481,14 +481,38 @@ app.post('/api/chat', async (request, response) => {
 app.post('/api/tts', async (request, response) => {
   const text = cleanText(request.body?.text, 2500); const requestedMode = request.body?.mode === 'fish' ? 'fish' : 'local';
   if (!text) { response.status(400).json({ error: 'Speech text is empty.' }); return; }
-  if (requestedMode !== 'fish') { response.status(409).json({ error: 'Use the browser local voice for offline speech.', fallback: 'browser' }); return; }
+  if (requestedMode !== 'fish') { response.status(409).json({ error: 'Fish Audio mode was not requested.' }); return; }
   const apiKey = process.env.FISH_AUDIO_API_KEY; const voiceId = process.env.FISH_AUDIO_VOICE_ID;
-  if (!apiKey || !voiceId) { response.status(503).json({ error: 'Fish Audio is not configured.', fallback: 'browser' }); return; }
+  if (!apiKey || !voiceId) { response.status(503).json({ error: 'Fish Audio is not configured.' }); return; }
   try {
-    const fishResponse = await fetch('https://api.fish.audio/v1/tts', { method: 'POST', signal: AbortSignal.timeout(120_000), headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', model: process.env.FISH_AUDIO_MODEL || 's2.1-pro-free' }, body: JSON.stringify({ text, reference_id: voiceId, format: 'mp3', latency: 'balanced', prosody: { speed: 1.02, volume: 0 } }) });
+    const latency = ['normal', 'balanced', 'low'].includes(process.env.FISH_AUDIO_LATENCY) ? process.env.FISH_AUDIO_LATENCY : 'normal';
+    const fishResponse = await fetch('https://api.fish.audio/v1/tts', {
+      method: 'POST',
+      signal: AbortSignal.timeout(120_000),
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', model: process.env.FISH_AUDIO_MODEL || 's2.1-pro-free' },
+      body: JSON.stringify({
+        text,
+        reference_id: voiceId,
+        temperature: safeNumber(process.env.FISH_AUDIO_TEMPERATURE, 0.3, 0, 1),
+        top_p: safeNumber(process.env.FISH_AUDIO_TOP_P, 0.55, 0, 1),
+        normalize: true,
+        language: 'en',
+        format: 'mp3',
+        sample_rate: 44100,
+        mp3_bitrate: 192,
+        latency,
+        features: ['quality-guard'],
+        prosody: {
+          speed: safeNumber(process.env.FISH_AUDIO_SPEED, 0.92, 0.5, 2),
+          volume: safeNumber(process.env.FISH_AUDIO_VOLUME, 0, -20, 20),
+          normalize_loudness: true
+        }
+      })
+    });
     if (!fishResponse.ok) throw new Error(`Fish Audio returned HTTP ${fishResponse.status}`);
+    response.set({ 'Cache-Control': 'no-store', 'X-Jarvis-TTS-Provider': 'fish', 'X-Jarvis-Voice-ID': voiceId });
     response.type(fishResponse.headers.get('content-type') || 'audio/mpeg'); response.send(Buffer.from(await fishResponse.arrayBuffer()));
-  } catch (error) { response.status(502).json({ error: error.message, fallback: 'browser' }); }
+  } catch (error) { response.status(502).json({ error: error.message }); }
 });
 
 app.get('/settings', (_request, response) => response.sendFile(path.join(__dirname, 'public', 'settings.html')));
@@ -532,7 +556,9 @@ async function monitorTick() {
   finally { monitorTickActive = false; }
 }
 
-await eventStore.init(); await loadSettings(); await eventStore.append('boot', 'JARVIS command center starting', { version: appVersion, platform: process.platform });
+await eventStore.init(); await loadSettings();
+dashboardSessionSecret = await loadDashboardSessionSecret(dataDirectory, process.env.DASHBOARD_SESSION_SECRET);
+await eventStore.append('boot', 'JARVIS command center starting', { version: appVersion, platform: process.platform });
 const server = app.listen(port, host, async () => {
   console.log(`JARVIS Command Center listening at http://${host}:${port}`); console.log(`OpenJarvis: ${openJarvisUrl} | Ollama: ${ollamaUrl}`);
   await startWakeListener(); void monitorTick(); void refreshPrinterStatus();
@@ -543,4 +569,3 @@ async function shutdown() {
   clearInterval(monitorTimer); clearInterval(printerTimer); await stopWakeListener(); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 3000).unref();
 }
 process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);
-

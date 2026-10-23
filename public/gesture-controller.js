@@ -1,4 +1,5 @@
 import { FilesetResolver, HandLandmarker } from '/vendor/mediapipe/vision_bundle.mjs';
+import { deviceIdConstraint, getUserMediaWithFallback, normalizeDeviceId } from './media-utils.js';
 
 const connections = [
   [0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8], [5, 9], [9, 10], [10, 11], [11, 12],
@@ -28,12 +29,14 @@ export class GestureController {
 
   async start({ deviceId = '', sensitivity = .42 } = {}) {
     await this.stop(); this.sensitivity = Number(sensitivity) || .42; this.smoothed = null; this.pinched = false; this.smoothedSpread = 0; this.missingFrames = 0; await this.load();
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      video: { deviceId: deviceId ? { exact: deviceId } : undefined, width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24, max: 30 } },
+    const selectedDevice = normalizeDeviceId(deviceId);
+    const opened = await getUserMediaWithFallback(navigator.mediaDevices, {
+      video: { deviceId: deviceIdConstraint(selectedDevice), width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24, max: 30 } },
       audio: false
     });
+    this.stream = opened.stream;
     this.video.srcObject = this.stream; await this.video.play(); this.video.hidden = false; this.canvas.hidden = false;
-    this.onStatus('GESTURE TRACKING'); this.loop();
+    this.onStatus(opened.fallbackUsed ? 'DEFAULT CAMERA // TRACKING' : 'GESTURE TRACKING'); this.loop();
   }
 
   draw(landmarks) {

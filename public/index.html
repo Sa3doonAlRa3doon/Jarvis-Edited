@@ -183,6 +183,27 @@
     <small>FULLSCREEN COMMAND INTERFACE</small>
   </button>
 
+  <dialog id="jarvis-search" class="jarvis-search" aria-labelledby="jarvis-search-title">
+    <form id="jarvis-search-form" class="jarvis-search-panel" autocomplete="off">
+      <header class="jarvis-search-head">
+        <div><span>LOCAL COMMAND INDEX</span><strong id="jarvis-search-title">JARVIS SEARCH</strong></div>
+        <button id="jarvis-search-close" type="button" aria-label="Close search">×</button>
+      </header>
+      <label class="jarvis-search-field" for="jarvis-search-input">
+        <i aria-hidden="true"></i>
+        <input id="jarvis-search-input" type="search" maxlength="180" placeholder="Search files, services, actions, or ask JARVIS…" aria-controls="jarvis-search-results" aria-autocomplete="list" spellcheck="false">
+        <kbd>ESC</kbd>
+      </label>
+      <div class="jarvis-search-meta"><span id="jarvis-search-mode">QUICK ACCESS</span><b id="jarvis-search-count">0 RESULTS</b></div>
+      <div id="jarvis-search-results" class="jarvis-search-results" role="listbox" aria-label="Search results"></div>
+      <footer class="jarvis-search-help">
+        <span><kbd>↑</kbd><kbd>↓</kbd> NAVIGATE</span>
+        <span><kbd>ENTER</kbd> OPEN</span>
+        <span>LONG-PRESS THE NEURAL FIELD TO SEARCH</span>
+      </footer>
+    </form>
+  </dialog>
+
   <dialog id="operation-dialog" class="operation-dialog">
     <form method="dialog" id="operation-form">
       <button class="dialog-close" id="operation-close" type="button" aria-label="Close">×</button>

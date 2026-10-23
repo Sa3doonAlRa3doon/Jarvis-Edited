@@ -2,6 +2,7 @@ import {
   DEFAULT_VOICE_VOCABULARY, normalizeVocabulary, normalizeWakePhrases, selectRecognitionAlternative
 } from './voice-utils.js';
 import { configureRecognitionCapabilities, startRecognitionWithTrack } from './voice-controller.js';
+import { deviceIdConstraint, friendlyMediaError, getUserMediaWithFallback, normalizeDeviceId } from './media-utils.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -16,6 +17,7 @@ const ui = {
   voiceLanguage: $('#voice-language'), wakePhrases: $('#wake-phrases'), voiceVocabulary: $('#voice-vocabulary'), recognitionConfidence: $('#recognition-confidence'), commandSilence: $('#command-silence'),
   voiceAutoStart: $('#voice-auto-start'), preferLocalRecognition: $('#prefer-local-recognition'), echoCancellation: $('#echo-cancellation'), noiseSuppression: $('#noise-suppression'), autoGainControl: $('#auto-gain-control'), bargeIn: $('#barge-in'),
   ttsVoice: $('#tts-voice'), ttsRate: $('#tts-rate'), ttsPitch: $('#tts-pitch'), ttsVolume: $('#tts-volume'), wakeResponse: $('#wake-response'),
+  ttsProviderNote: $('#tts-provider-note'),
   speechSupport: $('#speech-support'), voiceTranscript: $('#voice-transcript'), voiceConfidence: $('#voice-confidence'), testRecognition: $('#test-recognition'), testTalkback: $('#test-talkback'), installLocalSpeech: $('#install-local-speech'),
   cameraPreview: $('#camera-preview'), video: $('#camera-video'), image: $('#pi-camera-image'), canvas: $('#sensor-canvas'), placeholder: $('#camera-placeholder'), cameraSource: $('#camera-source'),
   personReadout: $('#person-readout'), micReadout: $('#mic-readout'), micMeter: $('#mic-meter'), wakeReadout: $('#wake-readout'), sensorState: $('#sensor-state'), sensorGuidance: $('#sensor-guidance'),
@@ -30,13 +32,14 @@ const recommendedProfile = {
   gestureSensitivity: 0.42, doubleClapWindow: 700, scanInterval: 900, accent: '#64e8ff',
   voiceLanguage: 'en-US', wakePhrases: ['hey jarvis', 'jarvis', 'جارفيس', 'يا جارفيس'], voiceVocabulary: DEFAULT_VOICE_VOCABULARY, recognitionConfidence: .35, commandSilenceMs: 700,
   voiceAutoStart: true, preferLocalRecognition: true, echoCancellation: true, noiseSuppression: true, autoGainControl: true, bargeIn: false,
-  ttsVoice: '', ttsRate: 1.02, ttsPitch: .92, ttsVolume: 1, wakeResponse: 'Yes?'
+  ttsVoice: '', ttsRate: 1.02, ttsPitch: .92, ttsVolume: 1, wakeResponse: 'Yes sir, how can I help you today?'
 };
 
 const state = {
-  savedSettings: {}, currentSection: 'devices', media: null, stream: null, audioContext: null, analyser: null,
+  savedSettings: {}, currentSection: 'devices', media: null, stream: null, audioContext: null, analyser: null, talkbackContext: null, talkbackSource: null,
   animation: 0, detector: null, detectTimer: 0, piTimer: 0, lastClap: 0, clapAbove: false, sensorsActive: false, dirty: false,
-  testRecognition: null, testRecognitionStream: null, testRecognitionPending: false, testRecognitionTimer: 0, speechCheck: 0, noiseFloor: .008, lastAudioLevel: 0
+  testRecognition: null, testRecognitionStream: null, testRecognitionPending: false, testRecognitionTimer: 0, speechCheck: 0, noiseFloor: .008, lastAudioLevel: 0,
+  config: { ttsMode: 'local', fishVoiceId: '', fishConfigured: false, allowBrowserTtsFallback: false }
 };
 
 const valueBindings = [
@@ -55,7 +58,7 @@ const valueBindings = [
 ];
 
 async function json(url, options) {
-  const response = await fetch(url, options);
+  const response = await (window.jarvisFetch || fetch)(url, options);
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
   return payload;
@@ -70,6 +73,7 @@ function setMessage(message) { ui.message.textContent = message; }
 function option(value, label) { const item = document.createElement('option'); item.value = value; item.textContent = label; return item; }
 
 function fillSelect(select, items, placeholder, selected) {
+  selected = normalizeDeviceId(selected);
   select.replaceChildren(option('', placeholder));
   for (const item of items) select.append(option(item.id || item.deviceId, item.label || item.id || item.deviceId));
   if (selected && ![...select.options].some((item) => item.value === selected)) select.append(option(selected, `Saved device (currently unavailable): ${selected}`));
@@ -78,7 +82,7 @@ function fillSelect(select, items, placeholder, selected) {
 
 function currentSettings() {
   return {
-    source: ui.source.value, browserCamera: ui.browserCamera.value, browserMicrophone: ui.browserMicrophone.value,
+    source: ui.source.value, browserCamera: normalizeDeviceId(ui.browserCamera.value), browserMicrophone: normalizeDeviceId(ui.browserMicrophone.value),
     piCamera: ui.piCamera.value, piMicrophone: ui.piMicrophone.value,
     personDetection: ui.personDetection.checked, voiceActivity: ui.voiceActivity.checked, wakeWord: ui.wakeWord.checked,
     doubleClap: ui.doubleClap.checked, gestureControl: ui.gestureControl.checked, autoSpeak: ui.autoSpeak.checked, autoRepair: ui.autoRepair.checked,
@@ -124,6 +128,7 @@ function previewSettings() {
 }
 
 function applySettings(settings, { saved = false, message = '' } = {}) {
+  settings = { ...settings, browserCamera: normalizeDeviceId(settings.browserCamera), browserMicrophone: normalizeDeviceId(settings.browserMicrophone) };
   ui.wakePhrases.value = normalizeWakePhrases(settings.wakePhrases).join(', ');
   ui.voiceVocabulary.value = normalizeVocabulary(settings.voiceVocabulary ?? DEFAULT_VOICE_VOCABULARY).join(', ');
   if (settings.ttsVoice && ![...ui.ttsVoice.options].some((item) => item.value === settings.ttsVoice)) ui.ttsVoice.append(option(settings.ttsVoice, `Saved voice (currently unavailable): ${settings.ttsVoice}`));
@@ -146,13 +151,15 @@ function applySettings(settings, { saved = false, message = '' } = {}) {
   if (message) setMessage(message);
 }
 
-function activateSection(name) {
-  state.currentSection = name;
+function activateSection(name, { syncUrl = true } = {}) {
+  const target = $(`.settings-section[data-section="${CSS.escape(String(name || ''))}"]`) ? String(name) : 'devices';
+  state.currentSection = target;
   ui.search.value = '';
   ui.workspace.classList.remove('is-searching');
-  for (const section of $$('.settings-section')) { section.hidden = false; section.classList.toggle('active', section.dataset.section === name); }
-  for (const button of $$('.settings-nav-list button')) button.classList.toggle('active', button.dataset.target === name);
+  for (const section of $$('.settings-section')) { section.hidden = false; section.classList.toggle('active', section.dataset.section === target); }
+  for (const button of $$('.settings-nav-list button')) button.classList.toggle('active', button.dataset.target === target);
   ui.searchEmpty.hidden = true;
+  if (syncUrl && location.hash !== `#${target}`) history.replaceState(null, '', `#${target}`);
 }
 
 function searchControls() {
@@ -255,19 +262,25 @@ async function testRecognition() {
   try {
     const settings = currentSettings();
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('Microphone access is unavailable in this browser.');
-    state.testRecognitionStream = await navigator.mediaDevices.getUserMedia({
+    const opened = await getUserMediaWithFallback(navigator.mediaDevices, {
       audio: {
-        deviceId: settings.browserMicrophone ? { exact: settings.browserMicrophone } : undefined,
+        deviceId: deviceIdConstraint(settings.browserMicrophone),
         channelCount: { ideal: 1 }, sampleRate: { ideal: 16000 },
         echoCancellation: settings.echoCancellation, noiseSuppression: settings.noiseSuppression, autoGainControl: settings.autoGainControl
       },
       video: false
     });
+    state.testRecognitionStream = opened.stream;
+    if (opened.fallbackUsed) {
+      ui.browserMicrophone.value = '';
+      updateDirty();
+      setMessage('The saved microphone was unavailable, so JARVIS switched to the browser default. Save to keep this repair.');
+    }
     const recognition = new RecognitionClass(); state.testRecognition = recognition;
     recognition.continuous = false; recognition.interimResults = true; recognition.maxAlternatives = 5; recognition.lang = settings.voiceLanguage || 'en-US';
     const mode = await configureRecognitionCapabilities(recognition, RecognitionClass, {
       language: recognition.lang, preferLocalRecognition: settings.preferLocalRecognition,
-      wakePhrases: settings.wakePhrases, voiceVocabulary: settings.voiceVocabulary
+      wakePhrases: settings.wakePhrases, voiceVocabulary: settings.voiceVocabulary, enablePhrases: false
     });
     ui.voiceTranscript.textContent = 'LISTENING…'; ui.voiceConfidence.textContent = `${mode === 'local' ? 'ON-DEVICE' : 'BROWSER PROVIDER'} // Say “Hey Jarvis, show system status”.`; ui.testRecognition.textContent = 'STOP TEST'; ui.testRecognition.classList.add('active');
     recognition.onresult = (event) => {
@@ -276,21 +289,64 @@ async function testRecognition() {
       ui.voiceTranscript.textContent = selected.transcript || 'NO TRANSCRIPT';
       ui.voiceConfidence.textContent = `${mode === 'local' ? 'ON-DEVICE' : 'BROWSER'} // ${result.isFinal ? 'FINAL' : 'INTERIM'} // ${selected.confidenceKnown ? `${Math.round(selected.confidence * 100)}% CONFIDENCE` : 'CONFIDENCE UNAVAILABLE'} // ${selected.wake.detected ? 'WAKE MATCH' : 'NO WAKE MATCH'}`;
     };
-    recognition.onerror = (event) => { ui.voiceTranscript.textContent = 'RECOGNITION ERROR'; stopRecognitionTest(event.error.replaceAll('-', ' ').toUpperCase()); };
+    recognition.onerror = (event) => {
+      ui.voiceTranscript.textContent = 'RECOGNITION ERROR';
+      const message = event.error === 'network'
+        ? 'Speech provider is offline. Install the on-device language pack below, then retry.'
+        : event.error.replaceAll('-', ' ').toUpperCase();
+      stopRecognitionTest(message);
+    };
     recognition.onend = () => { if (state.testRecognition === recognition) stopRecognitionTest('Recognition test complete.'); };
     startRecognitionWithTrack(recognition, state.testRecognitionStream.getAudioTracks()[0]);
     state.testRecognitionTimer = setTimeout(() => stopRecognitionTest('Timed out after 12 seconds.'), 12_000);
   } catch (error) {
-    ui.voiceTranscript.textContent = 'START FAILED'; stopRecognitionTest(error.message);
+    ui.voiceTranscript.textContent = 'START FAILED'; stopRecognitionTest(friendlyMediaError(error));
   } finally { state.testRecognitionPending = false; ui.testRecognition.disabled = false; }
 }
 
-function testTalkback() {
+async function testTalkback() {
+  const text = 'Voice core calibrated. I am ready.';
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (AudioContextClass) {
+    try {
+      if (!state.talkbackContext || state.talkbackContext.state === 'closed') state.talkbackContext = new AudioContextClass({ latencyHint: 'interactive' });
+      if (state.talkbackContext.state !== 'running') await state.talkbackContext.resume();
+    } catch {}
+  }
+  if (state.config.ttsMode === 'fish') {
+    ui.voiceTranscript.textContent = 'FISH VOICE REQUEST';
+    ui.voiceConfidence.textContent = state.config.fishConfigured ? 'JARVIS MAIN VOICE // CONNECTING' : 'JARVIS MAIN VOICE // API KEY NEEDED';
+    try {
+      const response = await (window.jarvisFetch || fetch)('/api/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, mode: 'fish' }) });
+      if (response.ok) {
+        const bytes = await response.arrayBuffer();
+        if (state.talkbackContext?.state === 'running') {
+          const decoded = await state.talkbackContext.decodeAudioData(bytes.slice(0));
+          try { state.talkbackSource?.stop(); } catch {}
+          const source = state.talkbackContext.createBufferSource(); const gain = state.talkbackContext.createGain();
+          source.buffer = decoded; gain.gain.value = Number(ui.ttsVolume.value); source.connect(gain).connect(state.talkbackContext.destination); state.talkbackSource = source;
+          await new Promise((resolve, reject) => { source.onended = resolve; try { source.start(0); } catch (error) { reject(error); } });
+          if (state.talkbackSource === source) state.talkbackSource = null;
+        } else {
+          const url = URL.createObjectURL(new Blob([bytes], { type: response.headers.get('content-type') || 'audio/mpeg' })); const audio = new Audio(url); audio.volume = Number(ui.ttsVolume.value);
+          try { await new Promise((resolve, reject) => { audio.onended = resolve; audio.onerror = reject; audio.play().catch(reject); }); }
+          finally { URL.revokeObjectURL(url); }
+        }
+        ui.voiceTranscript.textContent = 'FISH TALKBACK COMPLETE'; ui.voiceConfidence.textContent = `MAIN VOICE // ${state.config.fishVoiceId}`; return;
+      }
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(detail.error || `Fish Audio returned HTTP ${response.status}.`);
+    } catch (error) {
+      ui.voiceTranscript.textContent = 'FISH TALKBACK FAILED';
+      ui.voiceConfidence.textContent = `${error?.message || 'Voice request failed.'} // VOICE NOT SUBSTITUTED`;
+      if (!state.config.allowBrowserTtsFallback) return;
+    }
+  }
   if (!('speechSynthesis' in window)) { ui.voiceConfidence.textContent = 'Speech synthesis is unavailable in this browser.'; return; }
   speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance('Voice core calibrated. I am ready.');
   utterance.rate = Number(ui.ttsRate.value); utterance.pitch = Number(ui.ttsPitch.value); utterance.volume = Number(ui.ttsVolume.value); utterance.lang = ui.voiceLanguage.value;
   const voice = speechSynthesis.getVoices().find((item) => item.voiceURI === ui.ttsVoice.value || item.name === ui.ttsVoice.value); if (voice) utterance.voice = voice;
-  utterance.onstart = () => { ui.voiceTranscript.textContent = 'TALKBACK ACTIVE'; ui.voiceConfidence.textContent = voice ? `${voice.name} // ${voice.lang}` : 'System default voice'; };
+  utterance.onstart = () => { ui.voiceTranscript.textContent = 'LOCAL FALLBACK ACTIVE'; ui.voiceConfidence.textContent = voice ? `${voice.name} // ${voice.lang}` : 'System default voice'; };
   utterance.onend = () => { ui.voiceTranscript.textContent = 'TALKBACK COMPLETE'; };
   speechSynthesis.speak(utterance);
 }
@@ -439,13 +495,20 @@ async function startBrowserSensors() {
   const needsAudio = settings.voiceActivity || settings.wakeWord || settings.doubleClap;
   if (!needsVideo && !needsAudio) throw new Error('Enable at least one camera or microphone listener in Perception.');
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('This browser does not expose camera or microphone access.');
-  const video = needsVideo ? { deviceId: settings.browserCamera ? { exact: settings.browserCamera } : undefined } : false;
+  const video = needsVideo ? { deviceId: deviceIdConstraint(settings.browserCamera), width: { ideal: 960 }, height: { ideal: 540 }, frameRate: { ideal: 24, max: 30 } } : false;
   const audio = needsAudio ? {
-    deviceId: settings.browserMicrophone ? { exact: settings.browserMicrophone } : undefined,
+    deviceId: deviceIdConstraint(settings.browserMicrophone),
     channelCount: { ideal: 1 }, sampleRate: { ideal: 16000 }, echoCancellation: settings.echoCancellation,
     noiseSuppression: settings.noiseSuppression, autoGainControl: settings.autoGainControl
   } : false;
-  state.stream = await navigator.mediaDevices.getUserMedia({ video, audio });
+  const opened = await getUserMediaWithFallback(navigator.mediaDevices, { video, audio });
+  state.stream = opened.stream;
+  if (opened.fallbackUsed) {
+    if (needsVideo) ui.browserCamera.value = '';
+    if (needsAudio) ui.browserMicrophone.value = '';
+    updateDirty();
+    setMessage('A saved device was unavailable. JARVIS recovered with the browser defaults; save to keep this repair.');
+  }
   await enumerateBrowserDevices();
   if (video) {
     ui.video.srcObject = state.stream;
@@ -460,14 +523,18 @@ async function startBrowserSensors() {
     void loop();
   }
   if (audio) {
-    state.audioContext = new AudioContext();
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) throw new Error('This browser cannot analyse microphone audio.');
+    state.audioContext = new AudioContextClass({ latencyHint: 'interactive' });
+    await state.audioContext.resume();
     state.analyser = state.audioContext.createAnalyser();
     state.analyser.fftSize = 1024;
     state.audioContext.createMediaStreamSource(state.stream).connect(state.analyser);
     monitorAudio();
   }
-  ui.wakeReadout.textContent = settings.doubleClap ? 'CLAP LISTENER' : settings.wakeWord ? 'PI WAKE PROFILE' : 'SENSORS ON';
-  setSensorUi(true, 'BROWSER SENSOR BUS');
+  ui.wakeReadout.textContent = settings.doubleClap ? 'CLAP LISTENER' : settings.wakeWord ? 'WAKE ARMED' : 'SENSORS ON';
+  const videoTrack = state.stream.getVideoTracks()[0]; const audioTrack = state.stream.getAudioTracks()[0];
+  setSensorUi(true, [videoTrack?.label, audioTrack?.label].filter(Boolean).join(' + ') || 'BROWSER SENSOR BUS');
 }
 
 async function startPiSensors() {
@@ -510,7 +577,7 @@ async function startSensors() {
     setMessage('Calibration active. Device changes will safely stop this session.');
   } catch (error) {
     stopSensors({ quiet: true });
-    setMessage(`Could not start sensors: ${error.message}`);
+    setMessage(`Could not start sensors: ${friendlyMediaError(error)}`);
   }
 }
 
@@ -560,7 +627,7 @@ for (const button of $$('[data-accent]')) button.addEventListener('click', () =>
 ui.start.addEventListener('click', () => void startSensors());
 ui.stop.addEventListener('click', () => stopSensors());
 ui.testRecognition.addEventListener('click', () => void testRecognition());
-ui.testTalkback.addEventListener('click', testTalkback);
+ui.testTalkback.addEventListener('click', () => void testTalkback());
 ui.installLocalSpeech.addEventListener('click', () => void installLocalSpeechPack());
 ui.testWake.addEventListener('click', async () => {
   try {
@@ -581,9 +648,12 @@ for (const button of $$('[data-preview-size]')) button.addEventListener('click',
 ui.reloadPreview.addEventListener('click', () => { ui.preview.src = '/?preview=1'; });
 ui.openPreview.addEventListener('click', () => window.open('/', '_blank', 'noopener'));
 ui.preview.addEventListener('load', previewSettings);
+window.addEventListener('hashchange', () => activateSection(location.hash.slice(1), { syncUrl: false }));
 
 window.addEventListener('beforeunload', (event) => {
   stopSensors({ quiet: true }); stopRecognitionTest(); window.speechSynthesis?.cancel?.();
+  try { state.talkbackSource?.stop(); } catch {}
+  void state.talkbackContext?.close?.();
   if (state.dirty) { event.preventDefault(); event.returnValue = ''; }
 });
 
@@ -593,13 +663,20 @@ async function init() {
   try {
     await window.ensureDashboardAuthentication?.();
     const [settings, status, config] = await Promise.all([json('/api/settings'), json('/api/status'), json('/api/config')]);
-    ui.version.textContent = config.version || '3.4.0';
+    ui.version.textContent = config.version || '3.6.3';
     ui.node.textContent = config.piOnly ? 'PI-5' : 'LOCAL';
+    state.config = config;
+    if (config.ttsMode === 'fish') {
+      ui.ttsProviderNote.textContent = config.fishConfigured
+        ? `Locked: Fish Audio ${config.fishVoiceId} // ${config.fishModel}. Browser voice substitution is ${config.allowBrowserTtsFallback ? 'enabled' : 'disabled'}.`
+        : `Fish Audio ${config.fishVoiceId} is selected, but FISH_AUDIO_API_KEY is not configured. JARVIS will stay silent instead of changing voices.`;
+    }
     loadSpeechVoices(settings.ttsVoice || '');
     state.savedSettings = { ...settings };
     await loadDeviceLists(settings);
     renderGoogle(status.google || {});
     applySettings(settings, { saved: true, message: 'Configuration profile loaded. Live preview link is active.' });
+    activateSection(location.hash.slice(1) || 'devices', { syncUrl: false });
     await refreshSpeechSupport();
     setStatus('READY', 'ready');
   } catch (error) {
@@ -609,4 +686,3 @@ async function init() {
 }
 
 void init();
-

@@ -1,8 +1,10 @@
 (() => {
   let pending;
+  let authenticated = false;
+  const rawFetch = window.fetch.bind(window);
 
   async function readStatus() {
-    const response = await fetch('/api/auth/status', { cache: 'no-store' });
+    const response = await rawFetch('/api/auth/status', { cache: 'no-store' });
     if (!response.ok) throw new Error(`Authentication check failed (${response.status}).`);
     return response.json();
   }
@@ -24,11 +26,13 @@
     return { dialog, form, input, error, button };
   }
 
-  window.ensureDashboardAuthentication = () => {
+  window.ensureDashboardAuthentication = ({ force = false } = {}) => {
+    if (force) authenticated = false;
+    if (authenticated && !force) return Promise.resolve(true);
     if (pending) return pending;
     pending = (async () => {
       const status = await readStatus();
-      if (!status.required || status.authenticated) return true;
+      if (!status.required || status.authenticated) { authenticated = true; return true; }
       const ui = buildDialog();
       ui.dialog.addEventListener('cancel', (event) => event.preventDefault());
       ui.dialog.showModal(); ui.input.focus();
@@ -36,17 +40,26 @@
         ui.form.addEventListener('submit', async (event) => {
           event.preventDefault(); ui.error.textContent = ''; ui.button.disabled = true; ui.button.textContent = 'VERIFYING';
           try {
-            const response = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: ui.input.value }) });
+            const response = await rawFetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: ui.input.value }) });
             const payload = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(payload.error || `Login failed (${response.status}).`);
-            ui.dialog.close(); ui.dialog.remove(); resolve(true);
+            authenticated = true; ui.dialog.close(); ui.dialog.remove(); resolve(true);
           } catch (error) {
             ui.error.textContent = error.message; ui.input.select();
           } finally { ui.button.disabled = false; ui.button.textContent = 'UNLOCK PRIVATE CONSOLE'; }
         });
       });
       return true;
-    })();
+    })().finally(() => { pending = null; });
     return pending;
+  };
+
+  window.jarvisFetch = async (input, options) => {
+    let response = await rawFetch(input, options);
+    const url = typeof input === 'string' ? new URL(input, location.href) : new URL(input.url, location.href);
+    if (response.status !== 401 || url.pathname.startsWith('/api/auth/')) return response;
+    await window.ensureDashboardAuthentication({ force: true });
+    response = await rawFetch(input, options);
+    return response;
   };
 })();

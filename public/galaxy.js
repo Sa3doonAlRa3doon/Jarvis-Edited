@@ -19,7 +19,7 @@ function nodeColor(node) {
   return 0x5792aa;
 }
 
-export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () => {} }) {
+export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () => {}, onLongPress = () => {} }) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(1.8, window.devicePixelRatio || 1));
   renderer.setClearColor(0x000000, 0);
@@ -179,6 +179,9 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
   let targetDistance = 21.5;
   let dragging = false;
   let previousPointer = null;
+  let holdStart = null;
+  let holdTimer = 0;
+  let holdTriggered = false;
   let gesturePinched = false;
   let gesturePrevious = null;
 
@@ -290,21 +293,41 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
     return selectMesh(match);
   }
 
+  function getSearchItems() {
+    return meshes.map((mesh) => {
+      const node = mesh.userData.node;
+      return { id: node.id, label: node.name || 'Unknown node', detail: node.system ? 'JARVIS system orbit' : node.path || '', keywords: `${node.type || 'node'} ${node.path || ''}`, category: node.system ? 'SYSTEM' : 'KNOWLEDGE' };
+    });
+  }
+
   function resize() {
     const rect = canvas.getBoundingClientRect(); const width = Math.max(1, Math.round(rect.width)); const height = Math.max(1, Math.round(rect.height));
     renderer.setSize(width, height, false); camera.aspect = width / height; camera.updateProjectionMatrix();
   }
 
-  canvas.addEventListener('pointerdown', (event) => { dragging = true; previousPointer = { x: event.clientX, y: event.clientY }; canvas.setPointerCapture(event.pointerId); });
+  function clearHoldTimer() { if (holdTimer) window.clearTimeout(holdTimer); holdTimer = 0; }
+  canvas.addEventListener('pointerdown', (event) => {
+    if (!event.isPrimary) return;
+    dragging = true; holdTriggered = false; holdStart = { x: event.clientX, y: event.clientY }; previousPointer = { ...holdStart };
+    clearHoldTimer();
+    holdTimer = window.setTimeout(() => {
+      holdTimer = 0; holdTriggered = true; dragging = false; previousPointer = null; onLongPress();
+    }, 620);
+    canvas.setPointerCapture(event.pointerId);
+  });
   canvas.addEventListener('pointermove', (event) => {
+    if (holdStart && Math.hypot(event.clientX - holdStart.x, event.clientY - holdStart.y) > 11) clearHoldTimer();
     if (!dragging || !previousPointer) return;
     world.rotation.y += (event.clientX - previousPointer.x) * .006; world.rotation.x += (event.clientY - previousPointer.y) * .003;
     previousPointer = { x: event.clientX, y: event.clientY };
   });
   canvas.addEventListener('pointerup', (event) => {
-    if (previousPointer && Math.hypot(event.clientX - previousPointer.x, event.clientY - previousPointer.y) < 4) selectMesh(raycastAt(event.clientX, event.clientY));
-    dragging = false; previousPointer = null;
+    clearHoldTimer();
+    if (!holdTriggered && holdStart && Math.hypot(event.clientX - holdStart.x, event.clientY - holdStart.y) < 4) selectMesh(raycastAt(event.clientX, event.clientY));
+    dragging = false; previousPointer = null; holdStart = null; holdTriggered = false;
   });
+  canvas.addEventListener('pointercancel', () => { clearHoldTimer(); dragging = false; previousPointer = null; holdStart = null; holdTriggered = false; });
+  canvas.addEventListener('contextmenu', (event) => event.preventDefault());
   canvas.addEventListener('wheel', (event) => { event.preventDefault(); targetDistance = Math.max(10, Math.min(44, targetDistance + event.deltaY * .022)); }, { passive: false });
   canvas.addEventListener('dblclick', () => setMode('system'));
 
@@ -352,5 +375,5 @@ export async function createKnowledgeGalaxy({ canvas, inspector, onStatus = () =
   try { knowledge = await fetch('/api/knowledge').then((response) => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); }); buildGraph(); }
   catch (error) { onStatus(`INDEX OFFLINE // ${error.message}`); knowledge = { nodes: [], links: [], summary: {} }; buildGraph(); }
 
-  return { focusFromText, gesture, resize, setMode, setActivity, setAudioLevel, selectById: (id) => selectMesh(meshById.get(id)), get selected() { return selected?.userData?.node || null; }, get mode() { return activeMode; }, get activity() { return activityMode; } };
+  return { focusFromText, getSearchItems, gesture, resize, setMode, setActivity, setAudioLevel, selectById: (id) => selectMesh(meshById.get(id)), get selected() { return selected?.userData?.node || null; }, get mode() { return activeMode; }, get activity() { return activityMode; } };
 }

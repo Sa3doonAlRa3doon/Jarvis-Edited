@@ -3,13 +3,14 @@ import {
   normalizeTranscript, normalizeVocabulary, normalizeWakePhrases, recognitionPhraseSpecs,
   selectRecognitionAlternative
 } from './voice-utils.js';
+import { deviceIdConstraint, getUserMediaWithFallback, normalizeDeviceId } from './media-utils.js';
 
 const Recognition = () => window.SpeechRecognition || window.webkitSpeechRecognition || null;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 
 export async function configureRecognitionCapabilities(recognition, RecognitionClass, {
   language = 'en-US', preferLocalRecognition = true, wakePhrases = DEFAULT_WAKE_PHRASES,
-  voiceVocabulary = DEFAULT_VOICE_VOCABULARY, timeoutMs = 800
+  voiceVocabulary = DEFAULT_VOICE_VOCABULARY, timeoutMs = 800, enablePhrases = true
 } = {}) {
   let mode = 'browser';
   if (preferLocalRecognition && 'processLocally' in recognition && typeof RecognitionClass?.available === 'function') {
@@ -25,7 +26,7 @@ export async function configureRecognitionCapabilities(recognition, RecognitionC
   }
   try {
     const PhraseClass = globalThis.SpeechRecognitionPhrase;
-    if ('phrases' in recognition && typeof PhraseClass === 'function') {
+    if (enablePhrases && 'phrases' in recognition && typeof PhraseClass === 'function') {
       recognition.phrases = recognitionPhraseSpecs(wakePhrases, voiceVocabulary)
         .map(({ phrase, boost }) => new PhraseClass(phrase, boost));
     }
@@ -48,10 +49,12 @@ export class VoiceController {
     this.onState = onState; this.onLevel = onLevel; this.onWake = onWake; this.onCommand = onCommand; this.onTranscript = onTranscript; this.onError = onError;
     this.settings = {}; this.stream = null; this.context = null; this.analyser = null; this.raf = 0; this.recognition = null;
     this.running = false; this.shouldRun = false; this.speaking = false; this.restartTimer = 0; this.restartDelay = 240;
+    this.playbackSource = null;
     this.noiseFloor = .008; this.firstClapAt = 0; this.clapAbove = false; this.clapCooldownUntil = 0;
     this.armedUntil = 0; this.lastWakeAt = 0; this.lastCommand = ''; this.lastCommandAt = 0; this.pending = []; this.commandTimer = 0;
     this.lastLevel = 0; this.lastVoiceState = false; this.audioSamples = null; this.preparingRecognition = false;
-    this.recognitionMode = 'browser'; this.localRecognitionDisabled = false;
+    this.recognitionMode = 'browser'; this.localRecognitionDisabled = false; this.phraseBiasDisabled = false;
+    this.networkErrors = 0; this.recognitionUnavailable = false;
   }
 
   configure(settings = {}) {
@@ -64,24 +67,31 @@ export class VoiceController {
     };
     this.settings.wakePhrases = normalizeWakePhrases(this.settings.wakePhrases);
     this.settings.voiceVocabulary = normalizeVocabulary(this.settings.voiceVocabulary);
+    this.settings.browserMicrophone = normalizeDeviceId(this.settings.browserMicrophone);
     if (this.recognition) this.recognition.lang = this.settings.voiceLanguage;
   }
 
   async start(settings = this.settings) {
     this.configure(settings);
     if (this.running) return;
+    this.networkErrors = 0; this.recognitionUnavailable = false;
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('Microphone access is not available in this browser.');
     const audio = {
-      deviceId: this.settings.browserMicrophone ? { exact: this.settings.browserMicrophone } : undefined,
+      deviceId: deviceIdConstraint(this.settings.browserMicrophone),
       channelCount: { ideal: 1 }, sampleRate: { ideal: 16000 }, sampleSize: { ideal: 16 },
       echoCancellation: this.settings.echoCancellation !== false,
       noiseSuppression: this.settings.noiseSuppression !== false,
       autoGainControl: this.settings.autoGainControl !== false
     };
-    this.stream = await navigator.mediaDevices.getUserMedia({ audio, video: false });
+    const opened = await getUserMediaWithFallback(navigator.mediaDevices, { audio, video: false });
+    this.stream = opened.stream;
+    if (opened.fallbackUsed) {
+      this.settings.browserMicrophone = '';
+      this.onState('microphone-default');
+    }
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     if (AudioContextClass) {
-      this.context = new AudioContextClass({ latencyHint: 'interactive' });
+      if (!this.context || this.context.state === 'closed') this.context = new AudioContextClass({ latencyHint: 'interactive' });
       await this.context.resume();
       this.analyser = this.context.createAnalyser(); this.analyser.fftSize = 2048; this.analyser.smoothingTimeConstant = .28;
       this.context.createMediaStreamSource(this.stream).connect(this.analyser); this.monitorAudio();
@@ -100,7 +110,7 @@ export class VoiceController {
   }
 
   async startRecognition() {
-    if (!this.shouldRun || this.speaking && !this.settings.bargeIn || this.recognition || this.preparingRecognition) return;
+    if (!this.shouldRun || this.recognitionUnavailable || this.speaking && !this.settings.bargeIn || this.recognition || this.preparingRecognition) return;
     const RecognitionClass = Recognition();
     if (!RecognitionClass) { this.onState('audio-only'); return; }
     this.preparingRecognition = true;
@@ -115,6 +125,22 @@ export class VoiceController {
     recognition.onspeechend = () => this.onState('listening');
     recognition.onresult = (event) => this.handleRecognitionResult(event);
     recognition.onerror = (event) => {
+      if (event.error === 'phrases-not-supported') {
+        this.phraseBiasDisabled = true;
+        try { recognition.phrases = []; } catch {}
+        this.onState('listening');
+        return;
+      }
+      if (event.error === 'network') {
+        this.networkErrors += 1;
+        if (this.networkErrors >= 3) {
+          this.recognitionUnavailable = true;
+          clearTimeout(this.restartTimer);
+          this.onError(new Error('Speech provider is offline. Install the on-device language pack in /settings; camera, microphone level, and double-clap still work locally.'));
+          this.onState('audio-only');
+        }
+        return;
+      }
       if (event.error === 'language-not-supported' && this.recognitionMode === 'local') {
         this.localRecognitionDisabled = true; this.recognitionMode = 'browser';
         return;
@@ -128,14 +154,15 @@ export class VoiceController {
     };
     recognition.onend = () => {
       if (this.recognition === recognition) this.recognition = null;
-      if (this.shouldRun && (!this.speaking || this.settings.bargeIn)) this.scheduleRecognitionRestart();
+      if (this.shouldRun && !this.recognitionUnavailable && (!this.speaking || this.settings.bargeIn)) this.scheduleRecognitionRestart();
     };
     this.recognition = recognition;
     this.recognitionMode = await configureRecognitionCapabilities(recognition, RecognitionClass, {
       language: recognition.lang,
       preferLocalRecognition: this.settings.preferLocalRecognition && !this.localRecognitionDisabled,
       wakePhrases: this.settings.wakePhrases,
-      voiceVocabulary: this.settings.voiceVocabulary
+      voiceVocabulary: this.settings.voiceVocabulary,
+      enablePhrases: !this.phraseBiasDisabled
     });
     this.preparingRecognition = false;
     if (!this.shouldRun || this.recognition !== recognition || this.speaking && !this.settings.bargeIn) {
@@ -159,6 +186,7 @@ export class VoiceController {
   }
 
   handleRecognitionResult(event) {
+    this.networkErrors = 0;
     for (let index = event.resultIndex; index < event.results.length; index += 1) {
       const result = event.results[index];
       const alternatives = Array.from({ length: result.length }, (_, alternativeIndex) => result[alternativeIndex]);
@@ -238,11 +266,44 @@ export class VoiceController {
     }
   }
 
+  async primeAudio() {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return false;
+    if (!this.context || this.context.state === 'closed') this.context = new AudioContextClass({ latencyHint: 'interactive' });
+    if (this.context.state !== 'running') await this.context.resume();
+    if (this.context.state !== 'running') return false;
+    const source = this.context.createBufferSource();
+    source.buffer = this.context.createBuffer(1, 1, this.context.sampleRate);
+    source.connect(this.context.destination); source.start(0);
+    return true;
+  }
+
+  async playAudio(arrayBuffer, volume = 1) {
+    if (!await this.primeAudio()) {
+      const error = new Error('Browser audio needs one click on the JARVIS screen before it can speak.');
+      error.name = 'NotAllowedError'; throw error;
+    }
+    const decoded = await this.context.decodeAudioData(arrayBuffer.slice(0));
+    try { this.playbackSource?.stop(); } catch {}
+    const source = this.context.createBufferSource(); const gain = this.context.createGain();
+    source.buffer = decoded; gain.gain.value = clamp(volume, 0, 1); source.connect(gain).connect(this.context.destination);
+    this.playbackSource = source;
+    await new Promise((resolve, reject) => {
+      source.onended = resolve;
+      try { source.start(0); }
+      catch (error) { reject(error); }
+    });
+    if (this.playbackSource === source) this.playbackSource = null;
+  }
+
   async stop() {
     this.shouldRun = false; this.running = false; this.speaking = false;
     clearTimeout(this.restartTimer); clearTimeout(this.commandTimer); cancelAnimationFrame(this.raf);
     try { this.recognition?.abort(); } catch {}
+    try { this.playbackSource?.stop(); } catch {}
+    this.playbackSource = null;
     this.recognition = null; this.preparingRecognition = false; this.pending = []; this.stream?.getTracks().forEach((track) => track.stop()); this.stream = null; this.analyser = null; this.audioSamples = null;
+    this.networkErrors = 0; this.recognitionUnavailable = false;
     if (this.context) await this.context.close().catch(() => {});
     this.context = null; this.onLevel({ level: 0, rms: 0, peak: 0, noiseFloor: this.noiseFloor, voiceActive: false }); this.onState('standby');
   }
@@ -251,4 +312,3 @@ export class VoiceController {
   get active() { return this.running; }
   get recognitionAvailable() { return Boolean(Recognition()); }
 }
-
