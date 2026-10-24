@@ -663,7 +663,7 @@ async function init() {
   try {
     await window.ensureDashboardAuthentication?.();
     const [settings, status, config] = await Promise.all([json('/api/settings'), json('/api/status'), json('/api/config')]);
-    ui.version.textContent = config.version || '3.6.3';
+    ui.version.textContent = config.version || '3.7.1';
     ui.node.textContent = config.piOnly ? 'PI-5' : 'LOCAL';
     state.config = config;
     if (config.ttsMode === 'fish') {

@@ -82,3 +82,81 @@ test('plays server voice audio through the active microphone audio context', asy
     assert.equal(started, 2); assert.equal(outputGain, .65);
   } finally { globalThis.window = previousWindow; }
 });
+
+test('opens a 15 second command capture and recovers the last interim sentence', () => {
+  const previousWindow = globalThis.window;
+  const timers = []; const captures = []; const commands = [];
+  globalThis.window = { setTimeout(callback, milliseconds) { timers.push({ callback, milliseconds }); return timers.length; } };
+  try {
+    const controller = new VoiceController({ onCapture: (event) => captures.push(event), onCommand: (command) => commands.push(command) });
+    controller.beginCommandCapture();
+    assert.equal(controller.commandCaptureActive, true);
+    assert.equal(timers[0].milliseconds, 15_000);
+    assert.equal(captures[0].state, 'listening');
+
+    controller.captureInterim = 'How much memory is being used?';
+    controller.handleCommandCaptureDeadline();
+    assert.deepEqual(commands, ['how much memory is being used']);
+    assert.equal(controller.commandCaptureActive, false);
+    assert.equal(captures.at(-1).state, 'complete');
+  } finally { globalThis.window = previousWindow; }
+});
+
+test('closes command capture without sending when no speech is detected', () => {
+  const previousWindow = globalThis.window;
+  const captures = []; const commands = [];
+  globalThis.window = { setTimeout: () => 1 };
+  try {
+    const controller = new VoiceController({ onCapture: (event) => captures.push(event), onCommand: (command) => commands.push(command) });
+    controller.beginCommandCapture(); controller.finishCommandCapture('timeout');
+    assert.equal(controller.commandCaptureActive, false);
+    assert.deepEqual(commands, []);
+    assert.equal(captures.at(-1).state, 'timeout');
+  } finally { globalThis.window = previousWindow; }
+});
+
+test('microphone voice activity cancels the 15 second no-speech deadline before text arrives', () => {
+  const previousWindow = globalThis.window; const previousClearTimeout = globalThis.clearTimeout;
+  const timers = []; const cleared = []; const captures = [];
+  globalThis.window = { setTimeout(callback, milliseconds) { timers.push({ callback, milliseconds }); return timers.length; } };
+  globalThis.clearTimeout = (id) => { if (id) cleared.push(id); };
+  try {
+    const controller = new VoiceController({ onCapture: (event) => captures.push(event) });
+    controller.beginCommandCapture(); const noSpeechTimer = controller.captureTimer;
+    controller.updateCommandVoiceActivity(true);
+    assert.equal(controller.commandCaptureStarted, true);
+    assert.equal(controller.captureVoiceActive, true);
+    assert.ok(cleared.includes(noSpeechTimer));
+    assert.equal(captures.at(-1).state, 'hearing');
+    assert.equal(timers.at(-1).milliseconds, 120_000);
+  } finally { globalThis.window = previousWindow; globalThis.clearTimeout = previousClearTimeout; }
+});
+
+test('does not submit a final segment while mic activity says the speaker is still talking', () => {
+  const previousWindow = globalThis.window;
+  const timers = []; const commands = [];
+  globalThis.window = { setTimeout(callback, milliseconds) { timers.push({ callback, milliseconds }); return timers.length; } };
+  try {
+    const controller = new VoiceController({ onCommand: (command) => commands.push(command) });
+    controller.configure({ commandSilenceMs: 700 }); controller.beginCommandCapture();
+    controller.updateCommandVoiceActivity(true); controller.queueCommand('How much RAM');
+    assert.deepEqual(commands, []);
+    assert.equal(controller.commandTimer, 0);
+    controller.updateCommandVoiceActivity(false);
+    const finalize = timers.at(-1); assert.equal(finalize.milliseconds, 1_400); finalize.callback();
+    assert.deepEqual(commands, ['how much ram']);
+  } finally { globalThis.window = previousWindow; }
+});
+
+test('waits for delayed recognition text after audible speech ends', () => {
+  const previousWindow = globalThis.window;
+  const timers = []; const captures = [];
+  globalThis.window = { setTimeout(callback, milliseconds) { timers.push({ callback, milliseconds }); return timers.length; } };
+  try {
+    const controller = new VoiceController({ onCapture: (event) => captures.push(event) });
+    controller.configure({ commandSilenceMs: 700 }); controller.beginCommandCapture();
+    controller.updateCommandVoiceActivity(true); controller.updateCommandVoiceActivity(false);
+    assert.equal(timers.at(-1).milliseconds, 2_500);
+    assert.equal(captures.at(-1).state, 'hearing');
+  } finally { globalThis.window = previousWindow; }
+});

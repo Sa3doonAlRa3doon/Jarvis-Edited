@@ -31,8 +31,10 @@ const ui = {
   printerProgress: $('#printer-progress'), printerPercent: $('#printer-percent'), printerTemps: $('#printer-temps'),
   fullscreenButton: $('#fullscreen-button'), fullscreenGate: $('#fullscreen-gate'), coreLayer: $('#core-layer'),
   coreLink: $('#core-link'), coreHealth: $('#core-health'), reactorScan: $('#reactor-scan'),
-  searchDialog: $('#jarvis-search'), searchForm: $('#jarvis-search-form'), searchInput: $('#jarvis-search-input'),
-  searchResults: $('#jarvis-search-results'), searchClose: $('#jarvis-search-close'), searchMode: $('#jarvis-search-mode'), searchCount: $('#jarvis-search-count')
+  searchDialog: $('#jarvis-search'), searchForm: $('#jarvis-search-form'), searchInput: $('#jarvis-search-input'), searchTitle: $('#jarvis-search-title'),
+  searchResults: $('#jarvis-search-results'), searchClose: $('#jarvis-search-close'), searchMode: $('#jarvis-search-mode'), searchCount: $('#jarvis-search-count'),
+  voiceCapture: $('#jarvis-voice-capture'), voiceCaptureState: $('#jarvis-voice-capture-state'), voiceCaptureTranscript: $('#jarvis-voice-capture-transcript'),
+  voiceCaptureOrb: $('.jarvis-voice-orb'), voiceCaptureMeter: $('#jarvis-voice-meter-level')
 };
 
 const state = {
@@ -42,8 +44,11 @@ const state = {
   galaxy: null, gesture: null, voice: null, printer: { configured: false, online: false, state: 'checking' },
   chart: { cpu: Array(52).fill(0), ram: Array(52).fill(0), gpu: Array(52).fill(0) },
   neuralEnergy: 0.22, coreMode: 'system', voiceState: 'standby', voiceLevel: 0, searchResults: [], searchSelection: 0,
-  refreshFastPending: false, refreshSlowPending: false, pendingSpeech: null, audioPriming: false
+  refreshFastPending: false, refreshSlowPending: false, pendingSpeech: null, audioPriming: false, wakeSession: 0,
+  voiceCapture: { active: false, phase: 'idle', deadline: 0, ticker: 0, closeTimer: 0 }
 };
+
+const VOICE_COMMAND_TIMEOUT_MS = 15_000;
 
 const laneLabels = {
   code: { eyebrow: 'CODEACT STREAM', title: 'Code Assistant' },
@@ -205,6 +210,7 @@ function setSearchSelection(index, { scroll = true } = {}) {
 }
 
 function renderSearchResults({ resetSelection = false } = {}) {
+  if (state.voiceCapture.active) return;
   const query = ui.searchInput.value.trim();
   state.searchResults = searchCatalog(liveSearchItems(), query, { limit: query ? 9 : 10 });
   if (query) state.searchResults.push({ id: 'ask-current-query', label: `Ask JARVIS about “${query.slice(0, 80)}”`, detail: 'Send the full query to the selected local AI role', category: 'LOCAL AI', kind: 'ask', value: query });
@@ -229,8 +235,82 @@ function renderSearchResults({ resetSelection = false } = {}) {
   setSearchSelection(state.searchSelection, { scroll: false });
 }
 
+function stopVoiceCaptureTimers() {
+  clearInterval(state.voiceCapture.ticker); clearTimeout(state.voiceCapture.closeTimer);
+  state.voiceCapture.ticker = 0; state.voiceCapture.closeTimer = 0; state.voiceCapture.deadline = 0;
+}
+
+function resetSearchPresentation() {
+  delete ui.searchDialog.dataset.voiceCommand; delete ui.searchDialog.dataset.capturePhase;
+  ui.searchTitle.textContent = 'JARVIS SEARCH'; ui.searchInput.readOnly = false;
+  ui.searchInput.placeholder = 'Search files, services, actions, or ask JARVIS…'; ui.voiceCapture.hidden = true; ui.searchResults.hidden = false;
+}
+
+function startVoiceCaptureCountdown(timeoutMs = VOICE_COMMAND_TIMEOUT_MS) {
+  clearInterval(state.voiceCapture.ticker); state.voiceCapture.deadline = Date.now() + timeoutMs;
+  const render = () => {
+    if (!state.voiceCapture.active || !state.voiceCapture.deadline) return;
+    const remaining = Math.max(0, state.voiceCapture.deadline - Date.now());
+    ui.searchCount.textContent = `${(remaining / 1000).toFixed(1)}S`;
+  };
+  render(); state.voiceCapture.ticker = window.setInterval(render, 100);
+}
+
+function openVoiceCommandWindow() {
+  if (ui.operationDialog?.open) return false;
+  stopVoiceCaptureTimers(); state.voiceCapture.active = true; state.voiceCapture.phase = 'acknowledging';
+  if (!ui.searchDialog.open) {
+    try { ui.searchDialog.showModal(); }
+    catch { ui.searchDialog.setAttribute('open', ''); }
+  }
+  document.body.dataset.searchOpen = 'true'; ui.searchDialog.dataset.voiceCommand = 'true'; ui.searchDialog.dataset.capturePhase = 'acknowledging';
+  ui.searchTitle.textContent = 'VOICE COMMAND'; ui.searchInput.value = ''; ui.searchInput.readOnly = true;
+  ui.searchInput.placeholder = 'JARVIS is replying…'; ui.searchInput.removeAttribute('aria-activedescendant');
+  ui.searchMode.textContent = 'VOICE SESSION // ACKNOWLEDGING'; ui.searchCount.textContent = 'WAIT';
+  ui.voiceCapture.hidden = false; ui.searchResults.hidden = true; ui.voiceCaptureState.textContent = 'ACKNOWLEDGING';
+  ui.voiceCaptureTranscript.textContent = 'Say your command after JARVIS replies.';
+  ui.voiceCaptureMeter.style.width = '0%'; ui.voiceCaptureOrb.style.setProperty('--capture-scale', '1'); ui.voiceCaptureOrb.style.setProperty('--capture-glow', '18px');
+  return true;
+}
+
+function updateVoiceCommandTranscript(text, final = false) {
+  if (!state.voiceCapture.active) return;
+  const transcript = String(text || '').trim(); if (!transcript) return;
+  ui.searchInput.value = transcript; ui.voiceCaptureTranscript.textContent = transcript;
+  ui.searchMode.textContent = final ? 'VOICE SESSION // SENTENCE READY' : 'VOICE SESSION // TRANSCRIBING';
+}
+
+function updateVoiceCapture(detail = {}) {
+  if (!state.voiceCapture.active && !['listening', 'retry'].includes(detail.state)) return;
+  const phase = detail.state || 'listening'; state.voiceCapture.phase = phase; ui.searchDialog.dataset.capturePhase = phase;
+  if (detail.text) updateVoiceCommandTranscript(detail.text, phase === 'final' || phase === 'complete');
+  if (phase === 'listening' || phase === 'retry') {
+    ui.voiceCaptureState.textContent = phase === 'retry' ? 'LISTEN AGAIN' : 'LISTENING';
+    ui.voiceCaptureTranscript.textContent = phase === 'retry' ? 'I detected speech but not a usable sentence. Please say it again.' : 'Listening for your question or command…';
+    ui.searchInput.placeholder = 'Speak now…'; ui.searchMode.textContent = `VOICE SESSION // ${phase === 'retry' ? 'RETRY' : 'MIC LIVE'}`;
+    startVoiceCaptureCountdown(Number(detail.timeoutMs) || VOICE_COMMAND_TIMEOUT_MS); return;
+  }
+  if (phase === 'hearing' || phase === 'transcript' || phase === 'final') {
+    clearInterval(state.voiceCapture.ticker); state.voiceCapture.ticker = 0; state.voiceCapture.deadline = 0;
+    ui.voiceCaptureState.textContent = phase === 'final' ? 'SENTENCE READY' : 'HEARING'; ui.searchCount.textContent = phase === 'final' ? 'FINAL' : 'CAPTURING';
+    if (!detail.text && phase === 'hearing') ui.voiceCaptureTranscript.textContent = 'Keep talking. JARVIS will wait for the end of your sentence.';
+    return;
+  }
+  if (phase === 'complete') {
+    stopVoiceCaptureTimers(); ui.voiceCaptureState.textContent = 'SENDING'; ui.searchMode.textContent = 'VOICE SESSION // ROUTING'; ui.searchCount.textContent = 'READY'; return;
+  }
+  if (phase === 'timeout') {
+    stopVoiceCaptureTimers(); ui.voiceCaptureState.textContent = 'NO SPEECH DETECTED'; ui.voiceCaptureTranscript.textContent = 'Command capture stopped. Say “Hey Jarvis” to try again.';
+    ui.searchMode.textContent = 'VOICE SESSION // CLOSED'; ui.searchCount.textContent = 'TIMEOUT';
+    const session = state.wakeSession;
+    state.voiceCapture.closeTimer = window.setTimeout(() => { if (session === state.wakeSession) closeSearch({ cancelVoice: false }); }, 1100);
+  }
+}
+
 function openSearch(initialQuery = '') {
   if (ui.operationDialog?.open) return false;
+  if (state.voiceCapture.active) state.voice?.cancelCommandCapture('cancelled');
+  stopVoiceCaptureTimers(); state.voiceCapture.active = false; state.voiceCapture.phase = 'idle'; resetSearchPresentation();
   if (!ui.searchDialog.open) {
     try { ui.searchDialog.showModal(); }
     catch { ui.searchDialog.setAttribute('open', ''); }
@@ -243,11 +323,16 @@ function openSearch(initialQuery = '') {
   return true;
 }
 
-function closeSearch() {
+function closeSearch(options = {}) {
+  const cancelVoice = options?.cancelVoice !== false;
+  if (state.voiceCapture.active) {
+    state.voiceCapture.active = false; stopVoiceCaptureTimers();
+    if (cancelVoice) state.voice?.cancelCommandCapture('cancelled');
+  }
   if (!ui.searchDialog.open) return;
   try { ui.searchDialog.close(); } catch { ui.searchDialog.removeAttribute('open'); }
   delete document.body.dataset.searchOpen;
-  ui.searchInput.removeAttribute('aria-activedescendant');
+  ui.searchInput.removeAttribute('aria-activedescendant'); resetSearchPresentation();
   state.galaxy?.setActivity(state.voiceState, state.voiceLevel);
 }
 
@@ -268,6 +353,7 @@ function executeSearchItem(item = state.searchResults[state.searchSelection]) {
 
 function handleVoiceCommand(command) {
   const text = String(command || '').trim();
+  if (state.voiceCapture.active) closeSearch({ cancelVoice: false });
   if (/^(?:open|show)(?: the)? (?:jarvis )?search$/i.test(text)) { openSearch(); return; }
   const searchMatch = text.match(/^(?:search (?:the )?dashboard for|find in jarvis)\s+(.+)$/i);
   if (searchMatch) { openSearch(searchMatch[1]); return; }
@@ -476,8 +562,8 @@ async function requestFishSpeech(text) {
   throw lastError;
 }
 
-async function speak(text) {
-  if (!state.settings?.autoSpeak || !text) return;
+async function speak(text, { pendingContext = null } = {}) {
+  if (!state.settings?.autoSpeak || !text) return true;
   state.voice?.setSpeaking(true); updateVoiceVisual('speaking', .72);
   try {
     if (state.config?.ttsMode === 'fish') {
@@ -494,20 +580,20 @@ async function speak(text) {
           try { await new Promise((resolve, reject) => { audio.onended = resolve; audio.onerror = reject; audio.play().catch(reject); }); }
           finally { URL.revokeObjectURL(url); }
         }
-        state.pendingSpeech = null; document.body.classList.remove('audio-locked'); document.body.dataset.ttsState = 'complete'; return;
+        state.pendingSpeech = null; document.body.classList.remove('audio-locked'); document.body.dataset.ttsState = 'complete'; return true;
       } catch (error) {
         if (error?.name === 'NotAllowedError') {
-          state.pendingSpeech = { text }; document.body.classList.add('audio-locked'); document.body.dataset.ttsState = 'blocked'; state.galaxy?.setActivity('armed', 1); return;
+          state.pendingSpeech = { text, context: pendingContext }; document.body.classList.add('audio-locked'); document.body.dataset.ttsState = 'blocked'; state.galaxy?.setActivity('armed', 1); return false;
         }
         document.body.dataset.ttsState = 'error';
         console.warn(`Fish Audio playback failed without changing voices: ${error?.message || error}`);
-        if (!state.config?.allowBrowserTtsFallback) { state.galaxy?.setActivity('error', 1); return; }
+        if (!state.config?.allowBrowserTtsFallback) { state.galaxy?.setActivity('error', 1); return false; }
       }
     }
     if ('speechSynthesis' in window) {
       document.body.dataset.ttsProvider = 'browser'; document.body.dataset.ttsVoice = selectBrowserVoice()?.voiceURI || 'system-default'; document.body.dataset.ttsState = 'requesting';
       if (navigator.userActivation && !navigator.userActivation.hasBeenActive) {
-        state.pendingSpeech = { text }; document.body.classList.add('audio-locked'); document.body.dataset.ttsState = 'blocked'; state.galaxy?.setActivity('armed', 1); return;
+        state.pendingSpeech = { text, context: pendingContext }; document.body.classList.add('audio-locked'); document.body.dataset.ttsState = 'blocked'; state.galaxy?.setActivity('armed', 1); return false;
       }
       await new Promise((resolve) => {
         speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance(String(text).slice(0, 1800));
@@ -518,7 +604,9 @@ async function speak(text) {
         utterance.onend = () => { clearTimeout(timeout); document.body.dataset.ttsState = 'complete'; resolve(); };
         utterance.onerror = () => { clearTimeout(timeout); document.body.dataset.ttsState = 'error'; resolve(); }; speechSynthesis.speak(utterance);
       });
+      return document.body.dataset.ttsState === 'complete';
     }
+    return false;
   } finally {
     state.voice?.setSpeaking(false);
   }
@@ -532,16 +620,44 @@ async function unlockAudioFromGesture() {
     if (!ready) return;
     document.body.classList.remove('audio-locked');
     const pending = state.pendingSpeech; state.pendingSpeech = null;
-    if (pending?.text) void speak(pending.text);
+    if (pending?.text) {
+      const played = await speak(pending.text, { pendingContext: pending.context });
+      if (played && pending.context?.kind === 'wake') await beginWakeCommandCapture(pending.context.session, pending.context.command);
+    }
   } catch {}
   finally { state.audioPriming = false; }
 }
 
-function handleWake(event) {
+async function beginWakeCommandCapture(session, initialCommand = '') {
+  if (session !== state.wakeSession || !state.voiceCapture.active) return;
+  try {
+    if (!state.voice?.active) await state.voice?.start(state.settings);
+  } catch (error) {
+    stopVoiceCaptureTimers(); state.voiceCapture.phase = 'error'; ui.searchDialog.dataset.capturePhase = 'error';
+    ui.voiceCaptureState.textContent = 'MICROPHONE UNAVAILABLE'; ui.voiceCaptureTranscript.textContent = error.message;
+    ui.searchMode.textContent = 'VOICE SESSION // ERROR'; ui.searchCount.textContent = 'MIC OFF';
+    state.voiceCapture.closeTimer = window.setTimeout(() => { if (session === state.wakeSession) closeSearch({ cancelVoice: false }); }, 2200); return;
+  }
+  state.voice.beginCommandCapture(VOICE_COMMAND_TIMEOUT_MS);
+  if (initialCommand) {
+    updateVoiceCommandTranscript(initialCommand, true); state.voice.queueCommand(initialCommand); state.voice.flushCommand();
+  }
+}
+
+async function handleWake(event) {
+  const session = ++state.wakeSession; const initialCommand = String(event?.detail?.command || '').trim();
+  if (!openVoiceCommandWindow()) return;
   ui.wakeFlash.classList.remove('active'); void ui.wakeFlash.offsetWidth; ui.wakeFlash.classList.add('active');
   ui.wakeState.textContent = event?.detail?.kind === 'double_clap' ? 'CLAP' : 'HEARD'; state.neuralEnergy = 1;
   updateVoiceVisual('armed', 1);
-  if (!isEmbeddedPreview() && state.settings?.wakeResponse) void speak(state.settings.wakeResponse);
+  const context = { kind: 'wake', session, command: initialCommand };
+  const played = isEmbeddedPreview() || !state.settings?.wakeResponse ? true : await speak(state.settings.wakeResponse, { pendingContext: context });
+  if (session !== state.wakeSession || !state.voiceCapture.active) return;
+  if (!played && document.body.dataset.ttsState === 'blocked') {
+    ui.voiceCaptureState.textContent = 'TAP TO ENABLE AUDIO'; ui.voiceCaptureTranscript.textContent = 'Tap anywhere once. JARVIS will reply, then begin listening.';
+    ui.searchMode.textContent = 'VOICE SESSION // AUDIO LOCKED'; ui.searchCount.textContent = 'WAIT'; return;
+  }
+  await beginWakeCommandCapture(session, initialCommand);
   setTimeout(() => { ui.wakeState.textContent = state.status?.wake?.ready ? 'LISTENING' : 'STANDBY'; }, 2200);
 }
 
@@ -693,8 +809,8 @@ ui.gestureButton.addEventListener('click', () => void toggleGestures());
 ui.fullscreenButton?.addEventListener('click', () => void toggleFullscreen());
 ui.fullscreenGate?.addEventListener('click', () => void toggleFullscreen());
 ui.reactorScan?.addEventListener('click', pulseCore);
-ui.searchForm.addEventListener('submit', (event) => { event.preventDefault(); executeSearchItem(); });
-ui.searchInput.addEventListener('input', () => renderSearchResults({ resetSelection: true }));
+ui.searchForm.addEventListener('submit', (event) => { event.preventDefault(); if (!state.voiceCapture.active) executeSearchItem(); });
+ui.searchInput.addEventListener('input', () => { if (!state.voiceCapture.active) renderSearchResults({ resetSelection: true }); });
 ui.searchClose.addEventListener('click', closeSearch);
 ui.searchDialog.addEventListener('cancel', (event) => { event.preventDefault(); closeSearch(); });
 ui.searchDialog.addEventListener('pointerdown', (event) => { if (event.target === ui.searchDialog) closeSearch(); });
@@ -739,14 +855,22 @@ async function init() {
   activateCoreMode('system');
   state.voice = new VoiceController({
     onState: (mode) => updateVoiceVisual(mode),
-    onLevel: ({ level }) => { state.voiceLevel = level; state.galaxy?.setAudioLevel(level); },
-    onWake: (detail) => handleWake({ detail }),
+    onLevel: ({ level }) => {
+      state.voiceLevel = level; state.galaxy?.setAudioLevel(level);
+      if (state.voiceCapture.active) {
+        const shown = Math.max(0, Math.min(1, Number(level) || 0)); ui.voiceCaptureMeter.style.width = `${Math.round(shown * 100)}%`;
+        ui.voiceCaptureOrb.style.setProperty('--capture-scale', String(1 + shown * .32)); ui.voiceCaptureOrb.style.setProperty('--capture-glow', `${Math.round(18 + shown * 34)}px`);
+      }
+    },
+    onWake: (detail) => void handleWake({ detail }),
     onCommand: handleVoiceCommand,
     onTranscript: ({ text, final }) => {
+      if (state.voiceCapture.active) { updateVoiceCommandTranscript(text, final); return; }
       if (!final) return;
       if (ui.searchDialog.open) { ui.searchInput.value = text; renderSearchResults({ resetSelection: true }); }
       else if (ui.prompt) ui.prompt.value = text;
     },
+    onCapture: updateVoiceCapture,
     onError: (error) => { appendMessage('error', error.message); updateVoiceVisual('error', 1); }
   });
   state.voice.configure(state.settings || {});

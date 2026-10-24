@@ -7,6 +7,9 @@ import { deviceIdConstraint, getUserMediaWithFallback, normalizeDeviceId } from 
 
 const Recognition = () => window.SpeechRecognition || window.webkitSpeechRecognition || null;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
+const COMMAND_CAPTURE_HARD_LIMIT_MS = 120_000;
+const DELAYED_TRANSCRIPT_GRACE_MS = 2_500;
+const COMMAND_END_SILENCE_MS = 1_400;
 
 export async function configureRecognitionCapabilities(recognition, RecognitionClass, {
   language = 'en-US', preferLocalRecognition = true, wakePhrases = DEFAULT_WAKE_PHRASES,
@@ -45,13 +48,15 @@ export function startRecognitionWithTrack(recognition, track) {
 }
 
 export class VoiceController {
-  constructor({ onState = () => {}, onLevel = () => {}, onWake = () => {}, onCommand = () => {}, onTranscript = () => {}, onError = () => {} } = {}) {
-    this.onState = onState; this.onLevel = onLevel; this.onWake = onWake; this.onCommand = onCommand; this.onTranscript = onTranscript; this.onError = onError;
+  constructor({ onState = () => {}, onLevel = () => {}, onWake = () => {}, onCommand = () => {}, onTranscript = () => {}, onCapture = () => {}, onError = () => {} } = {}) {
+    this.onState = onState; this.onLevel = onLevel; this.onWake = onWake; this.onCommand = onCommand; this.onTranscript = onTranscript; this.onCapture = onCapture; this.onError = onError;
     this.settings = {}; this.stream = null; this.context = null; this.analyser = null; this.raf = 0; this.recognition = null;
     this.running = false; this.shouldRun = false; this.speaking = false; this.restartTimer = 0; this.restartDelay = 240;
     this.playbackSource = null;
     this.noiseFloor = .008; this.firstClapAt = 0; this.clapAbove = false; this.clapCooldownUntil = 0;
     this.armedUntil = 0; this.lastWakeAt = 0; this.lastCommand = ''; this.lastCommandAt = 0; this.pending = []; this.commandTimer = 0;
+    this.commandCaptureActive = false; this.commandCaptureStarted = false; this.captureTimer = 0; this.captureFinalizeTimer = 0;
+    this.captureInterim = ''; this.captureTimeoutMs = 15_000; this.captureHardDeadline = 0; this.captureVoiceActive = false;
     this.lastLevel = 0; this.lastVoiceState = false; this.audioSamples = null; this.preparingRecognition = false;
     this.recognitionMode = 'browser'; this.localRecognitionDisabled = false; this.phraseBiasDisabled = false;
     this.networkErrors = 0; this.recognitionUnavailable = false;
@@ -121,8 +126,8 @@ export class VoiceController {
     }
     recognition.continuous = true; recognition.interimResults = true; recognition.maxAlternatives = 5; recognition.lang = this.settings.voiceLanguage || 'en-US';
     recognition.onstart = () => { this.restartDelay = 240; this.onState('listening'); };
-    recognition.onspeechstart = () => this.onState('hearing');
-    recognition.onspeechend = () => this.onState('listening');
+    recognition.onspeechstart = () => { this.markCommandSpeech(); this.onState('hearing'); };
+    recognition.onspeechend = () => { if (this.commandCaptureActive) this.scheduleCommandFinalize(); this.onState(this.commandCaptureActive ? 'armed' : 'listening'); };
     recognition.onresult = (event) => this.handleRecognitionResult(event);
     recognition.onerror = (event) => {
       if (event.error === 'phrases-not-supported') {
@@ -196,29 +201,114 @@ export class VoiceController {
         recognitionConfidence: this.settings.recognitionConfidence, preferWake: this.settings.wakeWord && !armed
       });
       this.onTranscript({ text: selected.transcript, final: result.isFinal, confidence: selected.confidence, accepted: selected.accepted });
+      if (this.commandCaptureActive && selected.transcript) {
+        this.captureInterim = normalizeTranscript(selected.transcript);
+        this.markCommandSpeech();
+        this.onCapture({ state: result.isFinal ? 'final' : 'transcript', text: selected.transcript, confidence: selected.confidence });
+      }
       if (!selected.accepted || this.speaking && !this.settings.bargeIn) continue;
       const wake = selected.wake || findWakePhrase(selected.transcript, this.settings.wakePhrases, this.settings.wakeSensitivity);
-      if (this.settings.wakeWord && wake.detected) {
+      if (!this.commandCaptureActive && this.settings.wakeWord && wake.detected) {
         this.arm(wake);
-        if (result.isFinal && wake.command) this.queueCommand(wake.command);
         continue;
       }
       if (!result.isFinal) continue;
-      if (!this.settings.wakeWord || armed) this.queueCommand(selected.transcript);
+      if (this.commandCaptureActive || !this.settings.wakeWord || armed) this.queueCommand(selected.transcript);
     }
   }
 
   arm(wake = { phrase: 'jarvis', score: 1, kind: 'wake_word' }) {
-    const now = Date.now(); this.armedUntil = now + 10_000;
-    if (now - this.lastWakeAt > 1200) { this.lastWakeAt = now; this.onWake({ kind: wake.kind || 'wake_word', phrase: wake.phrase, score: wake.score }); }
+    const now = Date.now(); this.armedUntil = now + 30_000;
+    if (now - this.lastWakeAt > 1200) { this.lastWakeAt = now; this.onWake({ kind: wake.kind || 'wake_word', phrase: wake.phrase, score: wake.score, command: normalizeTranscript(wake.command) }); }
     this.onState('armed');
   }
+
+  beginCommandCapture(timeoutMs = 15_000) {
+    clearTimeout(this.captureTimer); clearTimeout(this.captureFinalizeTimer); clearTimeout(this.commandTimer);
+    this.pending = []; this.captureInterim = ''; this.commandCaptureStarted = false; this.commandCaptureActive = true; this.captureVoiceActive = false;
+    this.captureTimeoutMs = clamp(Number(timeoutMs) || 15_000, 5_000, 30_000);
+    this.captureHardDeadline = 0; this.armedUntil = Date.now() + this.captureTimeoutMs;
+    this.captureTimer = window.setTimeout(() => this.finishCommandCapture('timeout'), this.captureTimeoutMs);
+    this.onCapture({ state: 'listening', timeoutMs: this.captureTimeoutMs }); this.onState('armed');
+    if (this.shouldRun && !this.speaking) void this.startRecognition();
+  }
+
+  markCommandSpeech() {
+    if (!this.commandCaptureActive) return;
+    if (!this.commandCaptureStarted) {
+      this.commandCaptureStarted = true; clearTimeout(this.captureTimer);
+      this.captureHardDeadline = Date.now() + COMMAND_CAPTURE_HARD_LIMIT_MS; this.armedUntil = this.captureHardDeadline;
+      this.captureTimer = window.setTimeout(() => this.handleCommandCaptureDeadline(), COMMAND_CAPTURE_HARD_LIMIT_MS);
+    }
+    clearTimeout(this.captureFinalizeTimer); this.captureFinalizeTimer = 0;
+    this.onCapture({ state: 'hearing', text: this.captureInterim });
+  }
+
+  updateCommandVoiceActivity(active) {
+    if (!this.commandCaptureActive) return;
+    const next = Boolean(active); const changed = next !== this.captureVoiceActive;
+    this.captureVoiceActive = next;
+    if (next) {
+      clearTimeout(this.commandTimer); this.commandTimer = 0;
+      if (changed || !this.commandCaptureStarted) this.markCommandSpeech();
+      return;
+    }
+    if (changed && this.commandCaptureStarted) this.scheduleCommandFinalize();
+  }
+
+  scheduleCommandFinalize() {
+    if (!this.commandCaptureActive) return;
+    clearTimeout(this.captureFinalizeTimer);
+    if (this.captureVoiceActive) { this.captureFinalizeTimer = 0; return; }
+    const hasTranscript = Boolean(this.pending.length || this.captureInterim);
+    const delay = hasTranscript
+      ? Math.max(COMMAND_END_SILENCE_MS, clamp(this.settings.commandSilenceMs, 500, 1800))
+      : Math.max(DELAYED_TRANSCRIPT_GRACE_MS, clamp(this.settings.commandSilenceMs, 500, 1800));
+    this.captureFinalizeTimer = window.setTimeout(() => {
+      if (!this.commandCaptureActive) return;
+      if (this.pending.length) { this.flushCommand(); return; }
+      if (this.captureInterim) { this.pending.push(this.captureInterim); this.flushCommand(); return; }
+      this.commandCaptureStarted = false; clearTimeout(this.captureTimer);
+      this.captureTimer = window.setTimeout(() => this.finishCommandCapture('timeout'), this.captureTimeoutMs);
+      this.onCapture({ state: 'retry', timeoutMs: this.captureTimeoutMs });
+    }, delay);
+  }
+
+  handleCommandCaptureDeadline() {
+    if (!this.commandCaptureActive) return;
+    if (this.captureVoiceActive) {
+      this.captureHardDeadline = Date.now() + 30_000;
+      this.captureTimer = window.setTimeout(() => this.handleCommandCaptureDeadline(), 30_000);
+      return;
+    }
+    if (this.pending.length) { this.flushCommand(); return; }
+    if (this.captureInterim) { this.pending.push(this.captureInterim); this.flushCommand(); return; }
+    this.finishCommandCapture('timeout');
+  }
+
+  finishCommandCapture(reason = 'cancelled', text = '') {
+    if (!this.commandCaptureActive && reason !== 'complete') return;
+    this.commandCaptureActive = false; this.commandCaptureStarted = false; this.captureVoiceActive = false; this.armedUntil = 0;
+    clearTimeout(this.captureTimer); clearTimeout(this.captureFinalizeTimer); clearTimeout(this.commandTimer);
+    this.captureTimer = 0; this.captureFinalizeTimer = 0; this.commandTimer = 0; this.captureHardDeadline = 0; this.captureInterim = '';
+    if (reason !== 'complete') this.pending = [];
+    this.onCapture({ state: reason, text });
+    this.onState(this.shouldRun ? 'listening' : 'standby');
+  }
+
+  cancelCommandCapture(reason = 'cancelled') { this.finishCommandCapture(reason); }
 
   queueCommand(value) {
     const text = normalizeTranscript(value);
     if (!text) return;
+    if (this.commandCaptureActive) this.markCommandSpeech();
     this.pending.push(text); clearTimeout(this.commandTimer);
-    this.commandTimer = window.setTimeout(() => this.flushCommand(), clamp(this.settings.commandSilenceMs, 300, 1800));
+    if (!this.commandCaptureActive || !this.captureVoiceActive) {
+      const delay = this.commandCaptureActive
+        ? Math.max(COMMAND_END_SILENCE_MS, clamp(this.settings.commandSilenceMs, 300, 1800))
+        : clamp(this.settings.commandSilenceMs, 300, 1800);
+      this.commandTimer = window.setTimeout(() => this.flushCommand(), delay);
+    }
   }
 
   flushCommand() {
@@ -226,7 +316,9 @@ export class VoiceController {
     if (!command) return;
     const now = Date.now();
     if (isDuplicateCommand(command, this.lastCommand, now - this.lastCommandAt)) return;
-    this.lastCommand = command; this.lastCommandAt = now; this.armedUntil = 0; this.onState('processing'); this.onCommand(command);
+    this.lastCommand = command; this.lastCommandAt = now; this.armedUntil = 0;
+    if (this.commandCaptureActive) this.finishCommandCapture('complete', command);
+    this.onState('processing'); this.onCommand(command);
   }
 
   monitorAudio = () => {
@@ -241,6 +333,7 @@ export class VoiceController {
     if (!voiceActive) this.noiseFloor = this.noiseFloor * .985 + rms * .015;
     else if (this.noiseFloor < .004) this.noiseFloor = .004;
     const shown = Math.min(1, rms / Math.max(.035, vadThreshold * 2.4)); this.onLevel({ level: shown, rms, peak, noiseFloor: this.noiseFloor, voiceActive });
+    if (this.commandCaptureActive) this.updateCommandVoiceActivity(voiceActive);
     if (voiceActive !== this.lastVoiceState) { this.lastVoiceState = voiceActive; this.onState(voiceActive ? 'hearing' : Date.now() < this.armedUntil ? 'armed' : 'listening'); }
 
     const clapThreshold = Math.max(Number(this.settings.clapSensitivity || .34), this.noiseFloor * 7.5);
@@ -262,7 +355,7 @@ export class VoiceController {
       this.onState('speaking');
       if (!this.settings.bargeIn) { clearTimeout(this.restartTimer); try { this.recognition?.abort(); } catch {} }
     } else if (this.shouldRun) {
-      this.onState('listening'); this.restartDelay = 240; void this.startRecognition();
+      this.onState(this.commandCaptureActive ? 'armed' : 'listening'); this.restartDelay = 240; void this.startRecognition();
     }
   }
 
@@ -298,11 +391,12 @@ export class VoiceController {
 
   async stop() {
     this.shouldRun = false; this.running = false; this.speaking = false;
-    clearTimeout(this.restartTimer); clearTimeout(this.commandTimer); cancelAnimationFrame(this.raf);
+    if (this.commandCaptureActive) this.finishCommandCapture('cancelled');
+    clearTimeout(this.restartTimer); clearTimeout(this.commandTimer); clearTimeout(this.captureTimer); clearTimeout(this.captureFinalizeTimer); cancelAnimationFrame(this.raf);
     try { this.recognition?.abort(); } catch {}
     try { this.playbackSource?.stop(); } catch {}
     this.playbackSource = null;
-    this.recognition = null; this.preparingRecognition = false; this.pending = []; this.stream?.getTracks().forEach((track) => track.stop()); this.stream = null; this.analyser = null; this.audioSamples = null;
+    this.recognition = null; this.preparingRecognition = false; this.pending = []; this.commandCaptureActive = false; this.captureVoiceActive = false; this.captureInterim = ''; this.stream?.getTracks().forEach((track) => track.stop()); this.stream = null; this.analyser = null; this.audioSamples = null;
     this.networkErrors = 0; this.recognitionUnavailable = false;
     if (this.context) await this.context.close().catch(() => {});
     this.context = null; this.onLevel({ level: 0, rms: 0, peak: 0, noiseFloor: this.noiseFloor, voiceActive: false }); this.onState('standby');

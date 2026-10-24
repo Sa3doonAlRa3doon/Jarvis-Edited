@@ -1,12 +1,26 @@
-# OpenJarvis Pi Command Center 3.6.3
+# OpenJarvis Pi Command Center 3.7.1
 
 A private, Pi-first JARVIS visualization for OpenJarvis, Ollama, Docker, Google connectors, cameras, microphones, and guarded maintenance. The main route is now exactly one fullscreen neural field with no visible words, panels, cards, labels, or command bar.
+
+### 3.7.1 microphone-held command capture
+
+- The live microphone level detector now cancels the initial 15-second no-speech deadline as soon as real voice energy is heard, even before the browser produces transcript text.
+- Final recognition segments stay queued while the mic still detects speech, preventing a sentence from being submitted halfway through.
+- Brief natural pauses are tolerated with a 1.4-second end-of-sentence window before JARVIS submits the command.
+- After audible speech ends, JARVIS allows 2.5 seconds for delayed recognition text before offering a fresh capture window.
+
+### 3.7 wake command session
+
+- Saying **“Hey Jarvis”** or double-clapping opens a focused sci-fi voice command window and plays the configured “Yes sir…” acknowledgement before command capture begins.
+- The 15-second listening clock now starts after talkback finishes. No speech closes the temporary window without sending a request.
+- Once speech begins, JARVIS waits for the end of the sentence instead of cutting it off at the original deadline, joins final recognition segments, and submits the complete command automatically.
+- If the browser detects speech but never produces a final result, the best interim transcript is recovered after end-of-speech. If it produces no usable words, JARVIS opens a fresh 15-second retry window.
 
 ### 3.6 sensor and voice repair
 
 - Invalid saved browser device values such as `undefined` are cleaned automatically, and stale camera/microphone selections retry once with the browser default instead of failing after permission is granted.
 - Calibration now confirms the actual opened video/audio track labels, resumes the browser audio context, and reports permission, missing-device, and busy-device failures in plain language.
-- Fish Audio voice `612b878b113047d9a770c069c8b4fdfe` is the configured primary JARVIS voice with `s2.1-pro-free`; if its server-side API key is absent or Fish is unavailable, JARVIS immediately falls back to the selected local system voice.
+- Fish Audio voice `612b878b113047d9a770c069c8b4fdfe` is the configured primary JARVIS voice with `s2.1-pro-free`; browser voice substitution stays disabled unless `ALLOW_BROWSER_TTS_FALLBACK=true` is explicitly configured.
 - Chromium's optional phrase-bias failure no longer disables recognition. Repeated browser-provider network failures enter audio-only mode without a retry storm and point directly to the explicit on-device language-pack installer in `/settings`.
 
 ## What is new in 3.5

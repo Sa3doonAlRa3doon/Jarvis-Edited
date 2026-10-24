@@ -32,7 +32,7 @@ for (const shard of shards) { const stats = await fs.stat(path.join(modelDirecto
 const handModel = await fs.readFile(path.join(project, 'public', 'models', 'hand-landmarker', 'hand_landmarker.task'));
 assert.equal(handModel.length, 7819105, 'Unexpected hand landmark model size.');
 
-assert.equal(packageJson.version, '3.6.3');
+assert.equal(packageJson.version, '3.7.1');
 assert.match(server, /ALLOW_BROWSER_TTS_FALLBACK/);
 assert.match(server, /X-Jarvis-Voice-ID/);
 assert.match(client, /Fish Audio playback failed without changing voices/);
@@ -109,10 +109,17 @@ assert.match(settingsHtml, /id="test-recognition"/);
 assert.match(settingsHtml, /id="tts-voice"/);
 assert.match(server, /wakeResponse: 'Yes sir, how can I help you today\?'/);
 assert.match(settingsHtml, /placeholder="Yes sir, how can I help you today\?"/);
-assert.match(server, /const appVersion = '3\.6\.3'/);
+assert.match(server, /const appVersion = '3\.7\.1'/);
+assert.match(voiceController, /updateCommandVoiceActivity/);
+assert.match(voiceController, /DELAYED_TRANSCRIPT_GRACE_MS/);
 assert.match(server, /loadDashboardSessionSecret/);
 assert.match(client, /window\.jarvisFetch/);
 assert.match(client, /state\.voice\.playAudio/);
+assert.match(html, /id="jarvis-voice-capture"/);
+assert.match(client, /VOICE_COMMAND_TIMEOUT_MS = 15_000/);
+assert.match(client, /beginWakeCommandCapture/);
+assert.match(voiceController, /beginCommandCapture/);
+assert.match(voiceController, /captureInterim/);
 assert.match(server, /on-device-speech-recognition=\(self\)/);
 assert.match(server, /printerRefreshActive/);
 assert.match(server, /monitorTickActive/);
