@@ -1,6 +1,16 @@
-# OpenJarvis Pi Command Center 3.10.0
+# OpenJarvis Pi Command Center 3.11.0
 
 A private, Pi-first JARVIS visualization for OpenJarvis, Ollama, Docker, Google connectors, cameras, microphones, and guarded maintenance. The main route is now exactly one fullscreen neural field with no visible words, panels, cards, labels, or command bar.
+
+### 3.11 private browser, cross-platform workspace, and Office studio
+
+- **Its own browser** — JARVIS uses a dedicated Chromium/Chrome/Edge profile and output folder on Raspberry Pi OS, Ubuntu/Linux, and Windows. It never reuses your personal browser profile, cookies, saved passwords, or extensions.
+- **Visible, one-task control** — read-only navigation, extraction, screenshots, and sourced research remain available. Clicking or typing requires the dashboard PIN plus the exact `ALLOW BROWSER CONTROL` phrase for that exact task; the grant expires and works once.
+- **High-impact actions remain separate** — the browser cannot silently send messages, submit forms, buy, upload files, delete data, change permissions, or type passwords/API keys/payment data. Gmail uses its own editable preview and `SEND EMAIL` approval.
+- **Local PowerPoint, Word, and Excel output** — requests such as `Create a PowerPoint about solar energy`, `Write a Word report about my Pi`, or `Make an Excel expense tracker` produce real `.pptx`, `.docx`, or `.xlsx` files locally and open a download panel.
+- **Current Google News with sources** — `Show Google News about Raspberry Pi` reads the public Google News RSS feed, treats it as untrusted evidence, and returns bounded headlines with citations. No Google API key is required for news.
+- **Selected-app lens** — `/settings#screen` lets you explicitly select one screen, window, or browser tab for local preview and snapshot analysis. It does not silently capture or control arbitrary desktop apps.
+- **Separate capability lanes** — the browser agent has no shell/file tools. Optional Pi workspace control has no browser/network tools. This prevents instructions hidden in a webpage from turning into host commands.
 
 ### 3.10 Codex-style research, visible email approval, and isolated Pi control
 
@@ -172,6 +182,9 @@ OpenJarvis documents `native_openhands` as a CodeAct agent that generates and ex
 - Docker maintenance records the exact running container IDs before stopping them and resumes only those IDs.
 - `.env`, dashboard logs, the wake Python environment, Google OAuth material, tokens, private keys, and audio files are excluded from Git.
 - Google client secrets and tokens are never sent to the browser and are not included in the ZIP.
+- The automation browser has its own profile; it never inherits personal cookies, extensions, saved passwords, or active logins.
+- Interactive browser grants match one exact prompt, expire after ten minutes, and are consumed once. Uploads, secrets, payments, external sends, destructive actions, and permission changes are excluded from the browser tool set.
+- Browser tools and host-control tools are never enabled in the same OpenJarvis configuration.
 
 ## Install on Raspberry Pi 5
 
@@ -181,14 +194,14 @@ Clone the maintained GitHub repository directly on the Pi:
 git clone https://github.com/Sa3doonAlRa3doon/Jarvis-Edited.git ~/openjarvis-pi-command-center
 cd ~/openjarvis-pi-command-center
 chmod +x install-pi.sh scripts/setup-openjarvis-pi.sh
-# Browser/search/Google reads, with no shell or file writes:
+# Dedicated browser with one-task-approved click/type, no shell or file writes:
 ./scripts/setup-openjarvis-pi.sh
 # OR, for the requested user-level Pi control:
 ./scripts/setup-openjarvis-pi.sh --host-control
 ./install-pi.sh
 ```
 
-Use only one of the two setup commands. Host-control mode gives the agent the same ordinary access as the `pi5` Linux user; it does not make the model root. The dashboard's existing maintenance helper remains the only sudo path, and it accepts only its fixed service operations after the PIN and exact confirmation phrase.
+Use only one setup mode. The default installs the dedicated browser with one-task-approved click/type. Use `--read-only-browser` when you never want interactive browser input. Host-control mode is deliberately separate: it gives the isolated `jarvis-agent` ordinary access only inside `/srv/jarvis-workspace`; it does not make the model root and it disables browser/network tools. The dashboard's existing maintenance helper remains the only sudo path, and it accepts only its fixed service operations after the PIN and exact confirmation phrase.
 
 To update an existing GitHub installation later:
 
@@ -218,14 +231,26 @@ chmod +x install-pi.sh scripts/setup-openjarvis-pi.sh
 
 The installer:
 
-1. Installs production Node packages and FFmpeg/ALSA/V4L2 tools.
+1. Installs production Node packages, Chromium, the root-owned Playwright MCP bridge, and FFmpeg/ALSA/V4L2 tools.
 2. Creates `.wake-venv`, installs openWakeWord/ONNX Runtime, and downloads the official pretrained wake models once.
 3. Generates and prints a private six-digit dashboard/maintenance PIN if `.env` does not already contain one.
 4. Installs the fixed root helper and its exact sudoers rule.
 5. Adds maintenance-lock conditions to the three allow-listed services.
-6. Installs persistent `openjarvis-api.service` and `openjarvis-dashboard.service` units. Both bind only to loopback; OpenJarvis runs under the isolated `jarvis-agent` account.
+6. Installs persistent `openjarvis-api.service` and `openjarvis-dashboard.service` units. Both bind only to loopback; OpenJarvis runs under the isolated `jarvis-agent` account with its browser profile and output under `/srv/jarvis-workspace`.
 
 Save the generated PIN. It remains only in `~/openjarvis-pi-command-center/.env`. Unlocking the dashboard does not bypass the extra typed confirmation required for maintenance actions.
+
+### Windows or desktop Linux workspace
+
+Windows PowerShell can prepare the same private browser layout without touching your normal browser profile:
+
+```powershell
+cd "$env:USERPROFILE\Documents\Codex\2026-10-17\new-bot-im-working-on-called\outputs\openjarvis-pi-command-center"
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-windows.ps1
+node .\scripts\start-browser-mcp.mjs --check
+```
+
+On non-Pi Linux, use the same Node project and `scripts/start-browser-mcp.mjs`; install Chromium and point `JARVIS_BROWSER_EXECUTABLE` at it when auto-detection cannot find it. The `--check` command validates the executable, private profile, output directory, and headless mode without launching an agent session.
 
 ## Open it from the laptop
 
@@ -358,6 +383,8 @@ ollama pull llama3.2:1b
 ```
 
 Set `JARVIS_MODEL=llama3.2:1b` in `.env`. For Pi memory pressure, keep `OLLAMA_MAX_LOADED_MODELS=1`.
+
+Browser mode and host-control mode are intentionally different OpenJarvis instances/configurations. Browser mode can browse its private profile and, after one-task approval, click or type. Host-control mode can edit/code only inside the shared workspace and has no browser/network tools. JARVIS can create Office files directly without opening Microsoft Office or LibreOffice.
 
 Run these OpenJarvis agents separately and their real traces appear in the visualizer:
 

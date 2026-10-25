@@ -9,6 +9,7 @@ AGENT_HOME="/var/lib/jarvis-agent"
 AGENT_GROUP="jarvis-workspace"
 OPENJARVIS_DIR="${OPENJARVIS_INSTALL_DIR:-/opt/openjarvis}"
 OPENJARVIS_WORKSPACE="${OPENJARVIS_WORKSPACE:-/srv/jarvis-workspace}"
+AGENT_TOOLS_DIR="/opt/jarvis-agent-tools"
 NODE_BIN="$(command -v node || true)"
 JARVIS_BIN=""
 [[ -x "$OPENJARVIS_DIR/.venv/bin/jarvis" ]] && JARVIS_BIN="$OPENJARVIS_DIR/.venv/bin/jarvis"
@@ -145,6 +146,8 @@ Group=$AGENT_GROUP
 WorkingDirectory=$OPENJARVIS_WORKSPACE
 Environment=HOME=$AGENT_HOME
 Environment=PLAYWRIGHT_BROWSERS_PATH=$OPENJARVIS_DIR/.playwright
+Environment=OPENJARVIS_WORKSPACE=$OPENJARVIS_WORKSPACE
+Environment=JARVIS_BROWSER_HEADLESS=true
 ExecStart=$JARVIS_BIN serve --host 127.0.0.1 --port 8000 --agent orchestrator
 Restart=on-failure
 RestartSec=5
@@ -152,7 +155,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadOnlyPaths=$OPENJARVIS_DIR
+ReadOnlyPaths=$OPENJARVIS_DIR $AGENT_TOOLS_DIR
 ReadWritePaths=$AGENT_HOME $OPENJARVIS_WORKSPACE
 CapabilityBoundingSet=
 RestrictSUIDSGID=true

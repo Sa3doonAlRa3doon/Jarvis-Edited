@@ -21,7 +21,7 @@ const ui = {
   speechSupport: $('#speech-support'), voiceTranscript: $('#voice-transcript'), voiceConfidence: $('#voice-confidence'), testRecognition: $('#test-recognition'), testTalkback: $('#test-talkback'), installLocalSpeech: $('#install-local-speech'),
   cameraPreview: $('#camera-preview'), video: $('#camera-video'), image: $('#pi-camera-image'), canvas: $('#sensor-canvas'), placeholder: $('#camera-placeholder'), cameraSource: $('#camera-source'),
   personReadout: $('#person-readout'), micReadout: $('#mic-readout'), micMeter: $('#mic-meter'), wakeReadout: $('#wake-readout'), sensorState: $('#sensor-state'), sensorGuidance: $('#sensor-guidance'),
-  start: $('#start-sensors'), stop: $('#stop-sensors'), testWake: $('#test-wake'), googleGrid: $('#google-grid'), googleNote: $('#google-note'), googleState: $('#google-state'),
+  start: $('#start-sensors'), stop: $('#stop-sensors'), testWake: $('#test-wake'), googleGrid: $('#google-grid'), googleNote: $('#google-note'), googleState: $('#google-state'), workspaceGrid: $('#workspace-grid'), workspaceState: $('#workspace-state'),
   testGoogle: $('#test-google'), screenState: $('#screen-state'), screenStage: $('#screen-share-stage'), screenVideo: $('#screen-share-video'), screenCanvas: $('#screen-share-canvas'), screenPlaceholder: $('#screen-share-placeholder'), screenSource: $('#screen-share-source'), screenQuestion: $('#screen-question'), screenAnswer: $('#screen-answer'), screenVisionNote: $('#screen-vision-note'), startScreen: $('#start-screen-share'), stopScreen: $('#stop-screen-share'), analyzeScreen: $('#analyze-screen'),
   preview: $('#live-preview'), previewViewport: $('#preview-viewport'), previewResolution: $('#preview-resolution'), reloadPreview: $('#reload-preview'), openPreview: $('#open-preview'),
   search: $('#settings-search'), workspace: $('#settings-workspace'), searchEmpty: $('#search-empty'), save: $('#save-settings'), revert: $('#revert-settings'), recommended: $('#recommended-settings'), dirtyDot: $('#dirty-dot'), saveStateTitle: $('#save-state-title')
@@ -392,6 +392,22 @@ function renderGoogle(status) {
   ui.googleNote.textContent = status.scopesNote || ui.googleNote.textContent;
 }
 
+function renderWorkspace(status) {
+  const items = [
+    ['PRIVATE BROWSER', status.browser?.dedicatedProfile, status.browser?.interactiveEnabled ? 'PIN APPROVAL' : 'READ ONLY'],
+    ['OFFICE STUDIO', status.office?.local, (status.office?.formats || []).join(' / ').toUpperCase()],
+    ['GOOGLE NEWS', status.news?.googleRss, status.news?.apiKeyRequired ? 'KEY REQUIRED' : 'KEYLESS RSS'],
+    ['APP LENS', status.screenBorrow?.available, status.screenBorrow?.control ? 'CONTROL' : 'VIEW + ANALYZE']
+  ];
+  const active = items.filter(([, value]) => value).length;
+  ui.workspaceGrid.replaceChildren(...items.map(([name, available, detail]) => {
+    const item = document.createElement('div'); item.className = `google-item ${available ? 'connected' : ''}`;
+    item.innerHTML = `<i></i><span><b>${name}</b><small>${detail}</small></span><strong>${available ? 'READY' : 'OFFLINE'}</strong>`; return item;
+  }));
+  ui.workspaceState.textContent = `${active}/${items.length} READY // ${(status.platform || 'HOST').toUpperCase()}`;
+  ui.workspaceState.classList.toggle('active', active === items.length);
+}
+
 async function verifyGoogle() {
   ui.testGoogle.disabled = true; ui.testGoogle.textContent = 'VERIFYING…'; ui.googleState.textContent = 'PROBING';
   try {
@@ -728,8 +744,8 @@ if ('speechSynthesis' in window) speechSynthesis.addEventListener('voiceschanged
 async function init() {
   try {
     await window.ensureDashboardAuthentication?.();
-    const [settings, status, config] = await Promise.all([json('/api/settings'), json('/api/status'), json('/api/config')]);
-    ui.version.textContent = config.version || '3.10.0';
+    const [settings, status, config, workspace] = await Promise.all([json('/api/settings'), json('/api/status'), json('/api/config'), json('/api/workspace/status')]);
+    ui.version.textContent = config.version || '3.11.0';
     ui.node.textContent = config.piOnly ? 'PI-5' : 'LOCAL';
     state.config = config;
     ui.screenVisionNote.textContent = config.visionConfigured
@@ -744,6 +760,7 @@ async function init() {
     state.savedSettings = { ...settings };
     await loadDeviceLists(settings);
     renderGoogle(status.google || {});
+    renderWorkspace(workspace || {});
     applySettings(settings, { saved: true, message: 'Configuration profile loaded. Live preview link is active.' });
     activateSection(location.hash.slice(1) || 'devices', { syncUrl: false });
     await refreshSpeechSupport();

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import shutil
 from pathlib import Path
 
@@ -17,10 +18,20 @@ CORE_TOOLS = [
 ]
 
 READ_ONLY_BROWSER_TOOLS = [
-    "web_search",
     "browser_navigate",
-    "browser_screenshot",
-    "browser_extract",
+    "browser_navigate_back",
+    "browser_snapshot",
+    "browser_find",
+    "browser_take_screenshot",
+    "browser_wait_for",
+    "browser_tabs",
+]
+
+INTERACTIVE_BROWSER_TOOLS = [
+    "browser_click",
+    "browser_type",
+    "browser_select_option",
+    "browser_press_key",
 ]
 
 WORKSPACE_TOOLS = [
@@ -50,8 +61,12 @@ def main() -> None:
     parser.add_argument("--config", type=Path, default=Path.home() / ".openjarvis" / "config.toml")
     parser.add_argument("--model", default="llama3.2:1b")
     parser.add_argument("--host-control", action="store_true", help="Enable unprivileged shell and writable-file tools inside allowed-dir")
+    parser.add_argument("--browser-control", action="store_true", help="Enable one-task-approved click and type tools in the isolated browser")
+    parser.add_argument("--browser-launcher", type=Path, default=Path(__file__).with_name("start-browser-mcp.mjs"))
     parser.add_argument("--allowed-dir", type=Path, default=Path.home())
     args = parser.parse_args()
+    if args.host_control and args.browser_control:
+        parser.error("--host-control and --browser-control must use separate OpenJarvis instances")
 
     args.config.parent.mkdir(parents=True, exist_ok=True)
     if args.config.exists():
@@ -87,7 +102,28 @@ def main() -> None:
         enabled.extend(HOST_CONTROL_TOOLS)
     else:
         enabled.extend(READ_ONLY_BROWSER_TOOLS)
+        if args.browser_control:
+            enabled.extend(INTERACTIVE_BROWSER_TOOLS)
     tools["enabled"] = enabled
+
+    mcp = tools.get("mcp")
+    if not hasattr(mcp, "items"):
+        mcp = tomlkit.table()
+        tools["mcp"] = mcp
+    if args.host_control:
+        mcp["enabled"] = False
+        mcp["servers"] = ""
+    else:
+        browser_tools = list(READ_ONLY_BROWSER_TOOLS)
+        if args.browser_control:
+            browser_tools.extend(INTERACTIVE_BROWSER_TOOLS)
+        mcp["enabled"] = True
+        mcp["servers"] = json.dumps([{
+            "name": "jarvis-private-browser",
+            "command": "node",
+            "args": [str(args.browser_launcher.resolve())],
+            "include_tools": browser_tools,
+        }])
 
     server = table(document, "server")
     server["host"] = "127.0.0.1"
@@ -105,7 +141,7 @@ def main() -> None:
 
     args.config.write_text(tomlkit.dumps(document), encoding="utf-8")
     args.config.chmod(0o600)
-    mode = "browser plus unprivileged workspace control" if args.host_control else "browser and read-only workspace access"
+    mode = "unprivileged workspace control with no browser/network tools" if args.host_control else "isolated interactive browser" if args.browser_control else "isolated read-only browser"
     print(f"Configured OpenJarvis at {args.config} ({mode}).")
     print("Google OAuth credentials are not stored in this file.")
 

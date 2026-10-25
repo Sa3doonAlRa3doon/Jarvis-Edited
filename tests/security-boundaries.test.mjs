@@ -27,6 +27,7 @@ test('plain remote HTTP is rejected while localhost and trusted local TLS proxy 
 
 test('Pi services separate OpenJarvis from the dashboard sudo principal', async () => {
   const installer = await fs.readFile(new URL('../install-pi.sh', import.meta.url), 'utf8');
+  const setup = await fs.readFile(new URL('../scripts/setup-openjarvis-pi.sh', import.meta.url), 'utf8');
   const configurer = await fs.readFile(new URL('../scripts/configure-openjarvis.py', import.meta.url), 'utf8');
   assert.match(installer, /User=\$AGENT_USER/);
   assert.match(installer, /User=\$APP_USER/);
@@ -34,10 +35,14 @@ test('Pi services separate OpenJarvis from the dashboard sudo principal', async 
   assert.match(installer, /InaccessiblePaths=-\/var\/run\/docker\.sock -\/run\/docker\.sock/);
   assert.match(installer, /IPAddressDeny=any/);
   assert.match(installer, /IPAddressAllow=localhost/);
-  assert.doesNotMatch(configurer, /"browser_click"/);
-  assert.doesNotMatch(configurer, /"browser_type"/);
+  assert.match(configurer, /INTERACTIVE_BROWSER_TOOLS[\s\S]*"browser_click"[\s\S]*"browser_type"/);
+  assert.match(configurer, /if args\.host_control and args\.browser_control/);
+  for (const dangerous of ['browser_file_upload', 'browser_evaluate', 'browser_run_code_unsafe', 'browser_drop']) assert.doesNotMatch(configurer, new RegExp(`"${dangerous}"`));
   assert.doesNotMatch(configurer, /"http_request"/);
-  assert.match(configurer, /if args\.host_control:[\s\S]{0,180}enabled\.extend\(HOST_CONTROL_TOOLS\)[\s\S]{0,80}else:[\s\S]{0,120}enabled\.extend\(READ_ONLY_BROWSER_TOOLS\)/);
+  assert.match(configurer, /if args\.host_control:[\s\S]{0,180}enabled\.extend\(HOST_CONTROL_TOOLS\)[\s\S]{0,80}else:[\s\S]{0,180}enabled\.extend\(READ_ONLY_BROWSER_TOOLS\)/);
+  assert.match(installer, /AGENT_TOOLS_DIR="\/opt\/jarvis-agent-tools"/);
+  assert.match(setup, /browser-network-guard\.ts/);
+  assert.match(installer, /JARVIS_BROWSER_HEADLESS=true/);
   assert.match(installer, /set_env_value HOST 127\.0\.0\.1/);
   assert.doesNotMatch(installer, /User=\$APP_USER[\s\S]{0,250}ExecStart=\$JARVIS_BIN/);
 });

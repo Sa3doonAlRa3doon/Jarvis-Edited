@@ -1,6 +1,6 @@
 {
   "name": "openjarvis-pi-command-center",
-  "version": "3.10.0",
+  "version": "3.11.0",
   "private": true,
   "description": "Private Pi 5 JARVIS with one full-screen neural field and one local model that automatically switches specialist roles",
   "type": "module",
@@ -11,21 +11,27 @@
     "start": "node server.mjs",
     "google:authorize": "node scripts/google-oauth-local.mjs",
     "voice:calibrate": "node scripts/calibrate-fish-voice.mjs",
-    "check": "node --check server.mjs && node --check lib/agent-security.mjs && node --check lib/dashboard-session.mjs && node --check lib/email-drafts.mjs && node --check lib/event-store.mjs && node --check lib/system-probe.mjs && node --check lib/printer-client.mjs && node --check lib/knowledge-index.mjs && node --check lib/google-workspace.mjs && node --check lib/request-security.mjs && node --check lib/web-tools.mjs && node --check lib/openjarvis-live.mjs && node --check scripts/google-oauth-local.mjs && node --check public/auth.js && node --check public/app.js && node --check public/galaxy.js && node --check public/gesture-controller.js && node --check public/media-utils.js && node --check public/voice-utils.js && node --check public/voice-controller.js && node --check public/search-utils.js && node --check public/settings.js && node --test tests/*.test.mjs && node scripts/verify.mjs"
+    "check": "node --check server.mjs && node --check lib/agent-security.mjs && node --check lib/artifact-studio.mjs && node --check lib/browser-control.mjs && node --check lib/dashboard-session.mjs && node --check lib/email-drafts.mjs && node --check lib/event-store.mjs && node --check lib/system-probe.mjs && node --check lib/printer-client.mjs && node --check lib/knowledge-index.mjs && node --check lib/google-workspace.mjs && node --check lib/news-tools.mjs && node --check lib/request-security.mjs && node --check lib/web-tools.mjs && node --check lib/openjarvis-live.mjs && node --check scripts/google-oauth-local.mjs && node --check scripts/start-browser-mcp.mjs && node --check public/auth.js && node --check public/app.js && node --check public/galaxy.js && node --check public/gesture-controller.js && node --check public/media-utils.js && node --check public/voice-utils.js && node --check public/voice-controller.js && node --check public/search-utils.js && node --check public/settings.js && node --test tests/*.test.mjs && node scripts/verify.mjs"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.22-rc.20250304",
+    "@playwright/mcp": "0.0.83",
     "@tensorflow-models/coco-ssd": "^2.2.3",
     "@tensorflow/tfjs": "^4.22.0",
+    "docx": "^9.14.0",
     "dotenv": "^17.2.3",
+    "exceljs": "^4.4.0",
     "express": "^5.1.0",
+    "pptxgenjs": "^4.0.1",
     "three": "^0.180.0",
     "ws": "^8.22.0"
   },
   "overrides": {
-    "argparse": "2.0.1"
+    "argparse": "2.0.1",
+    "image-size": "2.0.4",
+    "uuid": "11.1.1"
   }
 }

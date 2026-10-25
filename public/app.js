@@ -39,7 +39,12 @@ const ui = {
   agentLivePlaceholder: $('#agent-live-placeholder'), agentLiveTool: $('#agent-live-tool'), agentLiveTime: $('#agent-live-time'),
   emailDialog: $('#email-dialog'), emailForm: $('#email-form'), emailClose: $('#email-close'), emailTo: $('#email-to'),
   emailSubject: $('#email-subject'), emailBody: $('#email-body'), emailPin: $('#email-pin'), emailConfirmation: $('#email-confirmation'),
-  emailError: $('#email-error'), emailSafety: $('#email-safety'), confirmEmail: $('#confirm-email')
+  emailError: $('#email-error'), emailSafety: $('#email-safety'), confirmEmail: $('#confirm-email'),
+  browserControlDialog: $('#browser-control-dialog'), browserControlForm: $('#browser-control-form'), browserControlClose: $('#browser-control-close'),
+  browserControlTask: $('#browser-control-task'), browserControlSafety: $('#browser-control-safety'), browserControlPin: $('#browser-control-pin'),
+  browserControlConfirmation: $('#browser-control-confirmation'), browserControlError: $('#browser-control-error'), confirmBrowserControl: $('#confirm-browser-control'),
+  artifactDialog: $('#artifact-dialog'), artifactClose: $('#artifact-close'), artifactTitle: $('#artifact-title'), artifactSubtitle: $('#artifact-subtitle'),
+  artifactType: $('#artifact-type'), artifactFile: $('#artifact-file'), artifactSize: $('#artifact-size'), artifactOutline: $('#artifact-outline'), artifactDownload: $('#artifact-download')
 };
 
 const state = {
@@ -51,7 +56,7 @@ const state = {
   neuralEnergy: 0.22, coreMode: 'system', voiceState: 'standby', voiceLevel: 0, searchResults: [], searchSelection: 0,
   refreshFastPending: false, refreshSlowPending: false, pendingSpeech: null, audioPriming: false, wakeSession: 0,
   voiceCapture: { active: false, phase: 'idle', deadline: 0, ticker: 0, closeTimer: 0 },
-  agentLive: { pending: false, timer: 0, frameVersion: 0 }, emailDraft: null
+  agentLive: { pending: false, timer: 0, frameVersion: 0 }, emailDraft: null, browserRequest: null, artifact: null
 };
 
 const VOICE_COMMAND_TIMEOUT_MS = 15_000;
@@ -667,7 +672,7 @@ async function handleWake(event) {
   setTimeout(() => { ui.wakeState.textContent = state.status?.wake?.ready ? 'LISTENING' : 'STANDBY'; }, 2200);
 }
 
-async function sendPrompt(prompt) {
+async function sendPrompt(prompt, { browserGrant = '', appendUser = true } = {}) {
   const text = String(prompt || '').trim(); if (!text || ui.send.disabled) return;
   state.galaxy?.focusFromText(text);
   const directPrinterAction = /\b(?:cancel|end|stop)\s+(?:my\s+|the\s+)?(?:3d\s+)?print\b/i.test(text) ? 'cancel'
@@ -678,16 +683,18 @@ async function sendPrompt(prompt) {
     appendMessage('user', text); appendMessage('assistant', `I opened the guarded ${directPrinterAction} control. Enter the operations PIN and type ${printerCopy[directPrinterAction].confirmation} exactly. I will not execute it automatically.`, 'LOCAL SAFETY');
     openPrinterAction(directPrinterAction); return;
   }
-  appendMessage('user', text); state.history.push({ role: 'user', content: text }); state.history = state.history.slice(-16);
+  if (appendUser) { appendMessage('user', text); state.history.push({ role: 'user', content: text }); state.history = state.history.slice(-16); }
   ui.prompt.value = ''; ui.send.disabled = true; ui.send.innerHTML = '<span>LINK</span><b>RUNNING</b>'; state.neuralEnergy = .95; updateVoiceVisual('processing', .92);
   window.setTimeout(() => void refreshAgentLive({ force: true }), 80);
   try {
-    const result = await json('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: text, history: state.history.slice(0, -1) }) });
+    const result = await json('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: text, history: state.history.slice(0, -1), browserGrant }) });
     ui.route.textContent = result.route;
     activateCoreMode(routeModes[result.route] || 'system');
     state.lastAssistant = result.content; appendMessage('assistant', result.content, result.source); state.history.push({ role: 'assistant', content: result.content }); state.history = state.history.slice(-16);
     if (Array.isArray(result.citations) && result.citations.length) { renderCitations(result.citations); activateCoreMode('research'); }
     if (result.action?.type === 'email_draft') openEmailDraft(result.action);
+    if (result.action?.type === 'browser_control_request') openBrowserControlRequest(result.action, text);
+    if (result.action?.type === 'artifact_ready') openArtifact(result.action.artifact);
     void speak(result.content);
   } catch (error) { appendMessage('error', error.message); }
   finally { ui.send.disabled = false; ui.send.innerHTML = '<span>RUN</span><b>EXECUTE</b>'; state.neuralEnergy = .42; if (state.voiceState !== 'speaking') updateVoiceVisual(state.voice?.active ? 'listening' : 'standby', .18); }
@@ -799,6 +806,46 @@ async function sendApprovedEmail() {
   }
 }
 
+function openBrowserControlRequest(action, fallbackTask = '') {
+  const request = action?.request;
+  if (!request?.id) return;
+  state.browserRequest = { ...request, task: request.task || fallbackTask };
+  ui.browserControlTask.textContent = state.browserRequest.task;
+  ui.browserControlPin.value = ''; ui.browserControlConfirmation.value = ''; ui.browserControlError.textContent = '';
+  ui.browserControlSafety.textContent = `NO CLICKS OR TYPING YET // REQUEST EXPIRES ${new Date(request.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  ui.confirmBrowserControl.disabled = false; ui.confirmBrowserControl.textContent = 'RUN THIS ONE BROWSER TASK';
+  ui.browserControlDialog.showModal(); ui.browserControlPin.focus();
+}
+
+async function approveBrowserControl() {
+  if (!state.browserRequest?.id) return;
+  ui.confirmBrowserControl.disabled = true; ui.confirmBrowserControl.textContent = 'AUTHORIZING…'; ui.browserControlError.textContent = '';
+  try {
+    const result = await json('/api/browser/control/approve', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId: state.browserRequest.id, pin: ui.browserControlPin.value, confirmation: ui.browserControlConfirmation.value })
+    });
+    const task = state.browserRequest.task; state.browserRequest = null; ui.browserControlDialog.close();
+    await sendPrompt(task, { browserGrant: result.grant.token, appendUser: false });
+  } catch (error) { ui.browserControlError.textContent = error.message; }
+  finally { if (state.browserRequest) { ui.confirmBrowserControl.disabled = false; ui.confirmBrowserControl.textContent = 'RUN THIS ONE BROWSER TASK'; } }
+}
+
+function artifactSize(bytes) {
+  const value = Math.max(0, Number(bytes) || 0);
+  return value >= 1024 * 1024 ? `${(value / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(value / 1024))} KB`;
+}
+
+function openArtifact(artifact) {
+  if (!artifact?.id || !artifact.downloadUrl) return;
+  state.artifact = { ...artifact };
+  ui.artifactTitle.textContent = artifact.title || 'Artifact ready'; ui.artifactSubtitle.textContent = artifact.subtitle || 'Generated locally by JARVIS.';
+  ui.artifactType.textContent = String(artifact.type || 'FILE').toUpperCase(); ui.artifactFile.textContent = artifact.fileName || 'download'; ui.artifactSize.textContent = artifactSize(artifact.bytes);
+  ui.artifactOutline.replaceChildren(...(artifact.outline || []).map((heading) => { const item = document.createElement('li'); item.textContent = heading; return item; }));
+  ui.artifactDownload.href = artifact.downloadUrl; ui.artifactDownload.download = artifact.fileName || '';
+  ui.artifactDialog.showModal();
+}
+
 function openOperation(action) {
   const copy = operationCopy[action]; if (!copy) return;
   state.operation = action; state.operationKind = 'system'; ui.operationTitle.textContent = copy.title; ui.operationDescription.textContent = copy.description; ui.confirmationPhrase.textContent = copy.confirmation;
@@ -895,6 +942,11 @@ ui.operationClose.addEventListener('click', () => ui.operationDialog.close());
 ui.emailForm.addEventListener('submit', (event) => { event.preventDefault(); void sendApprovedEmail(); });
 ui.emailClose.addEventListener('click', () => { state.emailDraft = null; ui.emailDialog.close(); });
 ui.emailDialog.addEventListener('cancel', () => { state.emailDraft = null; });
+ui.browserControlForm.addEventListener('submit', (event) => { event.preventDefault(); void approveBrowserControl(); });
+ui.browserControlClose.addEventListener('click', () => { state.browserRequest = null; ui.browserControlDialog.close(); });
+ui.browserControlDialog.addEventListener('cancel', () => { state.browserRequest = null; });
+ui.artifactClose.addEventListener('click', () => { state.artifact = null; ui.artifactDialog.close(); });
+ui.artifactDialog.addEventListener('cancel', () => { state.artifact = null; });
 window.addEventListener('resize', () => { syncFullscreenUi(); drawTelemetry(); });
 document.addEventListener('fullscreenchange', syncFullscreenUi);
 document.addEventListener('webkitfullscreenchange', syncFullscreenUi);

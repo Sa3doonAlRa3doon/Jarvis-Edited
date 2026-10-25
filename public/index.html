@@ -253,6 +253,33 @@
     </form>
   </dialog>
 
+  <dialog id="browser-control-dialog" class="operation-dialog browser-control-dialog">
+    <form id="browser-control-form" autocomplete="off">
+      <button class="dialog-close" id="browser-control-close" type="button" aria-label="Close">×</button>
+      <span class="dialog-kicker">PRIVATE BROWSER // ONE-TASK GRANT</span>
+      <h2>Approve browser interaction</h2>
+      <p>JARVIS will use its separate browser profile for only the exact task below. Closing this window performs no browser action.</p>
+      <div class="browser-task"><span>REQUESTED TASK</span><strong id="browser-control-task"></strong></div>
+      <p class="email-safety" id="browser-control-safety">NO CLICKS OR TYPING YET</p>
+      <label>CONTROL PIN<input id="browser-control-pin" type="password" inputmode="numeric" autocomplete="off" required></label>
+      <label>TYPE TO CONFIRM <b>ALLOW BROWSER CONTROL</b><input id="browser-control-confirmation" type="text" autocomplete="off" required></label>
+      <p class="dialog-error" id="browser-control-error"></p>
+      <button class="confirm-operation" id="confirm-browser-control" type="submit">RUN THIS ONE BROWSER TASK</button>
+    </form>
+  </dialog>
+
+  <dialog id="artifact-dialog" class="operation-dialog artifact-dialog">
+    <form method="dialog">
+      <button class="dialog-close" id="artifact-close" type="button" aria-label="Close">×</button>
+      <span class="dialog-kicker">LOCAL ARTIFACT STUDIO</span>
+      <h2 id="artifact-title">Artifact ready</h2>
+      <p id="artifact-subtitle"></p>
+      <div class="artifact-summary"><span id="artifact-type">FILE</span><b id="artifact-file"></b><small id="artifact-size"></small></div>
+      <ol id="artifact-outline" class="artifact-outline"></ol>
+      <a id="artifact-download" class="confirm-operation artifact-download" href="#" download>DOWNLOAD FILE</a>
+    </form>
+  </dialog>
+
   <script src="/auth.js"></script>
   <script src="/app.js" type="module"></script>
 </body>
