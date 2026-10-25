@@ -1,6 +1,6 @@
 {
   "name": "openjarvis-pi-command-center",
-  "version": "3.7.1",
+  "version": "3.10.0",
   "private": true,
   "description": "Private Pi 5 JARVIS with one full-screen neural field and one local model that automatically switches specialist roles",
   "type": "module",
@@ -9,8 +9,9 @@
     "assets": "node scripts/install-model.mjs",
     "postinstall": "node scripts/install-model.mjs",
     "start": "node server.mjs",
+    "google:authorize": "node scripts/google-oauth-local.mjs",
     "voice:calibrate": "node scripts/calibrate-fish-voice.mjs",
-    "check": "node --check server.mjs && node --check lib/dashboard-session.mjs && node --check lib/event-store.mjs && node --check lib/system-probe.mjs && node --check lib/printer-client.mjs && node --check lib/knowledge-index.mjs && node --check public/auth.js && node --check public/app.js && node --check public/galaxy.js && node --check public/gesture-controller.js && node --check public/media-utils.js && node --check public/voice-utils.js && node --check public/voice-controller.js && node --check public/search-utils.js && node --check public/settings.js && node --test tests/*.test.mjs && node scripts/verify.mjs"
+    "check": "node --check server.mjs && node --check lib/agent-security.mjs && node --check lib/dashboard-session.mjs && node --check lib/email-drafts.mjs && node --check lib/event-store.mjs && node --check lib/system-probe.mjs && node --check lib/printer-client.mjs && node --check lib/knowledge-index.mjs && node --check lib/google-workspace.mjs && node --check lib/request-security.mjs && node --check lib/web-tools.mjs && node --check lib/openjarvis-live.mjs && node --check scripts/google-oauth-local.mjs && node --check public/auth.js && node --check public/app.js && node --check public/galaxy.js && node --check public/gesture-controller.js && node --check public/media-utils.js && node --check public/voice-utils.js && node --check public/voice-controller.js && node --check public/search-utils.js && node --check public/settings.js && node --test tests/*.test.mjs && node scripts/verify.mjs"
   },
   "engines": {
     "node": ">=20"
@@ -21,7 +22,8 @@
     "@tensorflow/tfjs": "^4.22.0",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
-    "three": "^0.180.0"
+    "three": "^0.180.0",
+    "ws": "^8.22.0"
   },
   "overrides": {
     "argparse": "2.0.1"

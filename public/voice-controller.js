@@ -10,6 +10,9 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 
 const COMMAND_CAPTURE_HARD_LIMIT_MS = 120_000;
 const DELAYED_TRANSCRIPT_GRACE_MS = 2_500;
 const COMMAND_END_SILENCE_MS = 1_400;
+const VAD_ATTACK_MS = 320;
+const VAD_RELEASE_MS = 360;
+const VAD_TRANSCRIPT_HOLD_MS = 4_000;
 
 export async function configureRecognitionCapabilities(recognition, RecognitionClass, {
   language = 'en-US', preferLocalRecognition = true, wakePhrases = DEFAULT_WAKE_PHRASES,
@@ -57,6 +60,7 @@ export class VoiceController {
     this.armedUntil = 0; this.lastWakeAt = 0; this.lastCommand = ''; this.lastCommandAt = 0; this.pending = []; this.commandTimer = 0;
     this.commandCaptureActive = false; this.commandCaptureStarted = false; this.captureTimer = 0; this.captureFinalizeTimer = 0;
     this.captureInterim = ''; this.captureTimeoutMs = 15_000; this.captureHardDeadline = 0; this.captureVoiceActive = false;
+    this.vadCandidateSince = 0; this.vadQuietSince = 0; this.lastSpeechSignalAt = 0; this.lastRawVoiceAt = 0;
     this.lastLevel = 0; this.lastVoiceState = false; this.audioSamples = null; this.preparingRecognition = false;
     this.recognitionMode = 'browser'; this.localRecognitionDisabled = false; this.phraseBiasDisabled = false;
     this.networkErrors = 0; this.recognitionUnavailable = false;
@@ -65,7 +69,7 @@ export class VoiceController {
   configure(settings = {}) {
     this.settings = {
       browserMicrophone: '', wakeWord: true, doubleClap: true, wakePhrases: DEFAULT_WAKE_PHRASES,
-      wakeSensitivity: .55, recognitionConfidence: .35, commandSilenceMs: 700, micSensitivity: .18,
+      wakeSensitivity: .72, recognitionConfidence: .55, commandSilenceMs: 700, micSensitivity: .28,
       clapSensitivity: .34, doubleClapWindow: 700, echoCancellation: true, noiseSuppression: true,
       autoGainControl: true, voiceLanguage: 'en-US', bargeIn: false, preferLocalRecognition: true,
       voiceVocabulary: DEFAULT_VOICE_VOCABULARY, ...settings
@@ -126,8 +130,18 @@ export class VoiceController {
     }
     recognition.continuous = true; recognition.interimResults = true; recognition.maxAlternatives = 5; recognition.lang = this.settings.voiceLanguage || 'en-US';
     recognition.onstart = () => { this.restartDelay = 240; this.onState('listening'); };
-    recognition.onspeechstart = () => { this.markCommandSpeech(); this.onState('hearing'); };
-    recognition.onspeechend = () => { if (this.commandCaptureActive) this.scheduleCommandFinalize(); this.onState(this.commandCaptureActive ? 'armed' : 'listening'); };
+    recognition.onspeechstart = () => {
+      const recentPhysicalVoice = !this.analyser || this.lastRawVoiceAt > 0 && performance.now() - this.lastRawVoiceAt <= 2500;
+      if (recentPhysicalVoice) {
+        this.markCommandSpeech();
+        if (this.commandCaptureActive) this.updateCommandVoiceActivity(true);
+      }
+      this.onState('hearing');
+    };
+    recognition.onspeechend = () => {
+      if (this.commandCaptureActive) this.updateCommandVoiceActivity(false);
+      this.onState(this.commandCaptureActive ? 'armed' : 'listening');
+    };
     recognition.onresult = (event) => this.handleRecognitionResult(event);
     recognition.onerror = (event) => {
       if (event.error === 'phrases-not-supported') {
@@ -200,15 +214,17 @@ export class VoiceController {
         wakePhrases: this.settings.wakePhrases, wakeSensitivity: this.settings.wakeSensitivity,
         recognitionConfidence: this.settings.recognitionConfidence, preferWake: this.settings.wakeWord && !armed
       });
-      this.onTranscript({ text: selected.transcript, final: result.isFinal, confidence: selected.confidence, accepted: selected.accepted });
-      if (this.commandCaptureActive && selected.transcript) {
+      const recentPhysicalVoice = !this.analyser || this.lastRawVoiceAt > 0 && performance.now() - this.lastRawVoiceAt <= 2500;
+      const physicallyAccepted = selected.accepted && recentPhysicalVoice;
+      this.onTranscript({ text: selected.transcript, final: result.isFinal, confidence: selected.confidence, accepted: physicallyAccepted });
+      if (this.commandCaptureActive && physicallyAccepted && selected.transcript) {
         this.captureInterim = normalizeTranscript(selected.transcript);
         this.markCommandSpeech();
         this.onCapture({ state: result.isFinal ? 'final' : 'transcript', text: selected.transcript, confidence: selected.confidence });
       }
-      if (!selected.accepted || this.speaking && !this.settings.bargeIn) continue;
+      if (!physicallyAccepted || this.speaking && !this.settings.bargeIn) continue;
       const wake = selected.wake || findWakePhrase(selected.transcript, this.settings.wakePhrases, this.settings.wakeSensitivity);
-      if (!this.commandCaptureActive && this.settings.wakeWord && wake.detected) {
+      if (!this.commandCaptureActive && result.isFinal && this.settings.wakeWord && wake.detected && wake.start === 0 && recentPhysicalVoice) {
         this.arm(wake);
         continue;
       }
@@ -226,6 +242,7 @@ export class VoiceController {
   beginCommandCapture(timeoutMs = 15_000) {
     clearTimeout(this.captureTimer); clearTimeout(this.captureFinalizeTimer); clearTimeout(this.commandTimer);
     this.pending = []; this.captureInterim = ''; this.commandCaptureStarted = false; this.commandCaptureActive = true; this.captureVoiceActive = false;
+    this.vadCandidateSince = 0; this.vadQuietSince = 0; this.lastSpeechSignalAt = 0; this.lastRawVoiceAt = 0;
     this.captureTimeoutMs = clamp(Number(timeoutMs) || 15_000, 5_000, 30_000);
     this.captureHardDeadline = 0; this.armedUntil = Date.now() + this.captureTimeoutMs;
     this.captureTimer = window.setTimeout(() => this.finishCommandCapture('timeout'), this.captureTimeoutMs);
@@ -235,6 +252,7 @@ export class VoiceController {
 
   markCommandSpeech() {
     if (!this.commandCaptureActive) return;
+    this.lastSpeechSignalAt = performance.now();
     if (!this.commandCaptureStarted) {
       this.commandCaptureStarted = true; clearTimeout(this.captureTimer);
       this.captureHardDeadline = Date.now() + COMMAND_CAPTURE_HARD_LIMIT_MS; this.armedUntil = this.captureHardDeadline;
@@ -254,6 +272,28 @@ export class VoiceController {
       return;
     }
     if (changed && this.commandCaptureStarted) this.scheduleCommandFinalize();
+  }
+
+  updateRawCommandVoiceActivity(active, now = performance.now()) {
+    if (!this.commandCaptureActive) return;
+    if (!active) {
+      this.vadCandidateSince = 0;
+      if (!this.captureVoiceActive) { this.vadQuietSince = 0; return; }
+      if (!this.vadQuietSince) this.vadQuietSince = now;
+      if (now - this.vadQuietSince >= VAD_RELEASE_MS) {
+        this.vadQuietSince = 0;
+        this.updateCommandVoiceActivity(false);
+      }
+      return;
+    }
+    this.vadQuietSince = 0;
+    if (!this.commandCaptureStarted || !this.lastSpeechSignalAt || now - this.lastSpeechSignalAt > VAD_TRANSCRIPT_HOLD_MS) {
+      this.vadCandidateSince = 0;
+      if (this.captureVoiceActive) this.updateCommandVoiceActivity(false);
+      return;
+    }
+    if (!this.vadCandidateSince) this.vadCandidateSince = now;
+    if (!this.captureVoiceActive && now - this.vadCandidateSince >= VAD_ATTACK_MS) this.updateCommandVoiceActivity(true);
   }
 
   scheduleCommandFinalize() {
@@ -276,11 +316,6 @@ export class VoiceController {
 
   handleCommandCaptureDeadline() {
     if (!this.commandCaptureActive) return;
-    if (this.captureVoiceActive) {
-      this.captureHardDeadline = Date.now() + 30_000;
-      this.captureTimer = window.setTimeout(() => this.handleCommandCaptureDeadline(), 30_000);
-      return;
-    }
     if (this.pending.length) { this.flushCommand(); return; }
     if (this.captureInterim) { this.pending.push(this.captureInterim); this.flushCommand(); return; }
     this.finishCommandCapture('timeout');
@@ -289,6 +324,7 @@ export class VoiceController {
   finishCommandCapture(reason = 'cancelled', text = '') {
     if (!this.commandCaptureActive && reason !== 'complete') return;
     this.commandCaptureActive = false; this.commandCaptureStarted = false; this.captureVoiceActive = false; this.armedUntil = 0;
+    this.vadCandidateSince = 0; this.vadQuietSince = 0; this.lastSpeechSignalAt = 0;
     clearTimeout(this.captureTimer); clearTimeout(this.captureFinalizeTimer); clearTimeout(this.commandTimer);
     this.captureTimer = 0; this.captureFinalizeTimer = 0; this.commandTimer = 0; this.captureHardDeadline = 0; this.captureInterim = '';
     if (reason !== 'complete') this.pending = [];
@@ -330,10 +366,11 @@ export class VoiceController {
     const rms = Math.sqrt(sum / samples.length); const now = performance.now();
     const vadThreshold = Math.max(.012, this.noiseFloor * 2.8, Number(this.settings.micSensitivity || .18) * .2);
     const voiceActive = rms > vadThreshold;
+    if (voiceActive && peak > vadThreshold * 1.25) this.lastRawVoiceAt = now;
     if (!voiceActive) this.noiseFloor = this.noiseFloor * .985 + rms * .015;
     else if (this.noiseFloor < .004) this.noiseFloor = .004;
     const shown = Math.min(1, rms / Math.max(.035, vadThreshold * 2.4)); this.onLevel({ level: shown, rms, peak, noiseFloor: this.noiseFloor, voiceActive });
-    if (this.commandCaptureActive) this.updateCommandVoiceActivity(voiceActive);
+    if (this.commandCaptureActive) this.updateRawCommandVoiceActivity(voiceActive, now);
     if (voiceActive !== this.lastVoiceState) { this.lastVoiceState = voiceActive; this.onState(voiceActive ? 'hearing' : Date.now() < this.armedUntil ? 'armed' : 'listening'); }
 
     const clapThreshold = Math.max(Number(this.settings.clapSensitivity || .34), this.noiseFloor * 7.5);
@@ -396,7 +433,9 @@ export class VoiceController {
     try { this.recognition?.abort(); } catch {}
     try { this.playbackSource?.stop(); } catch {}
     this.playbackSource = null;
-    this.recognition = null; this.preparingRecognition = false; this.pending = []; this.commandCaptureActive = false; this.captureVoiceActive = false; this.captureInterim = ''; this.stream?.getTracks().forEach((track) => track.stop()); this.stream = null; this.analyser = null; this.audioSamples = null;
+    this.recognition = null; this.preparingRecognition = false; this.pending = []; this.commandCaptureActive = false; this.captureVoiceActive = false; this.captureInterim = '';
+    this.vadCandidateSince = 0; this.vadQuietSince = 0; this.lastSpeechSignalAt = 0;
+    this.stream?.getTracks().forEach((track) => track.stop()); this.stream = null; this.analyser = null; this.audioSamples = null;
     this.networkErrors = 0; this.recognitionUnavailable = false;
     if (this.context) await this.context.close().catch(() => {});
     this.context = null; this.onLevel({ level: 0, rms: 0, peak: 0, noiseFloor: this.noiseFloor, voiceActive: false }); this.onState('standby');

@@ -5,11 +5,12 @@ import { fileURLToPath } from 'node:url';
 
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (file) => fs.readFile(path.join(project, file), 'utf8');
-const [html, settingsHtml, client, settingsClient, authClient, css, server, helper, gitignore, packageRaw, galaxy, gestures, voiceController, voiceUtils, searchUtils, printerClient, knowledgeIndex, agentRouter] = await Promise.all([
+const [html, settingsHtml, client, settingsClient, authClient, css, server, helper, gitignore, packageRaw, galaxy, gestures, voiceController, voiceUtils, searchUtils, printerClient, knowledgeIndex, agentRouter, openJarvisLive, openJarvisConfig, openJarvisSetup] = await Promise.all([
   read('public/index.html'), read('public/settings.html'), read('public/app.js'), read('public/settings.js'),
   read('public/auth.js'), read('public/styles.css'), read('server.mjs'), read('scripts/jarvis-service-control.sh'), read('.gitignore'), read('package.json'),
   read('public/galaxy.js'), read('public/gesture-controller.js'), read('public/voice-controller.js'), read('public/voice-utils.js'), read('public/search-utils.js'),
-  read('lib/printer-client.mjs'), read('lib/knowledge-index.mjs'), read('lib/agent-router.mjs')
+  read('lib/printer-client.mjs'), read('lib/knowledge-index.mjs'), read('lib/agent-router.mjs'), read('lib/openjarvis-live.mjs'),
+  read('scripts/configure-openjarvis.py'), read('scripts/setup-openjarvis-pi.sh')
 ]);
 const packageJson = JSON.parse(packageRaw);
 
@@ -32,7 +33,7 @@ for (const shard of shards) { const stats = await fs.stat(path.join(modelDirecto
 const handModel = await fs.readFile(path.join(project, 'public', 'models', 'hand-landmarker', 'hand_landmarker.task'));
 assert.equal(handModel.length, 7819105, 'Unexpected hand landmark model size.');
 
-assert.equal(packageJson.version, '3.7.1');
+assert.equal(packageJson.version, '3.10.0');
 assert.match(server, /ALLOW_BROWSER_TTS_FALLBACK/);
 assert.match(server, /X-Jarvis-Voice-ID/);
 assert.match(client, /Fish Audio playback failed without changing voices/);
@@ -109,7 +110,7 @@ assert.match(settingsHtml, /id="test-recognition"/);
 assert.match(settingsHtml, /id="tts-voice"/);
 assert.match(server, /wakeResponse: 'Yes sir, how can I help you today\?'/);
 assert.match(settingsHtml, /placeholder="Yes sir, how can I help you today\?"/);
-assert.match(server, /const appVersion = '3\.7\.1'/);
+assert.match(server, /const appVersion = '3\.10\.0'/);
 assert.match(voiceController, /updateCommandVoiceActivity/);
 assert.match(voiceController, /DELAYED_TRANSCRIPT_GRACE_MS/);
 assert.match(server, /loadDashboardSessionSecret/);
@@ -121,6 +122,29 @@ assert.match(client, /beginWakeCommandCapture/);
 assert.match(voiceController, /beginCommandCapture/);
 assert.match(voiceController, /captureInterim/);
 assert.match(server, /on-device-speech-recognition=\(self\)/);
+assert.match(server, /display-capture=\(self\)/);
+assert.match(server, /googleWorkspace\.runIntent/);
+assert.match(server, /searchWeb\(prompt\)/);
+assert.match(server, /browser_screenshot after navigation/);
+assert.match(server, /app\.get\('\/api\/agent\/live'/);
+assert.match(server, /app\.get\('\/api\/agent\/live-frame'/);
+assert.match(html, /id="agent-live-view"/);
+assert.match(client, /refreshAgentLive/);
+assert.match(client, /\/api\/agent\/live-frame/);
+assert.match(openJarvisLive, /v1\/agents\/events/);
+assert.match(openJarvisLive, /Authorization: `Bearer \$\{this\.apiKey\}`/);
+assert.match(openJarvisConfig, /--host-control/);
+assert.match(openJarvisConfig, /browser_screenshot/);
+assert.match(openJarvisSetup, /--extra browser/);
+assert.match(openJarvisSetup, /install chromium/);
+assert.match(server, /app\.post\('\/api\/screen\/analyze'/);
+assert.match(settingsHtml, /id="screen-share-video"/);
+assert.match(settingsHtml, /id="test-google"/);
+assert.match(settingsClient, /getDisplayMedia/);
+assert.match(voiceController, /physicallyAccepted && selected\.transcript/);
+assert.match(voiceController, /result\.isFinal && this\.settings\.wakeWord/);
+assert.match(voiceController, /updateRawCommandVoiceActivity/);
+assert.match(voiceController, /wake\.start === 0 && recentPhysicalVoice/);
 assert.match(server, /printerRefreshActive/);
 assert.match(server, /monitorTickActive/);
 assert.match(client, /refreshFastPending/);
@@ -150,6 +174,13 @@ assert.match(galaxy, /setActivity/);
 assert.match(server, /app\.get\('\/api\/knowledge'/);
 assert.match(server, /app\.get\('\/api\/printer\/events'/);
 assert.match(server, /app\.post\('\/api\/printer\/action'/);
+assert.match(server, /app\.post\('\/api\/google\/email\/send'/);
+assert.match(html, /id="email-dialog"/);
+assert.match(client, /SEND THIS EXACT EMAIL/);
+assert.match(server, /source: 'ollama-readonly'/);
+assert.match(server, /privateApiTransportAllowed/);
+assert.match(openJarvisSetup, /AGENT_USER="jarvis-agent"/);
+assert.match(openJarvisSetup, /WORKSPACE_DIR="\/srv\/jarvis-workspace"/);
 assert.match(printerClient, /pause: '\/printer\/print\/pause'/);
 assert.match(printerClient, /cancel: '\/printer\/print\/cancel'/);
 assert.doesNotMatch(printerClient, /gcode\/script/);
@@ -167,3 +198,4 @@ console.log(`Verified ${shards.length} local person-model shards (${(modelBytes 
 console.log(`Verified local MediaPipe hand model (${(handModel.length / 1024 / 1024).toFixed(1)} MiB).`);
 console.log('Verified no-scroll 3D file galaxy, hidden settings, smoothed gestures, voice recognition controls, and live preview.');
 console.log('Verified session-gated dashboard, PIN-gated fixed printer/maintenance actions, and secret-file exclusions.');
+console.log('Verified OpenJarvis browser tools, protected transient live frames, isolated Pi agent account, and visible approved-email workflow.');

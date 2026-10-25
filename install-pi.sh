@@ -4,11 +4,14 @@ set -euo pipefail
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_USER="$(id -un)"
 APP_HOME="$(getent passwd "$APP_USER" | cut -d: -f6)"
+AGENT_USER="jarvis-agent"
+AGENT_HOME="/var/lib/jarvis-agent"
+AGENT_GROUP="jarvis-workspace"
+OPENJARVIS_DIR="${OPENJARVIS_INSTALL_DIR:-/opt/openjarvis}"
+OPENJARVIS_WORKSPACE="${OPENJARVIS_WORKSPACE:-/srv/jarvis-workspace}"
 NODE_BIN="$(command -v node || true)"
-JARVIS_BIN="$(command -v jarvis || true)"
-if [[ -z "$JARVIS_BIN" && -x "$APP_HOME/.local/bin/jarvis" ]]; then
-  JARVIS_BIN="$APP_HOME/.local/bin/jarvis"
-fi
+JARVIS_BIN=""
+[[ -x "$OPENJARVIS_DIR/.venv/bin/jarvis" ]] && JARVIS_BIN="$OPENJARVIS_DIR/.venv/bin/jarvis"
 
 if [[ -z "$NODE_BIN" ]]; then
   echo "Node.js 20+ is required. Install Node.js, then run this script again."
@@ -98,7 +101,7 @@ fi
 set_env_value OPS_HELPER_PATH /usr/local/sbin/jarvis-service-control
 set_env_value ENABLE_PI_WAKE_LISTENER "$WAKE_READY"
 set_env_value WAKE_PYTHON "$APP_DIR/.wake-venv/bin/python"
-set_env_value HOST 0.0.0.0
+set_env_value HOST 127.0.0.1
 install -d -m 0700 "$APP_DIR/data"
 
 sudo install -m 0750 "$APP_DIR/scripts/jarvis-service-control.sh" /usr/local/sbin/jarvis-service-control
@@ -118,6 +121,17 @@ EOF
 done
 
 if [[ -n "$JARVIS_BIN" ]]; then
+  if ! id "$AGENT_USER" >/dev/null 2>&1; then
+    echo "The isolated $AGENT_USER account is missing. Run scripts/setup-openjarvis-pi.sh first." >&2
+    exit 1
+  fi
+  sudo install -d -o "$AGENT_USER" -g "$AGENT_GROUP" -m 0750 "$AGENT_HOME" "$AGENT_HOME/.openjarvis" "$AGENT_HOME/.cache"
+  sudo install -d -o "$APP_USER" -g "$AGENT_GROUP" -m 2770 "$OPENJARVIS_WORKSPACE"
+  OPENJARVIS_NETWORK_POLICY=""
+  if grep -q '^JARVIS_ENABLE_HOST_CONTROL=\(1\|true\|yes\|on\)$' .env; then
+    OPENJARVIS_NETWORK_POLICY=$'IPAddressDeny=any\nIPAddressAllow=localhost'
+    echo "OpenJarvis workspace control is network-sealed to loopback. Dashboard web research remains available through the separate no-tools path."
+  fi
   sudo tee /etc/systemd/system/openjarvis-api.service >/dev/null <<EOF
 [Unit]
 Description=Private OpenJarvis API
@@ -126,16 +140,26 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=$APP_USER
-Environment=HOME=$APP_HOME
+User=$AGENT_USER
+Group=$AGENT_GROUP
+WorkingDirectory=$OPENJARVIS_WORKSPACE
+Environment=HOME=$AGENT_HOME
+Environment=PLAYWRIGHT_BROWSERS_PATH=$OPENJARVIS_DIR/.playwright
 ExecStart=$JARVIS_BIN serve --host 127.0.0.1 --port 8000 --agent orchestrator
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=full
-ProtectHome=read-only
-ReadWritePaths=$APP_HOME/.openjarvis
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=$OPENJARVIS_DIR
+ReadWritePaths=$AGENT_HOME $OPENJARVIS_WORKSPACE
+CapabilityBoundingSet=
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+InaccessiblePaths=-/var/run/docker.sock -/run/docker.sock
+$OPENJARVIS_NETWORK_POLICY
 
 [Install]
 WantedBy=multi-user.target
@@ -146,7 +170,7 @@ EOF
     echo "The dashboard will still use its direct Ollama fallback."
   fi
 else
-  echo "jarvis command not found. Install OpenJarvis first; the dashboard will use Ollama fallback meanwhile."
+  echo "Isolated OpenJarvis was not found at $OPENJARVIS_DIR. Run scripts/setup-openjarvis-pi.sh first; the dashboard will use Ollama fallback meanwhile."
 fi
 
 SERVICE_FILE="/etc/systemd/system/openjarvis-dashboard.service"
@@ -165,7 +189,9 @@ Environment=NODE_ENV=production
 ExecStart=$NODE_BIN $APP_DIR/server.mjs
 Restart=on-failure
 RestartSec=4
-NoNewPrivileges=true
+# sudo is restricted to the exact root-owned helper actions in
+# /etc/sudoers.d/jarvis-command-center. This service cannot sudo anything else.
+NoNewPrivileges=false
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=read-only
@@ -184,11 +210,10 @@ sudo systemctl status openjarvis-dashboard --no-pager -l
 
 echo
 PI_ADDRESS="$(hostname -I | awk '{print $1}')"
-echo "JARVIS dashboard installed on http://$PI_ADDRESS:8787."
+echo "JARVIS dashboard is listening only on http://127.0.0.1:8787."
 echo "Unlock it with the private dashboard PIN stored in $APP_DIR/.env."
 echo "Camera/microphone access is limited to devices selected in the Vision & Voice tab."
 echo "3D knowledge gestures and the fixed printer HUD are included. Printer actions still require the private PIN plus an exact phrase."
-echo "Hidden settings: http://$PI_ADDRESS:8787/settings"
-echo "For laptop camera/microphone testing, browsers require a secure origin. Use this tunnel:"
+echo "For private laptop/phone access, create an SSH tunnel (or configure Tailscale Serve HTTPS):"
 echo "ssh -N -L 8787:127.0.0.1:8787 $APP_USER@$PI_ADDRESS"
-echo "Then browse to http://127.0.0.1:8787/settings"
+echo "Then browse to http://127.0.0.1:8787/ (hidden settings: /settings)."

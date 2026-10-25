@@ -1,6 +1,33 @@
-# OpenJarvis Pi Command Center 3.7.1
+# OpenJarvis Pi Command Center 3.10.0
 
 A private, Pi-first JARVIS visualization for OpenJarvis, Ollama, Docker, Google connectors, cameras, microphones, and guarded maintenance. The main route is now exactly one fullscreen neural field with no visible words, panels, cards, labels, or command bar.
+
+### 3.10 Codex-style research, visible email approval, and isolated Pi control
+
+- **Search and answer with sources** — current web results and Google records are synthesized by the local Ollama model in a tool-free lane. Web pages, email text, calendar titles, and shared-file names are explicitly treated as untrusted data and can never instruct the Pi-control agent.
+- **Draft first, always visible** — ask `Draft an email to name@example.com saying ...`. JARVIS creates a local draft and opens an editable To/Subject/Body preview. Drafting sends nothing.
+- **Explicit Gmail sending** — one visible draft can be sent only when Gmail sending is enabled, the dashboard session is unlocked, the operations PIN is correct, and `SEND EMAIL` is typed exactly. Draft IDs expire after 15 minutes and work once.
+- **Separate agent account** — OpenJarvis runs as `jarvis-agent`, not the dashboard owner. Optional shell/code/Git tools are restricted to `/srv/jarvis-workspace`; the agent has no sudo rule, dashboard `.env`, OAuth files, SSH keys, private home, or Docker socket.
+- **Secure transport boundary** — the dashboard now binds to `127.0.0.1`. Use an SSH tunnel or Tailscale Serve HTTPS; private APIs reject remote plain HTTP, and forwarded HTTPS is trusted only from a loopback proxy.
+- **Stronger voice acceptance** — wake phrases and captured command transcripts both require recent physical microphone energy when the audio analyser is available, rejecting silent speech-provider guesses.
+
+### 3.9 browser agent, private live control view, and Pi tools
+
+- **Read-only OpenJarvis browser inspection** — browser mode can search, navigate, screenshot, and extract in an isolated profile, but cannot type, click, submit, access files, or run shell commands. In host-control mode, browser/web tools are removed entirely.
+- **Private live control view** — the PIN-authenticated dashboard listens to OpenJarvis lifecycle events on loopback and shows protected browser screenshots only while a browser or Pi-control tool is running. The view disappears and clears its last frame when the control run ends.
+- **No credential leakage to the webpage** — the OpenJarvis API key stays in the Node service, OAuth files stay on the Pi, and neither is added to a browser URL. Live frames are served only through the existing authenticated dashboard session.
+- **Opt-in Pi control** — `scripts/setup-openjarvis-pi.sh --host-control` enables shell, code, and Git only for the isolated `jarvis-agent` account inside `/srv/jarvis-workspace`. That service is network-sealed to loopback and has no browser/web tools. Root maintenance remains restricted to the dashboard user's PIN-and-phrase protected allow-list.
+- **Stricter wake gate** — a final wake phrase must begin the transcript and coincide with recent physical microphone activity. This blocks middle-of-sentence “Jarvis” matches and silent recognition-provider guesses while keeping `Hey Jarvis`, `Jarvis`, and double-clap activation.
+
+### 3.8 private tools, live screen, and false-hearing repair
+
+- **False commands are rejected** — low-confidence recognition guesses can no longer become the recovered command sentence, and interim “Jarvis” guesses cannot activate the wake session.
+- **Background audio no longer holds JARVIS forever** — raw microphone energy is debounced and can extend a command only after the speech recognizer confirms speech; the hard capture deadline never extends indefinitely.
+- **Safer noisy-room defaults** — the recommended profile now uses 72% wake sensitivity, 55% minimum recognition confidence, 28% mic sensitivity, and 42% clap sensitivity.
+- **Private Google Workspace access** — JARVIS can read Gmail, Calendar, Drive, Tasks, and Contacts through host-only OAuth files. Gmail sending is a separate opt-in approval action; tokens never enter the browser, model prompt, logs, or repository.
+- **Guarded public web tools** — “Search the web for …” adds bounded live results and citations to the local model. “Open YouTube” opens a validated public URL on the JARVIS host; localhost, LAN, credential-bearing, and non-HTTP URLs are blocked.
+- **User-controlled live screen link** — `/settings#screen` previews the selected display locally. Each AI view requires an explicit ANALYZE SNAPSHOT click and a configured local Ollama vision model; there is no silent or continuous capture.
+- **Codex/OpenHands boundary remains visible** — chat, Google, search, websites, screen snapshots, telemetry, printer, and allow-listed maintenance tools are built in. Arbitrary code/shell/file changes still belong to the OpenJarvis `native_openhands` backend and dangerous operations stay PIN-confirmed.
 
 ### 3.7.1 microphone-held command capture
 
@@ -153,9 +180,15 @@ Clone the maintained GitHub repository directly on the Pi:
 ```bash
 git clone https://github.com/Sa3doonAlRa3doon/Jarvis-Edited.git ~/openjarvis-pi-command-center
 cd ~/openjarvis-pi-command-center
-chmod +x install-pi.sh
+chmod +x install-pi.sh scripts/setup-openjarvis-pi.sh
+# Browser/search/Google reads, with no shell or file writes:
+./scripts/setup-openjarvis-pi.sh
+# OR, for the requested user-level Pi control:
+./scripts/setup-openjarvis-pi.sh --host-control
 ./install-pi.sh
 ```
+
+Use only one of the two setup commands. Host-control mode gives the agent the same ordinary access as the `pi5` Linux user; it does not make the model root. The dashboard's existing maintenance helper remains the only sudo path, and it accepts only its fixed service operations after the PIN and exact confirmation phrase.
 
 To update an existing GitHub installation later:
 
@@ -178,7 +211,8 @@ On the Pi:
 
 ```bash
 cd ~/openjarvis-pi-command-center
-chmod +x install-pi.sh
+chmod +x install-pi.sh scripts/setup-openjarvis-pi.sh
+./scripts/setup-openjarvis-pi.sh --host-control
 ./install-pi.sh
 ```
 
@@ -189,20 +223,13 @@ The installer:
 3. Generates and prints a private six-digit dashboard/maintenance PIN if `.env` does not already contain one.
 4. Installs the fixed root helper and its exact sudoers rule.
 5. Adds maintenance-lock conditions to the three allow-listed services.
-6. Installs persistent `openjarvis-api.service` and `openjarvis-dashboard.service` units.
+6. Installs persistent `openjarvis-api.service` and `openjarvis-dashboard.service` units. Both bind only to loopback; OpenJarvis runs under the isolated `jarvis-agent` account.
 
 Save the generated PIN. It remains only in `~/openjarvis-pi-command-center/.env`. Unlocking the dashboard does not bypass the extra typed confirmation required for maintenance actions.
 
 ## Open it from the laptop
 
-Direct Pi access works at:
-
-- Command screen: `http://192.168.4.123:8787/`
-- Hidden settings: `http://192.168.4.123:8787/settings`
-
-Enter the installer-generated PIN when the private-console lock appears. For laptop camera/microphone testing, use localhost because browsers treat plain LAN HTTP as an insecure origin. Keep this PowerShell tunnel open:
-
-Keep this PowerShell window open:
+Remote plain-HTTP access is intentionally disabled. Keep this PowerShell SSH tunnel open (replace the Pi address if it changed):
 
 ```powershell
 ssh -N -L 8787:127.0.0.1:8787 pi5@192.168.4.123
@@ -212,6 +239,8 @@ Then use:
 
 - Command screen: `http://127.0.0.1:8787/`
 - Hidden settings: `http://127.0.0.1:8787/settings`
+
+Enter the installer-generated PIN when the private-console lock appears. For a permanent phone-friendly URL, put a TLS reverse proxy such as Tailscale Serve in front of `127.0.0.1:8787`; do not bind the dashboard directly to LAN HTTP.
 
 The tunnel is optional for viewing the Pi dashboard and selecting Pi-attached devices, but required for reliable laptop `getUserMedia()` testing unless you add HTTPS.
 
@@ -269,7 +298,9 @@ Indexing is bounded to 180 nodes and four levels per refresh. It exposes file na
 
 ## Google Workspace
 
-Google belongs to OpenJarvis, not the Discord bot and not this frontend. OpenJarvis’s shared Google OAuth flow can authorize Drive, Gmail, Calendar, Tasks, and Contacts together, but actual access is always limited to the APIs enabled in Google Cloud and scopes accepted on the consent screen.
+Google belongs to this JARVIS installation, not the Discord bot. Use **one OAuth 2.0 Client ID of type Desktop app**. Do not create an API key, and do not use a service account for a personal Gmail/Drive/Calendar account. Enable Gmail API, Google Drive API, Google Calendar API, Google Tasks API, and People API in the same project, then add your own Google account under OAuth test users while the app is in Testing.
+
+The OAuth client secret posted in chat is exposed. Delete or rotate that OAuth client in Google Cloud before continuing, download the replacement client JSON, and never commit it or paste it into chat. A single replacement desktop OAuth client can authorize all five Google services; each service is still limited by the scopes you approve.
 
 Forward the OAuth callback from a second PowerShell/SSH session:
 
@@ -285,6 +316,33 @@ jarvis connect gdrive
 
 Open the authorization URL it prints. The callback travels through the tunnel to the Pi. Keep OAuth client JSON and token files outside this repository. The dashboard checks only for connector presence under `~/.openjarvis/connectors`; it never reads or exposes tokens.
 
+The direct bridge can search Gmail, list Calendar events, search Drive metadata, list Tasks, and find Contacts. Email drafting is local and never sends automatically. Gmail sending is the only write action and stays disabled until you explicitly authorize the `gmail.send` scope.
+
+To authorize or refresh all required read scopes plus `gmail.send`, keep this PowerShell tunnel open:
+
+```powershell
+ssh -N -L 8789:127.0.0.1:8789 pi5@192.168.4.123
+```
+
+Then run on the Pi:
+
+```bash
+cd ~/openjarvis-pi-command-center
+npm run google:authorize
+```
+
+Open the printed Google URL, approve it with your configured OAuth test-user account, and wait for `token.json` to be saved privately. Then set this only in the Pi `.env` and restart:
+
+```dotenv
+GOOGLE_EMAIL_SEND_ENABLED=true
+```
+
+```bash
+sudo systemctl restart openjarvis-dashboard
+```
+
+Usage example: `Draft an email to friend@example.com saying I will arrive at five.` Review and edit the exact draft, enter the operations PIN, type `SEND EMAIL`, and press **SEND THIS EXACT EMAIL**. Closing the draft sends nothing. Calendar, Drive, Tasks, Contacts, deletion, forwarding, and settings remain read-only.
+
 ## OpenJarvis and model setup
 
 Expected loopback services:
@@ -293,21 +351,13 @@ Expected loopback services:
 - Ollama: `http://127.0.0.1:11434`
 - Dashboard: `http://127.0.0.1:8787`
 
-Default task routing:
-
-- General: `qwen3.5:4b`
-- Coding/Docker: `qwen2.5-coder:7b`
-- Reasoning/research: `qwen3.5:9b`
-
-Install models:
+One model powers all specialist roles and the router changes instructions, tools, and visualization without loading a second model. The Pi-safe default is `llama3.2:1b`:
 
 ```bash
-ollama pull qwen3.5:4b
-ollama pull qwen2.5-coder:7b
-ollama pull qwen3.5:9b
+ollama pull llama3.2:1b
 ```
 
-For Pi memory pressure, keep `OLLAMA_MAX_LOADED_MODELS=1` so only one task model remains loaded at a time.
+Set `JARVIS_MODEL=llama3.2:1b` in `.env`. For Pi memory pressure, keep `OLLAMA_MAX_LOADED_MODELS=1`.
 
 Run these OpenJarvis agents separately and their real traces appear in the visualizer:
 

@@ -160,3 +160,108 @@ test('waits for delayed recognition text after audible speech ends', () => {
     assert.equal(captures.at(-1).state, 'hearing');
   } finally { globalThis.window = previousWindow; }
 });
+
+test('never recovers a rejected low-confidence transcript as a command', () => {
+  const previousWindow = globalThis.window;
+  const commands = [];
+  globalThis.window = { setTimeout: () => 1 };
+  try {
+    const controller = new VoiceController({ onCommand: (command) => commands.push(command) });
+    controller.configure({ recognitionConfidence: .55, wakeWord: true });
+    controller.beginCommandCapture();
+    const result = Object.assign([{ transcript: 'turn everything off', confidence: .08 }], { isFinal: true });
+    controller.handleRecognitionResult({ resultIndex: 0, results: [result] });
+    assert.equal(controller.captureInterim, '');
+    controller.handleCommandCaptureDeadline();
+    assert.deepEqual(commands, []);
+    assert.equal(controller.commandCaptureActive, false);
+  } finally { globalThis.window = previousWindow; }
+});
+
+test('does not wake from an interim provider guess', () => {
+  const wakes = [];
+  const controller = new VoiceController({ onWake: (event) => wakes.push(event) });
+  controller.configure({ wakeWord: true, recognitionConfidence: .55, wakePhrases: ['hey jarvis', 'jarvis'] });
+  const result = Object.assign([{ transcript: 'hey jarvis', confidence: .99 }], { isFinal: false });
+  controller.handleRecognitionResult({ resultIndex: 0, results: [result] });
+  assert.deepEqual(wakes, []);
+});
+
+test('requires a final wake phrase at the beginning of the transcript', () => {
+  const wakes = [];
+  const controller = new VoiceController({ onWake: (event) => wakes.push(event) });
+  controller.configure({ wakeWord: true, recognitionConfidence: .55, wakePhrases: ['hey jarvis', 'jarvis'] });
+  controller.analyser = {}; controller.lastRawVoiceAt = performance.now();
+  const background = Object.assign([{ transcript: 'someone on television said jarvis', confidence: .99 }], { isFinal: true });
+  controller.handleRecognitionResult({ resultIndex: 0, results: [background] });
+  assert.deepEqual(wakes, []);
+});
+
+test('requires recent physical microphone activity before accepting a provider wake result', () => {
+  const wakes = [];
+  const controller = new VoiceController({ onWake: (event) => wakes.push(event) });
+  controller.configure({ wakeWord: true, recognitionConfidence: .55, wakePhrases: ['hey jarvis', 'jarvis'] });
+  controller.analyser = {}; controller.lastRawVoiceAt = 0;
+  const silentGuess = Object.assign([{ transcript: 'hey jarvis', confidence: .99 }], { isFinal: true });
+  controller.handleRecognitionResult({ resultIndex: 0, results: [silentGuess] });
+  assert.deepEqual(wakes, []);
+
+  controller.lastRawVoiceAt = performance.now();
+  controller.handleRecognitionResult({ resultIndex: 0, results: [silentGuess] });
+  assert.equal(wakes.length, 1);
+});
+
+test('ignores a provider-hallucinated command when the physical microphone is silent', () => {
+  const previousWindow = globalThis.window;
+  const commands = []; const captures = [];
+  globalThis.window = { setTimeout: () => 1 };
+  try {
+    const controller = new VoiceController({ onCommand: (command) => commands.push(command), onCapture: (event) => captures.push(event) });
+    controller.configure({ wakeWord: true, recognitionConfidence: .55 });
+    controller.analyser = {}; controller.lastRawVoiceAt = 0;
+    controller.beginCommandCapture();
+    const silentGuess = Object.assign([{ transcript: 'shut down everything', confidence: .99 }], { isFinal: true });
+    controller.handleRecognitionResult({ resultIndex: 0, results: [silentGuess] });
+    controller.handleCommandCaptureDeadline();
+    assert.deepEqual(commands, []);
+    assert.equal(captures.some((event) => event.state === 'transcript' || event.state === 'final'), false);
+  } finally { globalThis.window = previousWindow; }
+});
+
+test('does not reuse wake-phrase microphone energy to authorize a later silent command', () => {
+  const previousWindow = globalThis.window;
+  const commands = [];
+  globalThis.window = { setTimeout: () => 1 };
+  try {
+    const controller = new VoiceController({ onCommand: (command) => commands.push(command) });
+    controller.configure({ wakeWord: true, recognitionConfidence: .55 });
+    controller.analyser = {}; controller.lastRawVoiceAt = performance.now();
+    controller.beginCommandCapture();
+    assert.equal(controller.lastRawVoiceAt, 0);
+    const staleGuess = Object.assign([{ transcript: 'send all my files', confidence: .99 }], { isFinal: true });
+    controller.handleRecognitionResult({ resultIndex: 0, results: [staleGuess] });
+    controller.handleCommandCaptureDeadline();
+    assert.deepEqual(commands, []);
+  } finally { globalThis.window = previousWindow; }
+});
+
+test('ignores transient raw audio and requires a speech-recognition signal before VAD can hold capture', () => {
+  const previousWindow = globalThis.window;
+  globalThis.window = { setTimeout: () => 1 };
+  try {
+    const controller = new VoiceController();
+    controller.beginCommandCapture();
+    controller.updateRawCommandVoiceActivity(true, 1_000);
+    controller.updateRawCommandVoiceActivity(true, 1_500);
+    assert.equal(controller.commandCaptureStarted, false);
+    assert.equal(controller.captureVoiceActive, false);
+
+    const previousPerformance = globalThis.performance;
+    Object.defineProperty(globalThis, 'performance', { configurable: true, value: { now: () => 2_000 } });
+    try { controller.markCommandSpeech(); }
+    finally { Object.defineProperty(globalThis, 'performance', { configurable: true, value: previousPerformance }); }
+    controller.updateRawCommandVoiceActivity(true, 2_050);
+    controller.updateRawCommandVoiceActivity(true, 2_400);
+    assert.equal(controller.captureVoiceActive, true);
+  } finally { globalThis.window = previousWindow; }
+});

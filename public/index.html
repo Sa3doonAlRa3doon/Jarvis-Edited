@@ -183,6 +183,19 @@
     <small>FULLSCREEN COMMAND INTERFACE</small>
   </button>
 
+  <section class="agent-live-view" id="agent-live-view" aria-live="polite" hidden>
+    <header>
+      <span><i></i> LOCAL CONTROL STREAM</span>
+      <b id="agent-live-state">CONNECTING</b>
+    </header>
+    <div class="agent-live-stage">
+      <img id="agent-live-frame" alt="Live OpenJarvis browser view" hidden>
+      <div id="agent-live-placeholder"><i></i><strong>AGENT CONTROL ACTIVE</strong><small>Waiting for the next protected browser frame…</small></div>
+      <div class="agent-live-scan" aria-hidden="true"></div>
+    </div>
+    <footer><span id="agent-live-tool">OPENJARVIS</span><time id="agent-live-time">LIVE</time></footer>
+  </section>
+
   <dialog id="jarvis-search" class="jarvis-search" aria-labelledby="jarvis-search-title">
     <form id="jarvis-search-form" class="jarvis-search-panel" autocomplete="off">
       <header class="jarvis-search-head">
@@ -220,6 +233,23 @@
       <label>TYPE TO CONFIRM <b id="confirmation-phrase"></b><input id="operation-confirmation" type="text" autocomplete="off" required></label>
       <p class="dialog-error" id="operation-error"></p>
       <button class="confirm-operation" id="confirm-operation" type="submit">RUN ON RASPBERRY PI</button>
+    </form>
+  </dialog>
+
+  <dialog id="email-dialog" class="operation-dialog email-dialog">
+    <form id="email-form" autocomplete="off">
+      <button class="dialog-close" id="email-close" type="button" aria-label="Close">×</button>
+      <span class="dialog-kicker">VISIBLE DRAFT // EXPLICIT APPROVAL</span>
+      <h2>Review email before sending</h2>
+      <p>JARVIS will send exactly the editable fields below only after your PIN and the confirmation phrase. Closing this window sends nothing.</p>
+      <label>TO<input id="email-to" type="email" maxlength="320" required spellcheck="false"></label>
+      <label>SUBJECT<input id="email-subject" type="text" maxlength="320" required></label>
+      <label>BODY<textarea id="email-body" maxlength="12000" rows="10" required></textarea></label>
+      <p class="email-safety" id="email-safety">NOT SENT // DRAFT EXPIRES AFTER 15 MINUTES</p>
+      <label>CONTROL PIN<input id="email-pin" type="password" inputmode="numeric" autocomplete="off" required></label>
+      <label>TYPE TO CONFIRM <b>SEND EMAIL</b><input id="email-confirmation" type="text" autocomplete="off" required></label>
+      <p class="dialog-error" id="email-error"></p>
+      <button class="confirm-operation" id="confirm-email" type="submit">SEND THIS EXACT EMAIL</button>
     </form>
   </dialog>
 

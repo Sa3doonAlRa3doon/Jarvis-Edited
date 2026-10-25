@@ -17,7 +17,7 @@
       </div>
       <div class="settings-health" aria-label="System context">
         <span><i class="pulse-dot"></i> LOCAL NODE <b id="settings-node">PI-5</b></span>
-        <span>BUILD <b id="settings-version">3.7.1</b></span>
+        <span>BUILD <b id="settings-version">3.10.0</b></span>
         <span>PROFILE <b id="settings-profile">LOADING</b></span>
       </div>
       <div class="settings-header-actions">
@@ -39,6 +39,7 @@
           <button type="button" data-target="voice"><span>04</span><b>VOICE CORE</b><small>Recognition &amp; talkback</small></button>
           <button type="button" data-target="interface"><span>05</span><b>INTERFACE</b><small>HUD appearance</small></button>
           <button type="button" data-target="integrations"><span>06</span><b>INTEGRATIONS</b><small>Private Google bridge</small></button>
+          <button type="button" data-target="screen"><span>07</span><b>LIVE SCREEN</b><small>Share &amp; ask local vision</small></button>
         </div>
         <div class="settings-nav-footer">
           <span>ACCESS PATH</span><code>/settings</code>
@@ -167,10 +168,39 @@
             <div class="interface-note"><span>DISPLAY CONTRACT</span><h3>ONE SCREEN. ZERO PAGE SCROLL.</h3><p>The command dashboard remains a full-screen instrument panel. Use the preview viewport controls to inspect laptop and Pi display proportions.</p></div>
           </section>
 
-          <section class="settings-section" data-section="integrations" data-search="google integration drive gmail calendar tasks contacts oauth private">
-            <div class="settings-section-head"><div><span>SECTION 06</span><h2>PRIVATE INTEGRATION BRIDGE</h2><p>Read-only status of the Google connectors installed in OpenJarvis on the Pi.</p></div><span class="section-state" id="google-state">CHECKING</span></div>
+          <section class="settings-section" data-section="integrations" data-search="google integration drive gmail calendar tasks contacts oauth private web websites browse internet">
+            <div class="settings-section-head"><div><span>SECTION 06</span><h2>PRIVATE INTEGRATION BRIDGE</h2><p>Google reads, visible email drafting, separately approved Gmail sending, and guarded public web search.</p></div><button type="button" class="section-tool" id="test-google">VERIFY GOOGLE</button></div>
+            <div class="integration-status-line"><span class="section-state" id="google-state">CHECKING</span><b>GOOGLE OAUTH STAYS ON THE HOST</b></div>
             <div class="google-grid" id="google-grid"></div>
-            <div class="privacy-callout google"><b>CREDENTIAL ISOLATION</b><p id="google-note">Google access belongs to OpenJarvis on the Pi. Credentials never enter this browser or the dashboard package.</p></div>
+            <div class="tool-capability-grid">
+              <article><i>01</i><b>ASK GOOGLE</b><p>“Show my latest Gmail,” “What is on my calendar?”, or “Find budget in Google Drive.”</p></article>
+              <article><i>02</i><b>SEARCH THE WEB</b><p>“Search the web for…” sends bounded public results and citations to the local model.</p></article>
+              <article><i>03</i><b>OPEN A WEBSITE</b><p>“Open YouTube” launches a validated public URL on the JARVIS host. Private network URLs stay blocked.</p></article>
+              <article><i>04</i><b>DRAFT + APPROVE EMAIL</b><p>JARVIS shows editable To, Subject, and Body fields. Sending needs the PIN plus SEND EMAIL and can be disabled in .env.</p></article>
+            </div>
+            <div class="privacy-callout google"><b>CREDENTIAL ISOLATION</b><p id="google-note">OAuth files and refresh tokens stay in private files on the JARVIS host and are never sent to the browser, model, logs, or GitHub.</p></div>
+          </section>
+
+          <section class="settings-section" data-section="screen" data-search="screen share display live desktop window vision see camera screenshot analyze">
+            <div class="settings-section-head"><div><span>SECTION 07</span><h2>LIVE SCREEN LINK</h2><p>Select one screen or window to preview locally and send individual snapshots to a local vision model.</p></div><span class="section-state" id="screen-state">OFFLINE</span></div>
+            <div class="screen-link-layout">
+              <div class="screen-share-stage" id="screen-share-stage">
+                <video id="screen-share-video" muted autoplay playsinline></video>
+                <canvas id="screen-share-canvas" hidden></canvas>
+                <span id="screen-share-placeholder"><b>DISPLAY LINK OFFLINE</b><small>Your browser will ask which screen or window to share. JARVIS cannot bypass that permission.</small></span>
+                <em id="screen-share-source">NO DISPLAY SELECTED</em>
+              </div>
+              <div class="screen-command-stack">
+                <label class="setting"><span>ASK ABOUT THIS SCREEN</span><textarea id="screen-question" rows="4" maxlength="1000" placeholder="What is visible and does anything need my attention?"></textarea><small>Only the snapshot taken when you press ANALYZE is sent to your configured local Ollama vision model.</small></label>
+                <div class="screen-answer" id="screen-answer"><span>VISION RESPONSE</span><p>Start screen sharing, then analyze a snapshot.</p></div>
+              </div>
+            </div>
+            <div class="sensor-actions screen-actions">
+              <button class="sensor-button primary" id="start-screen-share" type="button">SELECT SCREEN</button>
+              <button class="sensor-button" id="stop-screen-share" type="button" disabled>STOP SHARING</button>
+              <button class="sensor-button" id="analyze-screen" type="button" disabled>ANALYZE SNAPSHOT</button>
+            </div>
+            <div class="privacy-callout"><b>USER-CONTROLLED VISION</b><p id="screen-vision-note">Live preview remains in this browser. Image understanding requires a configured local vision model; there is no silent or continuous capture.</p></div>
           </section>
 
           <div class="search-empty" id="search-empty" hidden><b>NO CONTROL FOUND</b><span>Try camera, voice, wake, device, Google, or accent.</span></div>

@@ -22,15 +22,16 @@ const ui = {
   cameraPreview: $('#camera-preview'), video: $('#camera-video'), image: $('#pi-camera-image'), canvas: $('#sensor-canvas'), placeholder: $('#camera-placeholder'), cameraSource: $('#camera-source'),
   personReadout: $('#person-readout'), micReadout: $('#mic-readout'), micMeter: $('#mic-meter'), wakeReadout: $('#wake-readout'), sensorState: $('#sensor-state'), sensorGuidance: $('#sensor-guidance'),
   start: $('#start-sensors'), stop: $('#stop-sensors'), testWake: $('#test-wake'), googleGrid: $('#google-grid'), googleNote: $('#google-note'), googleState: $('#google-state'),
+  testGoogle: $('#test-google'), screenState: $('#screen-state'), screenStage: $('#screen-share-stage'), screenVideo: $('#screen-share-video'), screenCanvas: $('#screen-share-canvas'), screenPlaceholder: $('#screen-share-placeholder'), screenSource: $('#screen-share-source'), screenQuestion: $('#screen-question'), screenAnswer: $('#screen-answer'), screenVisionNote: $('#screen-vision-note'), startScreen: $('#start-screen-share'), stopScreen: $('#stop-screen-share'), analyzeScreen: $('#analyze-screen'),
   preview: $('#live-preview'), previewViewport: $('#preview-viewport'), previewResolution: $('#preview-resolution'), reloadPreview: $('#reload-preview'), openPreview: $('#open-preview'),
   search: $('#settings-search'), workspace: $('#settings-workspace'), searchEmpty: $('#search-empty'), save: $('#save-settings'), revert: $('#revert-settings'), recommended: $('#recommended-settings'), dirtyDot: $('#dirty-dot'), saveStateTitle: $('#save-state-title')
 };
 
 const recommendedProfile = {
   personDetection: true, voiceActivity: true, wakeWord: true, doubleClap: true, gestureControl: true, autoSpeak: true,
-  personThreshold: 0.55, micSensitivity: 0.18, wakeSensitivity: 0.55, clapSensitivity: 0.34,
+  personThreshold: 0.55, micSensitivity: 0.28, wakeSensitivity: 0.72, clapSensitivity: 0.42,
   gestureSensitivity: 0.42, doubleClapWindow: 700, scanInterval: 900, accent: '#64e8ff',
-  voiceLanguage: 'en-US', wakePhrases: ['hey jarvis', 'jarvis', 'جارفيس', 'يا جارفيس'], voiceVocabulary: DEFAULT_VOICE_VOCABULARY, recognitionConfidence: .35, commandSilenceMs: 700,
+  voiceLanguage: 'en-US', wakePhrases: ['hey jarvis', 'jarvis', 'جارفيس', 'يا جارفيس'], voiceVocabulary: DEFAULT_VOICE_VOCABULARY, recognitionConfidence: .55, commandSilenceMs: 700,
   voiceAutoStart: true, preferLocalRecognition: true, echoCancellation: true, noiseSuppression: true, autoGainControl: true, bargeIn: false,
   ttsVoice: '', ttsRate: 1.02, ttsPitch: .92, ttsVolume: 1, wakeResponse: 'Yes sir, how can I help you today?'
 };
@@ -39,7 +40,8 @@ const state = {
   savedSettings: {}, currentSection: 'devices', media: null, stream: null, audioContext: null, analyser: null, talkbackContext: null, talkbackSource: null,
   animation: 0, detector: null, detectTimer: 0, piTimer: 0, lastClap: 0, clapAbove: false, sensorsActive: false, dirty: false,
   testRecognition: null, testRecognitionStream: null, testRecognitionPending: false, testRecognitionTimer: 0, speechCheck: 0, noiseFloor: .008, lastAudioLevel: 0,
-  config: { ttsMode: 'local', fishVoiceId: '', fishConfigured: false, allowBrowserTtsFallback: false }
+  screenStream: null, screenBusy: false,
+  config: { ttsMode: 'local', fishVoiceId: '', fishConfigured: false, allowBrowserTtsFallback: false, visionModel: '', visionConfigured: false }
 };
 
 const valueBindings = [
@@ -384,8 +386,68 @@ function renderGoogle(status) {
     item.innerHTML = `<i></i><span><b>${name}</b><small>${detail}</small></span><strong>${active ? 'LINKED' : 'OFFLINE'}</strong>`;
     return item;
   }));
-  ui.googleState.textContent = `${connected}/6 LINKED`;
+  const sendState = status.emailSendEnabled ? ' // SEND APPROVAL ARMED' : ' // SEND OFF';
+  ui.googleState.textContent = `${status.liveVerified ? `${connected}/6 VERIFIED` : `${connected}/6 LINKED`}${sendState}`;
+  ui.googleState.classList.toggle('active', connected > 0);
   ui.googleNote.textContent = status.scopesNote || ui.googleNote.textContent;
+}
+
+async function verifyGoogle() {
+  ui.testGoogle.disabled = true; ui.testGoogle.textContent = 'VERIFYING…'; ui.googleState.textContent = 'PROBING';
+  try {
+    const status = await json('/api/google/status?probe=1');
+    renderGoogle(status);
+    const count = Object.values(status.connectors || {}).filter(Boolean).length;
+    setMessage(count ? `Google live check complete: ${count} connectors responded.` : 'Google OAuth files were found, but none of the requested APIs responded. Check scopes and enabled APIs.');
+  } catch (error) { ui.googleState.textContent = 'ERROR'; setMessage(`Google verification failed: ${error.message}`); }
+  finally { ui.testGoogle.disabled = false; ui.testGoogle.textContent = 'VERIFY GOOGLE'; }
+}
+
+function stopScreenShare({ quiet = false } = {}) {
+  state.screenStream?.getTracks().forEach((track) => track.stop()); state.screenStream = null;
+  ui.screenVideo.srcObject = null; ui.screenPlaceholder.hidden = false; ui.screenSource.textContent = 'NO DISPLAY SELECTED';
+  ui.startScreen.disabled = false; ui.stopScreen.disabled = true; ui.analyzeScreen.disabled = true; ui.screenState.textContent = 'OFFLINE'; ui.screenState.classList.remove('active');
+  if (!quiet) setMessage('Screen link stopped. No display track remains open.');
+}
+
+async function startScreenShare() {
+  if (!navigator.mediaDevices?.getDisplayMedia) { setMessage('This browser does not support screen sharing. Use current Chromium on localhost or HTTPS.'); return; }
+  stopScreenShare({ quiet: true }); ui.startScreen.disabled = true; ui.screenState.textContent = 'SELECTING';
+  try {
+    const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 12, max: 20 } }, audio: false });
+    state.screenStream = stream; ui.screenVideo.srcObject = stream; await ui.screenVideo.play();
+    const track = stream.getVideoTracks()[0]; track.addEventListener('ended', () => stopScreenShare({ quiet: true }), { once: true });
+    ui.screenPlaceholder.hidden = true; ui.screenSource.textContent = track.label || 'USER-SELECTED DISPLAY';
+    ui.startScreen.disabled = true; ui.stopScreen.disabled = false; ui.analyzeScreen.disabled = false; ui.screenState.textContent = 'LIVE'; ui.screenState.classList.add('active');
+    setMessage('Live display preview is active. JARVIS receives nothing until you press ANALYZE SNAPSHOT.');
+  } catch (error) {
+    stopScreenShare({ quiet: true });
+    setMessage(error.name === 'NotAllowedError' ? 'Screen selection was cancelled or blocked. Choose a display when the browser asks.' : `Screen share failed: ${error.message}`);
+  }
+}
+
+function captureScreenSnapshot() {
+  if (!state.screenStream || !ui.screenVideo.videoWidth) throw new Error('Start screen sharing and wait for the live preview first.');
+  const width = Math.min(1280, ui.screenVideo.videoWidth); const height = Math.max(1, Math.round(ui.screenVideo.videoHeight * width / ui.screenVideo.videoWidth));
+  ui.screenCanvas.width = width; ui.screenCanvas.height = height;
+  ui.screenCanvas.getContext('2d', { alpha: false }).drawImage(ui.screenVideo, 0, 0, width, height);
+  return ui.screenCanvas.toDataURL('image/jpeg', .72);
+}
+
+async function analyzeScreen() {
+  if (state.screenBusy) return;
+  state.screenBusy = true; ui.analyzeScreen.disabled = true; ui.analyzeScreen.textContent = 'ANALYZING…'; ui.screenAnswer.innerHTML = '<span>VISION RESPONSE</span><p>Local vision model is examining one approved snapshot…</p>';
+  try {
+    const image = captureScreenSnapshot();
+    const result = await json('/api/screen/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image, prompt: ui.screenQuestion.value.trim() }) });
+    const title = document.createElement('span'); title.textContent = `${result.model || 'LOCAL VISION'} // RESULT`;
+    const body = document.createElement('p'); body.textContent = result.content;
+    ui.screenAnswer.replaceChildren(title, body); setMessage('Screen snapshot analysis complete. The live stream remained browser-local.');
+  } catch (error) {
+    const title = document.createElement('span'); title.textContent = 'VISION UNAVAILABLE';
+    const body = document.createElement('p'); body.textContent = error.message;
+    ui.screenAnswer.replaceChildren(title, body); setMessage(`Screen analysis failed: ${error.message}`);
+  } finally { state.screenBusy = false; ui.analyzeScreen.disabled = !state.screenStream; ui.analyzeScreen.textContent = 'ANALYZE SNAPSHOT'; }
 }
 
 async function loadDetector() {
@@ -596,6 +658,10 @@ function onFormInput(event) {
 for (const button of $$('.settings-nav-list button')) button.addEventListener('click', () => activateSection(button.dataset.target));
 ui.search.addEventListener('input', searchControls);
 ui.refreshDevices.addEventListener('click', () => void loadDeviceLists());
+ui.testGoogle.addEventListener('click', () => void verifyGoogle());
+ui.startScreen.addEventListener('click', () => void startScreenShare());
+ui.stopScreen.addEventListener('click', () => stopScreenShare());
+ui.analyzeScreen.addEventListener('click', () => void analyzeScreen());
 form.addEventListener('input', onFormInput);
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -651,7 +717,7 @@ ui.preview.addEventListener('load', previewSettings);
 window.addEventListener('hashchange', () => activateSection(location.hash.slice(1), { syncUrl: false }));
 
 window.addEventListener('beforeunload', (event) => {
-  stopSensors({ quiet: true }); stopRecognitionTest(); window.speechSynthesis?.cancel?.();
+  stopSensors({ quiet: true }); stopScreenShare({ quiet: true }); stopRecognitionTest(); window.speechSynthesis?.cancel?.();
   try { state.talkbackSource?.stop(); } catch {}
   void state.talkbackContext?.close?.();
   if (state.dirty) { event.preventDefault(); event.returnValue = ''; }
@@ -663,9 +729,12 @@ async function init() {
   try {
     await window.ensureDashboardAuthentication?.();
     const [settings, status, config] = await Promise.all([json('/api/settings'), json('/api/status'), json('/api/config')]);
-    ui.version.textContent = config.version || '3.7.1';
+    ui.version.textContent = config.version || '3.10.0';
     ui.node.textContent = config.piOnly ? 'PI-5' : 'LOCAL';
     state.config = config;
+    ui.screenVisionNote.textContent = config.visionConfigured
+      ? `Snapshot understanding is local through Ollama model ${config.visionModel}. Live preview never leaves this browser.`
+      : 'Live preview works now. To let JARVIS understand snapshots, install a local Ollama vision model and set JARVIS_VISION_MODEL in .env.';
     if (config.ttsMode === 'fish') {
       ui.ttsProviderNote.textContent = config.fishConfigured
         ? `Locked: Fish Audio ${config.fishVoiceId} // ${config.fishModel}. Browser voice substitution is ${config.allowBrowserTtsFallback ? 'enabled' : 'disabled'}.`

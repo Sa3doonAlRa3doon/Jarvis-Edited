@@ -34,7 +34,12 @@ const ui = {
   searchDialog: $('#jarvis-search'), searchForm: $('#jarvis-search-form'), searchInput: $('#jarvis-search-input'), searchTitle: $('#jarvis-search-title'),
   searchResults: $('#jarvis-search-results'), searchClose: $('#jarvis-search-close'), searchMode: $('#jarvis-search-mode'), searchCount: $('#jarvis-search-count'),
   voiceCapture: $('#jarvis-voice-capture'), voiceCaptureState: $('#jarvis-voice-capture-state'), voiceCaptureTranscript: $('#jarvis-voice-capture-transcript'),
-  voiceCaptureOrb: $('.jarvis-voice-orb'), voiceCaptureMeter: $('#jarvis-voice-meter-level')
+  voiceCaptureOrb: $('.jarvis-voice-orb'), voiceCaptureMeter: $('#jarvis-voice-meter-level'),
+  agentLiveView: $('#agent-live-view'), agentLiveState: $('#agent-live-state'), agentLiveFrame: $('#agent-live-frame'),
+  agentLivePlaceholder: $('#agent-live-placeholder'), agentLiveTool: $('#agent-live-tool'), agentLiveTime: $('#agent-live-time'),
+  emailDialog: $('#email-dialog'), emailForm: $('#email-form'), emailClose: $('#email-close'), emailTo: $('#email-to'),
+  emailSubject: $('#email-subject'), emailBody: $('#email-body'), emailPin: $('#email-pin'), emailConfirmation: $('#email-confirmation'),
+  emailError: $('#email-error'), emailSafety: $('#email-safety'), confirmEmail: $('#confirm-email')
 };
 
 const state = {
@@ -45,7 +50,8 @@ const state = {
   chart: { cpu: Array(52).fill(0), ram: Array(52).fill(0), gpu: Array(52).fill(0) },
   neuralEnergy: 0.22, coreMode: 'system', voiceState: 'standby', voiceLevel: 0, searchResults: [], searchSelection: 0,
   refreshFastPending: false, refreshSlowPending: false, pendingSpeech: null, audioPriming: false, wakeSession: 0,
-  voiceCapture: { active: false, phase: 'idle', deadline: 0, ticker: 0, closeTimer: 0 }
+  voiceCapture: { active: false, phase: 'idle', deadline: 0, ticker: 0, closeTimer: 0 },
+  agentLive: { pending: false, timer: 0, frameVersion: 0 }, emailDraft: null
 };
 
 const VOICE_COMMAND_TIMEOUT_MS = 15_000;
@@ -257,7 +263,7 @@ function startVoiceCaptureCountdown(timeoutMs = VOICE_COMMAND_TIMEOUT_MS) {
 }
 
 function openVoiceCommandWindow() {
-  if (ui.operationDialog?.open) return false;
+  if (ui.operationDialog?.open || ui.emailDialog?.open) return false;
   stopVoiceCaptureTimers(); state.voiceCapture.active = true; state.voiceCapture.phase = 'acknowledging';
   if (!ui.searchDialog.open) {
     try { ui.searchDialog.showModal(); }
@@ -308,7 +314,7 @@ function updateVoiceCapture(detail = {}) {
 }
 
 function openSearch(initialQuery = '') {
-  if (ui.operationDialog?.open) return false;
+  if (ui.operationDialog?.open || ui.emailDialog?.open) return false;
   if (state.voiceCapture.active) state.voice?.cancelCommandCapture('cancelled');
   stopVoiceCaptureTimers(); state.voiceCapture.active = false; state.voiceCapture.phase = 'idle'; resetSearchPresentation();
   if (!ui.searchDialog.open) {
@@ -674,13 +680,47 @@ async function sendPrompt(prompt) {
   }
   appendMessage('user', text); state.history.push({ role: 'user', content: text }); state.history = state.history.slice(-16);
   ui.prompt.value = ''; ui.send.disabled = true; ui.send.innerHTML = '<span>LINK</span><b>RUNNING</b>'; state.neuralEnergy = .95; updateVoiceVisual('processing', .92);
+  window.setTimeout(() => void refreshAgentLive({ force: true }), 80);
   try {
     const result = await json('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: text, history: state.history.slice(0, -1) }) });
     ui.route.textContent = result.route;
     activateCoreMode(routeModes[result.route] || 'system');
-    state.lastAssistant = result.content; appendMessage('assistant', result.content, result.source); state.history.push({ role: 'assistant', content: result.content }); state.history = state.history.slice(-16); void speak(result.content);
+    state.lastAssistant = result.content; appendMessage('assistant', result.content, result.source); state.history.push({ role: 'assistant', content: result.content }); state.history = state.history.slice(-16);
+    if (Array.isArray(result.citations) && result.citations.length) { renderCitations(result.citations); activateCoreMode('research'); }
+    if (result.action?.type === 'email_draft') openEmailDraft(result.action);
+    void speak(result.content);
   } catch (error) { appendMessage('error', error.message); }
   finally { ui.send.disabled = false; ui.send.innerHTML = '<span>RUN</span><b>EXECUTE</b>'; state.neuralEnergy = .42; if (state.voiceState !== 'speaking') updateVoiceVisual(state.voice?.active ? 'listening' : 'standby', .18); }
+}
+
+function hideAgentLiveView() {
+  ui.agentLiveView.hidden = true;
+  ui.agentLiveFrame.hidden = true;
+  ui.agentLiveFrame.removeAttribute('src');
+  ui.agentLivePlaceholder.hidden = false;
+  state.agentLive.frameVersion = 0;
+}
+
+async function refreshAgentLive({ force = false } = {}) {
+  if (state.agentLive.pending || document.hidden && !force) return;
+  state.agentLive.pending = true;
+  try {
+    const live = await pollJson('/api/agent/live', 1800);
+    if (!live.visible) { hideAgentLiveView(); return; }
+    ui.agentLiveView.hidden = false;
+    ui.agentLiveState.textContent = String(live.phase || 'CONTROLLING').replaceAll('-', ' ').toUpperCase();
+    ui.agentLiveTool.textContent = String(live.tool || 'OPENJARVIS').replaceAll('_', ' ').toUpperCase();
+    ui.agentLiveTime.textContent = live.startedAt ? new Date(live.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'LIVE';
+    if (live.frameAvailable && live.frameVersion !== state.agentLive.frameVersion) {
+      state.agentLive.frameVersion = live.frameVersion;
+      ui.agentLiveFrame.onload = () => { ui.agentLiveFrame.hidden = false; ui.agentLivePlaceholder.hidden = true; };
+      ui.agentLiveFrame.onerror = () => { ui.agentLiveFrame.hidden = true; ui.agentLivePlaceholder.hidden = false; };
+      ui.agentLiveFrame.src = `/api/agent/live-frame?v=${encodeURIComponent(live.frameVersion)}`;
+    } else if (!live.frameAvailable) {
+      ui.agentLiveFrame.hidden = true; ui.agentLiveFrame.removeAttribute('src'); ui.agentLivePlaceholder.hidden = false;
+    }
+  } catch { hideAgentLiveView(); }
+  finally { state.agentLive.pending = false; }
 }
 
 async function toggleVoice() {
@@ -721,6 +761,42 @@ async function toggleFullscreen() {
     console.info(`JARVIS fullscreen fallback: ${error.message}`);
   }
   syncFullscreenUi();
+}
+
+function openEmailDraft(action) {
+  const draft = action?.draft;
+  if (!draft?.id) return;
+  state.emailDraft = { ...draft };
+  ui.emailTo.value = draft.to || ''; ui.emailSubject.value = draft.subject || ''; ui.emailBody.value = draft.body || '';
+  ui.emailPin.value = ''; ui.emailConfirmation.value = ''; ui.emailError.textContent = '';
+  ui.confirmEmail.disabled = action.sendEnabled !== true;
+  ui.confirmEmail.textContent = action.sendEnabled === true ? 'SEND THIS EXACT EMAIL' : 'SENDING DISABLED — ENABLE GMAIL.SEND';
+  ui.emailSafety.textContent = action.sendEnabled === true
+    ? `NOT SENT // EXPIRES ${new Date(draft.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+    : 'NOT SENT // RE-AUTHORIZE GOOGLE WITH GMAIL.SEND, THEN ENABLE APPROVED SENDING';
+  ui.emailDialog.showModal(); ui.emailTo.focus();
+}
+
+async function sendApprovedEmail() {
+  if (!state.emailDraft?.id) return;
+  ui.confirmEmail.disabled = true; ui.confirmEmail.textContent = 'SENDING…'; ui.emailError.textContent = '';
+  try {
+    const result = await json('/api/google/email/send', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        draftId: state.emailDraft.id, to: ui.emailTo.value, subject: ui.emailSubject.value, body: ui.emailBody.value,
+        pin: ui.emailPin.value, confirmation: ui.emailConfirmation.value
+      })
+    });
+    ui.emailDialog.close(); state.emailDraft = null;
+    const message = `Email sent to ${result.result.to} with subject “${result.result.subject}”.`;
+    appendMessage('assistant', message, 'GMAIL APPROVED SEND');
+    addEvent({ id: `email-${Date.now()}`, at: new Date().toISOString(), type: 'connector', message: 'Approved Gmail message sent', detail: {} });
+    void speak('Email sent, sir.');
+  } catch (error) { ui.emailError.textContent = error.message; }
+  finally {
+    if (state.emailDraft) { ui.confirmEmail.disabled = false; ui.confirmEmail.textContent = 'SEND THIS EXACT EMAIL'; }
+  }
 }
 
 function openOperation(action) {
@@ -816,6 +892,9 @@ ui.searchDialog.addEventListener('cancel', (event) => { event.preventDefault(); 
 ui.searchDialog.addEventListener('pointerdown', (event) => { if (event.target === ui.searchDialog) closeSearch(); });
 ui.operationForm.addEventListener('submit', (event) => { event.preventDefault(); void runOperation(); });
 ui.operationClose.addEventListener('click', () => ui.operationDialog.close());
+ui.emailForm.addEventListener('submit', (event) => { event.preventDefault(); void sendApprovedEmail(); });
+ui.emailClose.addEventListener('click', () => { state.emailDraft = null; ui.emailDialog.close(); });
+ui.emailDialog.addEventListener('cancel', () => { state.emailDraft = null; });
 window.addEventListener('resize', () => { syncFullscreenUi(); drawTelemetry(); });
 document.addEventListener('fullscreenchange', syncFullscreenUi);
 document.addEventListener('webkitfullscreenchange', syncFullscreenUi);
@@ -836,7 +915,7 @@ window.addEventListener('keydown', (event) => {
   if (event.key.toLowerCase() === 'g') void toggleGestures();
   if (event.key === 'Escape') { void state.voice?.stop(); void state.gesture?.stop(); }
 });
-window.addEventListener('beforeunload', () => { void state.voice?.stop(); void state.gesture?.stop(); });
+window.addEventListener('beforeunload', () => { clearInterval(state.agentLive.timer); void state.voice?.stop(); void state.gesture?.stop(); });
 document.addEventListener('pointerdown', () => void unlockAudioFromGesture(), { capture: true });
 document.addEventListener('keydown', () => void unlockAudioFromGesture(), { capture: true });
 document.addEventListener('visibilitychange', () => {
@@ -881,7 +960,8 @@ async function init() {
   });
   if (!isEmbeddedPreview()) void state.voice.autoStartIfGranted(state.settings).catch(() => {});
   if (!isEmbeddedPreview()) void autoStartGesturesIfGranted();
-  await Promise.all([refreshFast({ force: true }), refreshSlow({ force: true })]);
+  await Promise.all([refreshFast({ force: true }), refreshSlow({ force: true }), refreshAgentLive({ force: true })]);
+  state.agentLive.timer = window.setInterval(() => void refreshAgentLive(), 700);
   setInterval(() => void refreshFast(), 2500); setInterval(() => void refreshSlow(), 7000);
 }
 

@@ -10,5 +10,7 @@ credentials.json
 token.json
 *.pem
 *.key
+__pycache__/
+*.py[cod]
 public/models/coco-ssd/group1-shard*
 public/models/hand-landmarker/hand_landmarker.task
