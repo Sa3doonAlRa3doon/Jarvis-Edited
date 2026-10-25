@@ -42,6 +42,7 @@ assert.match(server, /app\.get\('\/settings'/);
 assert.match(server, /v1\/traces\?limit=40/);
 assert.match(server, /timingSafeEqual/);
 assert.match(server, /requireDashboardAuth/);
+assert.match(server, /operationsControlPin = String\(process\.env\.OPS_CONTROL_PIN \|\| dashboardAccessPin/);
 assert.match(server, /HttpOnly; SameSite=Strict/);
 assert.match(authClient, /ensureDashboardAuthentication/);
 assert.match(client, /safeCitationUrl/);

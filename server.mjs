@@ -50,6 +50,7 @@ const printerSubscribers = new Set();
 let knowledgeCache = null;
 const wakeEventToken = crypto.randomBytes(32).toString('hex');
 const dashboardAccessPin = String(process.env.DASHBOARD_ACCESS_PIN || process.env.OPS_CONTROL_PIN || '');
+const operationsControlPin = String(process.env.OPS_CONTROL_PIN || dashboardAccessPin || '');
 let dashboardSessionSecret = null;
 const helperPath = process.env.OPS_HELPER_PATH || '/usr/local/sbin/jarvis-service-control';
 const primaryModel = resolvePrimaryModel(process.env);
@@ -280,7 +281,7 @@ async function operationStatus() {
   }
 }
 function verifyPin(input) {
-  const expected = String(process.env.OPS_CONTROL_PIN || '');
+  const expected = operationsControlPin;
   const actual = String(input || '');
   if (!expected || !actual) return false;
   const left = crypto.createHash('sha256').update(expected).digest();
@@ -419,7 +420,7 @@ app.post('/api/auth/logout', (request, response) => {
 });
 app.use('/api', requireDashboardAuth);
 
-app.get('/api/config', (_request, response) => response.json({ name: 'JARVIS', version: appVersion, ttsMode: process.env.TTS_MODE || 'local', fishVoiceId: process.env.FISH_AUDIO_VOICE_ID || '', fishModel: process.env.FISH_AUDIO_MODEL || 's2.1-pro-free', fishConfigured: Boolean(process.env.FISH_AUDIO_API_KEY && process.env.FISH_AUDIO_VOICE_ID), allowBrowserTtsFallback: asBool(process.env.ALLOW_BROWSER_TTS_FALLBACK, false), model: primaryModel, models, visionModel, visionConfigured: Boolean(visionModel), emailSendEnabled: googleEmailSendEnabled, browserControlEnabled, tools: { google: true, emailDraft: true, emailSend: googleEmailSendEnabled, web: true, googleNews: true, screen: true, hostBrowser: true, browserControl: browserControlEnabled, officeArtifacts: true, liveAgentView: true }, agents: Object.fromEntries(Object.entries(agentRoles).map(([route, role]) => [route, role.name])), timezone: 'Asia/Dubai', piOnly: true, operationsEnabled: Boolean(process.env.OPS_CONTROL_PIN), printerConfigured: printerClient.configured }));
+app.get('/api/config', (_request, response) => response.json({ name: 'JARVIS', version: appVersion, ttsMode: process.env.TTS_MODE || 'local', fishVoiceId: process.env.FISH_AUDIO_VOICE_ID || '', fishModel: process.env.FISH_AUDIO_MODEL || 's2.1-pro-free', fishConfigured: Boolean(process.env.FISH_AUDIO_API_KEY && process.env.FISH_AUDIO_VOICE_ID), allowBrowserTtsFallback: asBool(process.env.ALLOW_BROWSER_TTS_FALLBACK, false), model: primaryModel, models, visionModel, visionConfigured: Boolean(visionModel), emailSendEnabled: googleEmailSendEnabled, browserControlEnabled, tools: { google: true, emailDraft: true, emailSend: googleEmailSendEnabled, web: true, googleNews: true, screen: true, hostBrowser: true, browserControl: browserControlEnabled, officeArtifacts: true, liveAgentView: true }, agents: Object.fromEntries(Object.entries(agentRoles).map(([route, role]) => [route, role.name])), timezone: 'Asia/Dubai', piOnly: true, operationsEnabled: Boolean(operationsControlPin), printerConfigured: printerClient.configured }));
 app.get('/api/workspace/status', (_request, response) => response.json({
   platform: process.platform, browser: { dedicatedProfile: true, interactiveEnabled: browserControlEnabled, approval: 'one-task-pin', liveFrames: true },
   office: { local: true, formats: ['pptx', 'docx', 'xlsx'] }, news: { googleRss: true, apiKeyRequired: false },
