@@ -45,6 +45,19 @@ test('can disable experimental phrase bias while preserving recognition', async 
   } finally { globalThis.SpeechRecognitionPhrase = previous; }
 });
 
+test('reports an actionable state when the browser has no speech-recognition API', async () => {
+  const previousWindow = globalThis.window;
+  const states = []; const errors = [];
+  globalThis.window = {};
+  try {
+    const controller = new VoiceController({ onState: (state) => states.push(state), onError: (error) => errors.push(error.message) });
+    controller.configure(); controller.shouldRun = true;
+    await controller.startRecognition();
+    assert.equal(states.at(-1), 'audio-only');
+    assert.match(errors.at(-1), /Speech recognition is unavailable/);
+  } finally { globalThis.window = previousWindow; }
+});
+
 test('routes wake phrase and double clap through the same wake callback', () => {
   const events = [];
   const originalNow = Date.now;
