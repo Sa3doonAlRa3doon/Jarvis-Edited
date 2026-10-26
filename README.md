@@ -99,7 +99,7 @@ A private, Pi-first JARVIS visualization for OpenJarvis, Ollama, Docker, Google 
 - **Restart-safe dashboard sessions** — authenticated browser sessions use a signed secret stored only under ignored `data/`, so service restarts no longer leave an apparently live dashboard with silently unauthorized voice requests.
 - **Voice-reactive neural field** — the text-free particle scene changes light intensity, particle size, glow, and motion while listening, hearing, armed, thinking, speaking, or reporting an error.
 - **Smoother camera gestures** — pointer movement, pinch state, and two-hand zoom now use temporal smoothing, pinch hysteresis, and lost-frame tolerance to reduce jitter.
-- **Permission-safe auto start** — microphone and camera listeners auto-start only when the matching permission has already been granted. With the fullscreen page focused, press `V` for voice, `G` for gestures, or `Esc` to stop both without adding visible controls.
+- **Permission-safe auto start** — the microphone listener starts on first enabled visit when permission is prompt or granted, but never retries a denied permission. With the fullscreen page focused, press `V` for voice, `G` for gestures, or `Esc` to stop both without adding visible controls.
 
 ## What is new in 3.1
 
