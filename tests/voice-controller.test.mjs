@@ -211,6 +211,26 @@ test('requires recent physical microphone activity before accepting a provider w
   assert.equal(wakes.length, 1);
 });
 
+test('accepts a delayed final wake transcript within the bounded physical-voice grace window', () => {
+  const previousPerformance = globalThis.performance;
+  Object.defineProperty(globalThis, 'performance', { configurable: true, value: { now: () => 10_000 } });
+  const wakes = [];
+  try {
+    const controller = new VoiceController({ onWake: (event) => wakes.push(event) });
+    controller.configure({ wakeWord: true, recognitionConfidence: .55, wakePhrases: ['hey jarvis'] });
+    controller.analyser = {};
+    controller.lastRawVoiceAt = 5_000;
+    const delayedWake = Object.assign([{ transcript: 'hey jarvis', confidence: .99 }], { isFinal: true });
+    controller.handleRecognitionResult({ resultIndex: 0, results: [delayedWake] });
+    assert.equal(wakes.length, 1);
+
+    controller.armedUntil = 0;
+    controller.lastRawVoiceAt = 3_000;
+    controller.handleRecognitionResult({ resultIndex: 0, results: [delayedWake] });
+    assert.equal(wakes.length, 1);
+  } finally { Object.defineProperty(globalThis, 'performance', { configurable: true, value: previousPerformance }); }
+});
+
 test('ignores a provider-hallucinated command when the physical microphone is silent', () => {
   const previousWindow = globalThis.window;
   const commands = []; const captures = [];

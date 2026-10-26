@@ -22,6 +22,7 @@ A private, Pi-first JARVIS visualization for OpenJarvis, Ollama, Docker, Google 
 - **Separate agent account** — OpenJarvis runs as `jarvis-agent`, not the dashboard owner. Optional shell/code/Git tools are restricted to `/srv/jarvis-workspace`; the agent has no sudo rule, dashboard `.env`, OAuth files, SSH keys, private home, or Docker socket.
 - **Secure transport boundary** — the dashboard now binds to `127.0.0.1`. Use an SSH tunnel or Tailscale Serve HTTPS; private APIs reject remote plain HTTP, and forwarded HTTPS is trusted only from a loopback proxy.
 - **Stronger voice acceptance** — wake phrases and captured command transcripts both require recent physical microphone energy when the audio analyser is available, rejecting silent speech-provider guesses.
+- **Wake troubleshooting is visible** — first-run microphone permission can start from the main page, delayed final wake transcripts are accepted within a bounded six-second physical-voice window, and unsupported speech-recognition browsers report an actionable error instead of appearing silently armed.
 
 ### 3.9 browser agent, private live control view, and Pi tools
 
@@ -46,7 +47,7 @@ A private, Pi-first JARVIS visualization for OpenJarvis, Ollama, Docker, Google 
 - The live microphone level detector now cancels the initial 15-second no-speech deadline as soon as real voice energy is heard, even before the browser produces transcript text.
 - Final recognition segments stay queued while the mic still detects speech, preventing a sentence from being submitted halfway through.
 - Brief natural pauses are tolerated with a 1.4-second end-of-sentence window before JARVIS submits the command.
-- After audible speech ends, JARVIS allows 2.5 seconds for delayed recognition text before offering a fresh capture window.
+- After audible speech ends, JARVIS allows 2.5 seconds for delayed command text; the separate wake gate accepts a final wake transcript for up to six seconds after physical microphone energy, then expires it.
 
 ### 3.7 wake command session
 
@@ -275,7 +276,8 @@ The tunnel is optional for viewing the Pi dashboard and selecting Pi-attached de
 
 Open `/settings`, choose **This browser** for laptop testing or **Raspberry Pi 5 hardware** for Pi devices, select the exact camera/microphone, then save.
 
-- Browser mode requests camera and microphone permission only after **Start calibration**, **Test recognition**, `V`, or `G` is deliberately used.
+- Browser mode requests camera and microphone permission on the first enabled visit (or after **Start calibration**, **Test recognition**, `V`, or `G`); a denied permission is never retried automatically.
+- Use a normal Chrome/Edge/Chromium tab for laptop voice testing. Embedded preview browsers may not expose `getUserMedia()` or `SpeechRecognition`, so they can display the neural field but cannot hear a wake phrase.
 - After permission has been granted, the main screen can safely auto-start the enabled listener on later visits. Select the exact **Browser / Gesture Camera** in `/settings`; this is also how Ubuntu/Chromium on the Pi selects one camera while leaving other cameras untouched.
 - Pi mode uses the selected `/dev/video*` and `plughw:CARD,DEVICE` paths only.
 - Person detection runs the TensorFlow.js COCO-SSD model locally. The release ZIP includes it; GitHub installs download the official model shards once during `npm install`, verify their hashes, and then run offline.

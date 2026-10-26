@@ -538,6 +538,20 @@ function updateVoiceVisual(mode = 'standby', level = state.voiceLevel) {
   ui.voiceButton?.classList.toggle('listening', state.voice?.active && ['listening', 'hearing', 'armed'].includes(mode));
   ui.voiceButton?.classList.toggle('speaking', mode === 'speaking');
   ui.voiceButton?.setAttribute('aria-pressed', String(Boolean(state.voice?.active)));
+  const voiceCopy = {
+    standby: 'Enable browser microphone',
+    listening: 'JARVIS is listening for Hey Jarvis',
+    hearing: 'JARVIS hears microphone audio',
+    armed: 'JARVIS is ready for your command',
+    speaking: 'JARVIS is speaking',
+    processing: 'JARVIS is processing your request',
+    'audio-only': 'Microphone active; speech recognition is unavailable in this browser',
+    error: 'Voice listener error; open Settings for microphone and speech diagnostics'
+  };
+  const label = voiceCopy[mode] || 'JARVIS voice listener';
+  ui.voiceButton?.setAttribute('aria-label', label);
+  ui.voiceButton?.setAttribute('title', label);
+  if (ui.voiceButton) ui.voiceButton.dataset.voiceMode = mode;
   state.galaxy?.setActivity(mode, state.voiceLevel);
 }
 

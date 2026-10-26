@@ -9,6 +9,11 @@ const Recognition = () => window.SpeechRecognition || window.webkitSpeechRecogni
 const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 const COMMAND_CAPTURE_HARD_LIMIT_MS = 120_000;
 const DELAYED_TRANSCRIPT_GRACE_MS = 2_500;
+// Browser speech recognition often delivers the final wake transcript several
+// seconds after the microphone's VAD peak. Keep this bounded so a stale sound
+// cannot authorize a later command, while avoiding false negatives on normal
+// speech with network/local recognition latency.
+const WAKE_PHYSICAL_VOICE_GRACE_MS = 6_000;
 const COMMAND_END_SILENCE_MS = 1_400;
 const VAD_ATTACK_MS = 320;
 const VAD_RELEASE_MS = 360;
@@ -110,18 +115,30 @@ export class VoiceController {
 
   async autoStartIfGranted(settings = this.settings) {
     this.configure(settings);
-    if (!this.settings.voiceAutoStart || this.running || !navigator.permissions?.query) return false;
+    if (!this.settings.voiceAutoStart || this.running) return false;
+    let permission = null;
     try {
-      const permission = await navigator.permissions.query({ name: 'microphone' });
-      if (permission.state !== 'granted') return false;
+      if (navigator.permissions?.query) permission = await navigator.permissions.query({ name: 'microphone' });
+      // A prompt is a valid first-run state: getUserMedia will ask once and
+      // then future page loads can start silently. Never retry a denied grant.
+      if (permission?.state === 'denied') return false;
       await this.start(); return true;
-    } catch { return false; }
+    } catch (error) {
+      // Surface first-run/unsupported-browser failures instead of leaving the
+      // user with an apparently armed but inert wake listener.
+      if (permission?.state !== 'denied') this.onError(error);
+      return false;
+    }
   }
 
   async startRecognition() {
     if (!this.shouldRun || this.recognitionUnavailable || this.speaking && !this.settings.bargeIn || this.recognition || this.preparingRecognition) return;
     const RecognitionClass = Recognition();
-    if (!RecognitionClass) { this.onState('audio-only'); return; }
+    if (!RecognitionClass) {
+      this.onState('audio-only');
+      this.onError(new Error('Speech recognition is unavailable in this browser. Use Chrome or Edge on the dashboard, or install the on-device language pack in /settings.'));
+      return;
+    }
     this.preparingRecognition = true;
     let recognition;
     try { recognition = new RecognitionClass(); }
@@ -131,7 +148,7 @@ export class VoiceController {
     recognition.continuous = true; recognition.interimResults = true; recognition.maxAlternatives = 5; recognition.lang = this.settings.voiceLanguage || 'en-US';
     recognition.onstart = () => { this.restartDelay = 240; this.onState('listening'); };
     recognition.onspeechstart = () => {
-      const recentPhysicalVoice = !this.analyser || this.lastRawVoiceAt > 0 && performance.now() - this.lastRawVoiceAt <= 2500;
+      const recentPhysicalVoice = this.hasRecentPhysicalVoice();
       if (recentPhysicalVoice) {
         this.markCommandSpeech();
         if (this.commandCaptureActive) this.updateCommandVoiceActivity(true);
@@ -214,7 +231,7 @@ export class VoiceController {
         wakePhrases: this.settings.wakePhrases, wakeSensitivity: this.settings.wakeSensitivity,
         recognitionConfidence: this.settings.recognitionConfidence, preferWake: this.settings.wakeWord && !armed
       });
-      const recentPhysicalVoice = !this.analyser || this.lastRawVoiceAt > 0 && performance.now() - this.lastRawVoiceAt <= 2500;
+      const recentPhysicalVoice = this.hasRecentPhysicalVoice();
       const physicallyAccepted = selected.accepted && recentPhysicalVoice;
       this.onTranscript({ text: selected.transcript, final: result.isFinal, confidence: selected.confidence, accepted: physicallyAccepted });
       if (this.commandCaptureActive && physicallyAccepted && selected.transcript) {
@@ -237,6 +254,10 @@ export class VoiceController {
     const now = Date.now(); this.armedUntil = now + 30_000;
     if (now - this.lastWakeAt > 1200) { this.lastWakeAt = now; this.onWake({ kind: wake.kind || 'wake_word', phrase: wake.phrase, score: wake.score, command: normalizeTranscript(wake.command) }); }
     this.onState('armed');
+  }
+
+  hasRecentPhysicalVoice(now = performance.now(), graceMs = WAKE_PHYSICAL_VOICE_GRACE_MS) {
+    return !this.analyser || this.lastRawVoiceAt > 0 && now - this.lastRawVoiceAt <= graceMs;
   }
 
   beginCommandCapture(timeoutMs = 15_000) {
@@ -364,7 +385,7 @@ export class VoiceController {
     let sum = 0; let peak = 0;
     for (const sample of samples) { const value = Math.abs((sample - 128) / 128); sum += value * value; peak = Math.max(peak, value); }
     const rms = Math.sqrt(sum / samples.length); const now = performance.now();
-    const vadThreshold = Math.max(.012, this.noiseFloor * 2.8, Number(this.settings.micSensitivity || .18) * .2);
+    const vadThreshold = Math.max(.008, this.noiseFloor * 2.4, Number(this.settings.micSensitivity || .18) * .14);
     const voiceActive = rms > vadThreshold;
     if (voiceActive && peak > vadThreshold * 1.25) this.lastRawVoiceAt = now;
     if (!voiceActive) this.noiseFloor = this.noiseFloor * .985 + rms * .015;
