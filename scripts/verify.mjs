@@ -5,12 +5,12 @@ import { fileURLToPath } from 'node:url';
 
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (file) => fs.readFile(path.join(project, file), 'utf8');
-const [html, settingsHtml, client, settingsClient, authClient, css, server, helper, gitignore, packageRaw, galaxy, gestures, voiceController, voiceUtils, searchUtils, printerClient, knowledgeIndex, agentRouter, openJarvisLive, openJarvisConfig, openJarvisSetup, browserLauncher, browserNetworkGuard, artifactStudio, browserControl, newsTools] = await Promise.all([
+const [html, settingsHtml, client, settingsClient, authClient, css, server, helper, gitignore, packageRaw, galaxy, gestures, voiceController, voiceUtils, searchUtils, printerClient, knowledgeIndex, agentRouter, openJarvisLive, openJarvisConfig, openJarvisSetup, browserLauncher, browserNetworkGuard, browserPrefix, artifactStudio, browserControl, newsTools] = await Promise.all([
   read('public/index.html'), read('public/settings.html'), read('public/app.js'), read('public/settings.js'),
   read('public/auth.js'), read('public/styles.css'), read('server.mjs'), read('scripts/jarvis-service-control.sh'), read('.gitignore'), read('package.json'),
   read('public/galaxy.js'), read('public/gesture-controller.js'), read('public/voice-controller.js'), read('public/voice-utils.js'), read('public/search-utils.js'),
   read('lib/printer-client.mjs'), read('lib/knowledge-index.mjs'), read('lib/agent-router.mjs'), read('lib/openjarvis-live.mjs'),
-  read('scripts/configure-openjarvis.py'), read('scripts/setup-openjarvis-pi.sh'), read('scripts/start-browser-mcp.mjs'), read('scripts/browser-network-guard.ts'),
+  read('scripts/configure-openjarvis.py'), read('scripts/setup-openjarvis-pi.sh'), read('scripts/start-browser-mcp.mjs'), read('scripts/browser-network-guard.ts'), read('scripts/mcp-prefix.mjs'),
   read('lib/artifact-studio.mjs'), read('lib/browser-control.mjs'), read('lib/news-tools.mjs')
 ]);
 const packageJson = JSON.parse(packageRaw);
@@ -34,7 +34,7 @@ for (const shard of shards) { const stats = await fs.stat(path.join(modelDirecto
 const handModel = await fs.readFile(path.join(project, 'public', 'models', 'hand-landmarker', 'hand_landmarker.task'));
 assert.equal(handModel.length, 7819105, 'Unexpected hand landmark model size.');
 
-assert.equal(packageJson.version, '3.11.0');
+assert.equal(packageJson.version, '3.11.1');
 assert.match(server, /ALLOW_BROWSER_TTS_FALLBACK/);
 assert.match(server, /X-Jarvis-Voice-ID/);
 assert.match(client, /Fish Audio playback failed without changing voices/);
@@ -112,7 +112,7 @@ assert.match(settingsHtml, /id="test-recognition"/);
 assert.match(settingsHtml, /id="tts-voice"/);
 assert.match(server, /wakeResponse: 'Yes sir, how can I help you today\?'/);
 assert.match(settingsHtml, /placeholder="Yes sir, how can I help you today\?"/);
-assert.match(server, /const appVersion = '3\.11\.0'/);
+assert.match(server, /const appVersion = '3\.11\.1'/);
 assert.match(voiceController, /updateCommandVoiceActivity/);
 assert.match(voiceController, /DELAYED_TRANSCRIPT_GRACE_MS/);
 assert.match(server, /loadDashboardSessionSecret/);
@@ -127,7 +127,8 @@ assert.match(server, /on-device-speech-recognition=\(self\)/);
 assert.match(server, /display-capture=\(self\)/);
 assert.match(server, /googleWorkspace\.runIntent/);
 assert.match(server, /searchWeb\(prompt\)/);
-assert.match(server, /take a screenshot after navigation/);
+assert.match(server, /after every navigation, call jarvis_browser_snapshot before clicking/);
+assert.match(server, /private browser bridge captures live frames automatically/);
 assert.match(server, /app\.get\('\/api\/agent\/live'/);
 assert.match(server, /app\.get\('\/api\/agent\/live-frame'/);
 assert.match(html, /id="agent-live-view"/);
@@ -195,6 +196,7 @@ assert.match(server, /privateApiTransportAllowed/);
 assert.match(openJarvisSetup, /AGENT_USER="jarvis-agent"/);
 assert.match(openJarvisSetup, /WORKSPACE_DIR="\/srv\/jarvis-workspace"/);
 assert.match(openJarvisSetup, /AGENT_TOOLS_DIR="\/opt\/jarvis-agent-tools"/);
+assert.match(openJarvisSetup, /mcp-prefix\.mjs/);
 assert.match(openJarvisSetup, /--browser-control/);
 assert.match(openJarvisConfig, /INTERACTIVE_BROWSER_TOOLS/);
 assert.match(openJarvisConfig, /if args\.host_control and args\.browser_control/);
@@ -204,8 +206,12 @@ assert.match(browserLauncher, /--block-service-workers/);
 assert.match(browserLauncher, /--init-page/);
 assert.doesNotMatch(browserLauncher, /--browser=chromium/);
 assert.match(browserLauncher, /JARVIS_BROWSER_HEADLESS/);
+assert.match(browserLauncher, /must be a file inside OPENJARVIS_WORKSPACE/);
+assert.match(browserLauncher, /replyTimer = setTimeout/);
+assert.match(browserPrefix, /MCP_TOOL_PREFIX = 'jarvis_'/);
 assert.match(browserNetworkGuard, /page\.context\(\)\.route/);
 assert.match(browserNetworkGuard, /blockedIpv4/);
+assert.match(browserNetworkGuard, /blockedMethod/);
 assert.match(artifactStudio, /PptxGenJS/);
 assert.match(artifactStudio, /new Document/);
 assert.match(artifactStudio, /new ExcelJS\.Workbook/);

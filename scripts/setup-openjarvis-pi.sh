@@ -81,6 +81,7 @@ sudo chmod -R a+rX "$SOURCE_DIR" "$UV_ENV"
 echo "Installing the root-owned Playwright MCP bridge used by the isolated agent"
 sudo install -d -o root -g root -m 0755 "$AGENT_TOOLS_DIR"
 sudo install -o root -g root -m 0755 "$SCRIPT_DIR/start-browser-mcp.mjs" "$AGENT_TOOLS_DIR/start-browser-mcp.mjs"
+sudo install -o root -g root -m 0644 "$SCRIPT_DIR/mcp-prefix.mjs" "$AGENT_TOOLS_DIR/mcp-prefix.mjs"
 sudo install -o root -g root -m 0644 "$SCRIPT_DIR/browser-network-guard.ts" "$AGENT_TOOLS_DIR/browser-network-guard.ts"
 sudo npm install --prefix "$AGENT_TOOLS_DIR" --omit=dev --ignore-scripts @playwright/mcp@0.0.83
 sudo chown -R root:root "$AGENT_TOOLS_DIR"

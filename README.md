@@ -1,12 +1,14 @@
-# OpenJarvis Pi Command Center 3.11.0
+# OpenJarvis Pi Command Center 3.11.1
 
 A private, Pi-first JARVIS visualization for OpenJarvis, Ollama, Docker, Google connectors, cameras, microphones, and guarded maintenance. The main route is now exactly one fullscreen neural field with no visible words, panels, cards, labels, or command bar.
 
 ### 3.11 private browser, cross-platform workspace, and Office studio
 
+- **Collision-proof browser bridge** — Playwright MCP tools are exposed to OpenJarvis as `jarvis_browser_*`, preventing its incomplete built-in browser tools from shadowing the protected private-browser connection.
+- **Automatic private live frames** — navigation, clicks, typing, selections, and key presses refresh a protected screenshot for the dashboard while control is active; the frame is hidden again when the run ends.
 - **Its own browser** — JARVIS uses a dedicated Chromium/Chrome/Edge profile and output folder on Raspberry Pi OS, Ubuntu/Linux, and Windows. It never reuses your personal browser profile, cookies, saved passwords, or extensions.
 - **Visible, one-task control** — read-only navigation, extraction, screenshots, and sourced research remain available. Clicking or typing requires the dashboard PIN plus the exact `ALLOW BROWSER CONTROL` phrase for that exact task; the grant expires and works once.
-- **High-impact actions remain separate** — the browser cannot silently send messages, submit forms, buy, upload files, delete data, change permissions, or type passwords/API keys/payment data. Gmail uses its own editable preview and `SEND EMAIL` approval.
+- **High-impact actions remain separate** — the browser bridge technically rejects state-changing HTTP methods (POST, PUT, PATCH, and DELETE) in addition to the model policy. It cannot silently send messages, submit forms, buy, upload files, delete data, change permissions, or type passwords/API keys/payment data. Gmail uses its own editable preview and `SEND EMAIL` approval.
 - **Local PowerPoint, Word, and Excel output** — requests such as `Create a PowerPoint about solar energy`, `Write a Word report about my Pi`, or `Make an Excel expense tracker` produce real `.pptx`, `.docx`, or `.xlsx` files locally and open a download panel.
 - **Current Google News with sources** — `Show Google News about Raspberry Pi` reads the public Google News RSS feed, treats it as untrusted evidence, and returns bounded headlines with citations. No Google API key is required for news.
 - **Selected-app lens** — `/settings#screen` lets you explicitly select one screen, window, or browser tab for local preview and snapshot analysis. It does not silently capture or control arbitrary desktop apps.

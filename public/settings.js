@@ -745,7 +745,7 @@ async function init() {
   try {
     await window.ensureDashboardAuthentication?.();
     const [settings, status, config, workspace] = await Promise.all([json('/api/settings'), json('/api/status'), json('/api/config'), json('/api/workspace/status')]);
-    ui.version.textContent = config.version || '3.11.0';
+    ui.version.textContent = config.version || '3.11.1';
     ui.node.textContent = config.piOnly ? 'PI-5' : 'LOCAL';
     state.config = config;
     ui.screenVisionNote.textContent = config.visionConfigured

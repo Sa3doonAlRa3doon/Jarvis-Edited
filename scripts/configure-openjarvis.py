@@ -17,21 +17,23 @@ CORE_TOOLS = [
     "calculator",
 ]
 
+BROWSER_TOOL_PREFIX = "jarvis_"
+
 READ_ONLY_BROWSER_TOOLS = [
-    "browser_navigate",
-    "browser_navigate_back",
-    "browser_snapshot",
-    "browser_find",
-    "browser_take_screenshot",
-    "browser_wait_for",
-    "browser_tabs",
+    f"{BROWSER_TOOL_PREFIX}browser_navigate",
+    f"{BROWSER_TOOL_PREFIX}browser_navigate_back",
+    f"{BROWSER_TOOL_PREFIX}browser_snapshot",
+    f"{BROWSER_TOOL_PREFIX}browser_find",
+    f"{BROWSER_TOOL_PREFIX}browser_take_screenshot",
+    f"{BROWSER_TOOL_PREFIX}browser_wait_for",
+    f"{BROWSER_TOOL_PREFIX}browser_tabs",
 ]
 
 INTERACTIVE_BROWSER_TOOLS = [
-    "browser_click",
-    "browser_type",
-    "browser_select_option",
-    "browser_press_key",
+    f"{BROWSER_TOOL_PREFIX}browser_click",
+    f"{BROWSER_TOOL_PREFIX}browser_type",
+    f"{BROWSER_TOOL_PREFIX}browser_select_option",
+    f"{BROWSER_TOOL_PREFIX}browser_press_key",
 ]
 
 WORKSPACE_TOOLS = [
@@ -133,6 +135,7 @@ def main() -> None:
     server["workers"] = 1
 
     security = table(document, "security")
+    security["profile"] = "personal"
     security["allowed_dirs"] = [str(args.allowed_dir.resolve())]
 
     table(document, "traces")["enabled"] = True
