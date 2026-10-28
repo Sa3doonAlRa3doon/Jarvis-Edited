@@ -70,3 +70,24 @@ test('sends a Gmail raw message with OAuth POST and never exposes the token in t
   assert.deepEqual(JSON.parse(seen[1].options.body), { raw: 'YWJj' });
   assert.equal(result.accessToken, undefined);
 });
+
+test('coalesces concurrent OAuth refreshes and names rejected Google probes', async () => {
+  const files = new Map([
+    ['C:\\private\\credentials.json', JSON.stringify({ installed: { client_id: 'client', client_secret: 'secret' } })],
+    ['C:\\private\\token.json', JSON.stringify({ refresh_token: 'refresh' })]
+  ]);
+  let refreshCalls = 0;
+  const bridge = new GoogleWorkspaceBridge({
+    environment: { GOOGLE_CREDENTIALS_PATH: 'C:\\private\\credentials.json', GOOGLE_TOKEN_PATH: 'C:\\private\\token.json' }, home: 'C:\\home',
+    reader: async (file) => { if (!files.has(file)) throw new Error('missing'); return files.get(file); },
+    fetchImpl: async (url) => {
+      if (String(url).includes('oauth2.googleapis.com')) { refreshCalls += 1; return response({ error: 'invalid_grant', error_description: 'Bad Request' }, 401); }
+      return response({}, 500);
+    }
+  });
+  const status = await bridge.status({ probe: true });
+  assert.equal(refreshCalls, 1);
+  assert.equal(status.liveVerified, false);
+  assert.deepEqual(Object.keys(status.errors).sort(), ['gcalendar', 'gcontacts', 'gdrive', 'gmail', 'gtasks']);
+  assert.match(status.errors.gmail, /google:authorize/);
+});

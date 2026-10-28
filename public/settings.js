@@ -414,7 +414,8 @@ async function verifyGoogle() {
     const status = await json('/api/google/status?probe=1');
     renderGoogle(status);
     const count = Object.values(status.connectors || {}).filter(Boolean).length;
-    setMessage(count ? `Google live check complete: ${count} connectors responded.` : 'Google OAuth files were found, but none of the requested APIs responded. Check scopes and enabled APIs.');
+    const failures = Object.entries(status.errors || {}).map(([service, error]) => `${service}: ${error}`).slice(0, 3);
+    setMessage(count ? `Google live check complete: ${count} connectors responded.` : `Google OAuth files were found, but no Google API responded.${failures.length ? ` ${failures.join(' | ')}` : ' Check scopes and enabled APIs.'}`);
   } catch (error) { ui.googleState.textContent = 'ERROR'; setMessage(`Google verification failed: ${error.message}`); }
   finally { ui.testGoogle.disabled = false; ui.testGoogle.textContent = 'VERIFY GOOGLE'; }
 }
