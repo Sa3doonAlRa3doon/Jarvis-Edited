@@ -19,6 +19,7 @@ import { issueDashboardSession, loadDashboardSessionSecret, verifyDashboardSessi
 import { PrinterClient } from './lib/printer-client.mjs';
 import { isLoopbackAddress, privateApiTransportAllowed, trustedHttpsState } from './lib/request-security.mjs';
 import { isGoogleNewsPrompt, searchGoogleNews } from './lib/news-tools.mjs';
+import { publicServiceCatalog, runPublicService } from './lib/public-services.mjs';
 import { isWebResearchPrompt, openWebsiteOnHost, searchWeb, websiteFromPrompt } from './lib/web-tools.mjs';
 import {
   audioRms, clamp, dockerSummary, linuxCameras, linuxMicrophones,
@@ -422,10 +423,11 @@ app.post('/api/auth/logout', (request, response) => {
 });
 app.use('/api', requireDashboardAuth);
 
-app.get('/api/config', (_request, response) => response.json({ name: 'JARVIS', version: appVersion, ttsMode: process.env.TTS_MODE || 'local', fishVoiceId: process.env.FISH_AUDIO_VOICE_ID || '', fishModel: process.env.FISH_AUDIO_MODEL || 's2.1-pro-free', fishConfigured: Boolean(process.env.FISH_AUDIO_API_KEY && process.env.FISH_AUDIO_VOICE_ID), allowBrowserTtsFallback: asBool(process.env.ALLOW_BROWSER_TTS_FALLBACK, false), model: primaryModel, models, visionModel, visionConfigured: Boolean(visionModel), emailSendEnabled: googleEmailSendEnabled, browserControlEnabled, tools: { google: true, emailDraft: true, emailSend: googleEmailSendEnabled, web: true, googleNews: true, screen: true, hostBrowser: true, browserControl: browserControlEnabled, officeArtifacts: true, liveAgentView: true }, agents: Object.fromEntries(Object.entries(agentRoles).map(([route, role]) => [route, role.name])), timezone: 'Asia/Dubai', piOnly: true, operationsEnabled: Boolean(operationsControlPin), printerConfigured: printerClient.configured }));
+app.get('/api/config', (_request, response) => response.json({ name: 'JARVIS', version: appVersion, ttsMode: process.env.TTS_MODE || 'local', fishVoiceId: process.env.FISH_AUDIO_VOICE_ID || '', fishModel: process.env.FISH_AUDIO_MODEL || 's2.1-pro-free', fishConfigured: Boolean(process.env.FISH_AUDIO_API_KEY && process.env.FISH_AUDIO_VOICE_ID), allowBrowserTtsFallback: asBool(process.env.ALLOW_BROWSER_TTS_FALLBACK, false), model: primaryModel, models, visionModel, visionConfigured: Boolean(visionModel), emailSendEnabled: googleEmailSendEnabled, browserControlEnabled, tools: { google: true, emailDraft: true, emailSend: googleEmailSendEnabled, web: true, googleNews: true, publicApis: true, screen: true, hostBrowser: true, browserControl: browserControlEnabled, officeArtifacts: true, liveAgentView: true }, publicApiServices: publicServiceCatalog(), agents: Object.fromEntries(Object.entries(agentRoles).map(([route, role]) => [route, role.name])), timezone: 'Asia/Dubai', piOnly: true, operationsEnabled: Boolean(operationsControlPin), printerConfigured: printerClient.configured }));
 app.get('/api/workspace/status', (_request, response) => response.json({
   platform: process.platform, browser: { dedicatedProfile: true, interactiveEnabled: browserControlEnabled, approval: 'one-task-pin', liveFrames: true },
   office: { local: true, formats: ['pptx', 'docx', 'xlsx'] }, news: { googleRss: true, apiKeyRequired: false },
+  publicApis: { keyless: true, services: publicServiceCatalog().map((item) => item.service) },
   screenBorrow: { available: true, mode: 'user-selected-view', control: false },
   boundaries: ['No personal browser profile reuse', 'No silent sends, posts, purchases, uploads, or destructive actions', 'No OAuth secrets in model prompts']
 }));
@@ -538,6 +540,15 @@ app.post('/api/news/search', async (request, response) => {
     await eventStore.append('research', 'Google News RSS search completed', { query: result.query, results: result.results.length });
     response.json({ query: result.query, results: result.results, citations: result.citations });
   } catch (error) { response.status(502).json({ error: cleanText(error.message, 260) }); }
+});
+app.get('/api/public/catalog', (_request, response) => response.json({ keyless: true, services: publicServiceCatalog() }));
+app.post('/api/public/query', async (request, response) => {
+  const prompt = cleanText(request.body?.prompt, 1000);
+  if (!prompt) { response.status(400).json({ error: 'Describe the public information to look up.' }); return; }
+  const result = await runPublicService(prompt);
+  if (!result.used) { response.status(400).json({ error: 'Try weather, air quality, a map location, local time, sunrise, exchange rates, holidays, earthquakes, ISS, a definition, Wikipedia, or crypto prices.' }); return; }
+  await eventStore.append('research', `Public API lookup ${result.service} completed`, { service: result.service, available: Boolean(result.result) });
+  response.status(result.result ? 200 : 502).json({ ok: Boolean(result.result), service: result.service, query: result.query, result: result.result, citations: result.citations, error: result.result ? undefined : cleanText(result.context, 320) });
 });
 app.post('/api/screen/analyze', async (request, response) => {
   const prompt = cleanText(request.body?.prompt || 'Describe the visible screen and identify anything that needs my attention.', 1000);
@@ -704,6 +715,12 @@ app.post('/api/chat', async (request, response) => {
     dataBlocks.push({ source: `google-${google.service}-untrusted`, value: google.result || { unavailable: true, error: cleanText(google.context, 320) } });
     citations.push(...google.citations);
     toolResults.push({ tool: 'google', service: google.service, ok: Boolean(google.result) });
+  }
+  const publicApi = await runPublicService(prompt);
+  if (publicApi.used) {
+    dataBlocks.push({ source: `public-api-${publicApi.service}-untrusted`, value: publicApi.result || { unavailable: true, error: cleanText(publicApi.context, 320) } });
+    citations.push(...publicApi.citations);
+    toolResults.push({ tool: 'public-api', service: publicApi.service, ok: Boolean(publicApi.result) });
   }
   const newsRequested = isGoogleNewsPrompt(prompt);
   if (newsRequested) {

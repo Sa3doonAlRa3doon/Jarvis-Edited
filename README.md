@@ -372,6 +372,22 @@ sudo systemctl restart openjarvis-dashboard
 
 Usage example: `Draft an email to friend@example.com saying I will arrive at five.` Review and edit the exact draft, enter the operations PIN, type `SEND EMAIL`, and press **SEND THIS EXACT EMAIL**. Closing the draft sends nothing. Calendar, Drive, Tasks, Contacts, deletion, forwarding, and settings remain read-only.
 
+## Curated public information tools
+
+The GitHub API-list repositories are directories, not credentials. JARVIS now uses a small, reviewed set of public read-only services that do not need API keys by default. It does not blindly import endpoints from a list or place unknown keys in `.env`.
+
+Available requests include:
+
+- weather and three-day forecasts, air quality/AQI, geocoding, and OpenStreetMap location links (Open-Meteo/OpenStreetMap)
+- local time and time zones, sunrise/sunset, exchange rates (Frankfurter), and public holidays (Nager.Date)
+- USGS earthquakes, ISS position, English definitions, Wikipedia summaries, and cryptocurrency prices
+
+Examples: `What is the weather in Dubai?`, `Show a map of Berlin`, `Convert 20 USD to EUR`, `Define resilient`, `Summarize Wikipedia Raspberry Pi`, or `Where is the ISS?`.
+
+Each lookup is bounded to a short timeout, cached briefly, normalized to a small result, and marked as untrusted evidence before it reaches the local model. Sources are returned in the response so the dashboard can show what was used. To change defaults, set `PUBLIC_API_DEFAULT_LOCATION`, `PUBLIC_API_DEFAULT_COUNTRY`, or `PUBLIC_API_TIMEOUT_MS` in the Pi-only `.env`; no secret belongs in `.env.example`.
+
+For direct diagnostics, unlock the dashboard and call `POST /api/public/query` with `{ "prompt": "weather in Dubai" }`. `GET /api/public/catalog` lists the enabled services.
+
 ## OpenJarvis and model setup
 
 Expected loopback services:
