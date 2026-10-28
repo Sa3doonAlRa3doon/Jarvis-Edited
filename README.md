@@ -435,6 +435,16 @@ curl http://127.0.0.1:8787/api/health
 # Protected endpoints return 401 until a dashboard session is unlocked in the browser.
 ```
 
+For a real, non-mocked laptop/Pi smoke test, run this from the command-center directory:
+
+```powershell
+npm run smoke:live
+# Require Google OAuth and a model backend to be healthy:
+npm run smoke:live -- --require-google --require-model
+```
+
+The smoke test performs read-only Gmail/Calendar/Drive/Tasks/Contacts probes, exercises every enabled public-information service, verifies the dashboard session, and checks real TTS output. It never sends email. A non-zero result means a live dependency is unavailable; it does not turn an unavailable Google token into a false pass.
+
 ## Laptop development test
 
 From Windows PowerShell:
