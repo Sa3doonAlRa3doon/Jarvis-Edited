@@ -13,6 +13,7 @@ test('routes only explicit public-information requests', () => {
   assert.equal(isPublicServicePrompt('What is the weather in Dubai?'), true);
   assert.equal(detectService('Show me a map of Berlin'), 'map');
   assert.equal(detectService('Convert 20 USD to EUR'), 'exchange');
+  assert.equal(detectService('map of Dubai'), 'map');
   assert.equal(detectService('Write a poem about dragons'), '');
   assert.equal(detectService('What is my CPU temperature?'), '');
   assert.equal(publicServiceCatalog().every((item) => item.keyRequired === false), true);
