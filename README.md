@@ -445,6 +445,14 @@ npm run smoke:live -- --require-google --require-model
 
 The smoke test performs read-only Gmail/Calendar/Drive/Tasks/Contacts probes, exercises every enabled public-information service, verifies the dashboard session, and checks real TTS output. It never sends email. A non-zero result means a live dependency is unavailable; it does not turn an unavailable Google token into a false pass.
 
+For a visible Chrome end-to-end check of the actual command screen, camera, microphone, gestures, search, Settings, sensor calibration, and Google verification UI, run:
+
+```powershell
+npm run smoke:chrome
+```
+
+This opens the installed Chrome executable with real camera/microphone permissions and never uses fake media devices. It closes Chrome after the report; no email or other external write is sent.
+
 ## Laptop development test
 
 From Windows PowerShell:
