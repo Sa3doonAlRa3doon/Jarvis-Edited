@@ -443,8 +443,10 @@ function renderStatus(payload) {
   const online = services.filter((item) => item.ok).length;
   ui.serviceCount.textContent = `${online}/${services.length}`;
   ui.serviceList.innerHTML = services.map((item) => `<article class="service-item"><i class="${item.ok ? 'ok' : ''}"></i><div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.detail)}</span></div><b>${item.ok ? 'ONLINE' : 'OFFLINE'}</b></article>`).join('');
-  const healthy = payload.services?.openjarvis?.online && payload.services?.ollama?.online;
-  ui.systemDot.className = healthy ? 'online' : 'warning'; ui.systemState.textContent = healthy ? 'SYSTEM NOMINAL' : 'DEGRADED';
+  const ollamaFallback = Boolean(payload.services?.ollama?.online && state.config?.allowOllamaFallback !== false);
+  const healthy = Boolean(payload.services?.ollama?.online && (payload.services?.openjarvis?.online || ollamaFallback));
+  const statusLabel = payload.services?.openjarvis?.online ? 'SYSTEM NOMINAL' : ollamaFallback ? 'OLLAMA FALLBACK' : 'DEGRADED';
+  ui.systemDot.className = healthy ? 'online' : 'warning'; ui.systemState.textContent = statusLabel;
   if (state.coreMode === 'system') ui.coreSubtitle.textContent = healthy ? 'SPEAK // PINCH // INSPECT // COMMAND' : 'VISUAL CORE READY // MODEL SERVICES STANDBY';
   ui.modelLabel.textContent = payload.services?.ollama?.models?.[0] || 'NO MODEL';
   ui.wakeState.textContent = payload.wake?.ready ? 'LISTENING' : payload.wake?.configured ? 'STARTING' : 'STANDBY';
