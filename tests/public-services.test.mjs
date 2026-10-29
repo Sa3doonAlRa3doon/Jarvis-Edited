@@ -46,3 +46,42 @@ test('handles an empty public-holiday dataset as a normal unavailable result', a
   assert.equal(result.used, true); assert.equal(result.service, 'holiday'); assert.equal(result.result.available, false); assert.deepEqual(result.result.holidays, []);
 });
 
+test('returns OpenStreetMap geocoding with an OpenFreeMap MapLibre style', async () => {
+  const result = await runPublicService('Show a map of Berlin', { lookup, fetchImpl: async (url) => {
+    assert.match(String(url), /nominatim\.openstreetmap\.org\/search/);
+    return response([{ name: 'Berlin', display_name: 'Berlin, Germany', lat: '52.52', lon: '13.405', address: { country: 'Germany', country_code: 'de' } }]);
+  } });
+  assert.equal(result.service, 'map'); assert.equal(result.result.location.countryCode, 'DE');
+  assert.equal(result.result.openFreeMap.styleUrl, 'https://tiles.openfreemap.org/styles/liberty');
+  assert.match(result.result.openStreetMapUrl, /mlat=52\.52/);
+});
+
+test('finds nearby places through a bounded Overpass lookup', async () => {
+  const result = await runPublicService('Find nearby restaurants in Dubai', { lookup, fetchImpl: async (url) => {
+    const value = String(url);
+    if (value.includes('nominatim.openstreetmap.org/search')) return response([{ name: 'Dubai', display_name: 'Dubai, UAE', lat: '25.2', lon: '55.3', address: { country: 'United Arab Emirates', country_code: 'ae' } }]);
+    assert.match(value, /overpass-api\.de\/api\/interpreter\?data=/);
+    return response({ elements: [{ type: 'node', id: 1, lat: 25.21, lon: 55.31, tags: { name: 'Example Kitchen', amenity: 'restaurant', 'addr:street': 'Main Road' } }] });
+  } });
+  assert.equal(result.service, 'places'); assert.equal(result.result.places[0].name, 'Example Kitchen');
+  assert.equal(result.result.openFreeMap.center[0], 55.3); assert.ok(result.citations.some((url) => url.includes('overpass-api.de')));
+});
+
+test('returns a clear non-US result for the US-only weather alert feed', async () => {
+  const result = await runPublicService('Are there weather alerts in Dubai?', { lookup, fetchImpl: async (url) => {
+    assert.match(String(url), /geocoding-api\.open-meteo\.com/);
+    return response({ results: [{ name: 'Dubai', country: 'United Arab Emirates', country_code: 'AE', latitude: 25.2, longitude: 55.3, timezone: 'Asia/Dubai' }] });
+  } });
+  assert.equal(result.service, 'weather_alerts'); assert.equal(result.result.available, false); assert.equal(result.result.countryCode, 'AE');
+});
+
+test('normalizes active NWS alerts for a US location', async () => {
+  const result = await runPublicService('Are there weather warnings in Miami?', { lookup, fetchImpl: async (url, options) => {
+    const value = String(url);
+    if (value.includes('geocoding-api.open-meteo.com')) return response({ results: [{ name: 'Miami', country: 'United States', country_code: 'US', latitude: 25.77, longitude: -80.19, timezone: 'America/New_York' }] });
+    assert.match(value, /api\.weather\.gov\/alerts\/active\?point=/); assert.equal(options.headers.Accept, 'application/geo+json');
+    return response({ features: [{ id: 'alert-1', properties: { event: 'Heat Advisory', headline: 'Heat advisory in effect', severity: 'Moderate', areaDesc: 'Miami-Dade', expires: '2026-10-29T23:00:00Z' } }] });
+  } });
+  assert.equal(result.service, 'weather_alerts'); assert.equal(result.result.alerts[0].event, 'Heat Advisory');
+});
+

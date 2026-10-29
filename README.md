@@ -378,13 +378,14 @@ The GitHub API-list repositories are directories, not credentials. JARVIS now us
 
 Available requests include:
 
-- weather and three-day forecasts, air quality/AQI, geocoding, and OpenStreetMap location links (Open-Meteo/OpenStreetMap)
+- weather and three-day forecasts, air quality/AQI, geocoding, OpenFreeMap/MapLibre map metadata, OpenStreetMap links, and nearby places through Overpass (Open-Meteo/OpenStreetMap)
+- US active weather alerts (National Weather Service); OpenWeatherMap and WeatherAPI.com are optional weather fallbacks when their keys are supplied
 - local time and time zones, sunrise/sunset, exchange rates (Frankfurter), and public holidays (Nager.Date)
 - USGS earthquakes, ISS position, English definitions, Wikipedia summaries, and cryptocurrency prices
 
-Examples: `What is the weather in Dubai?`, `Show a map of Berlin`, `Convert 20 USD to EUR`, `Define resilient`, `Summarize Wikipedia Raspberry Pi`, or `Where is the ISS?`.
+Examples: `What is the weather in Dubai?`, `Show a map of Berlin`, `Find nearby restaurants in Dubai`, `Are there weather alerts in Miami?`, `Convert 20 USD to EUR`, `Define resilient`, `Summarize Wikipedia Raspberry Pi`, or `Where is the ISS?`.
 
-Each lookup is bounded to a short timeout, cached briefly, normalized to a small result, and marked as untrusted evidence before it reaches the local model. Sources are returned in the response so the dashboard can show what was used. To change defaults, set `PUBLIC_API_DEFAULT_LOCATION`, `PUBLIC_API_DEFAULT_COUNTRY`, or `PUBLIC_API_TIMEOUT_MS` in the Pi-only `.env`; no secret belongs in `.env.example`.
+Each lookup is bounded to a short timeout, cached briefly, normalized to a small result, and marked as untrusted evidence before it reaches the local model. Sources are returned in the response so the dashboard can show what was used. Open-Meteo remains the default keyless weather provider; set `PUBLIC_API_WEATHER_PROVIDER=openweather` or `weatherapi` only when the matching optional key is present. To change defaults, set `PUBLIC_API_DEFAULT_LOCATION`, `PUBLIC_API_DEFAULT_COUNTRY`, `PUBLIC_API_TIMEOUT_MS`, or `PUBLIC_API_USER_AGENT` in the Pi-only `.env`. Keep Nominatim usage light and do not build autocomplete on its public instance; map results include OpenStreetMap attribution.
 
 For direct diagnostics, unlock the dashboard and call `POST /api/public/query` with `{ "prompt": "weather in Dubai" }`. `GET /api/public/catalog` lists the enabled services.
 
