@@ -54,12 +54,13 @@ const state = {
   galaxy: null, gesture: null, voice: null, printer: { configured: false, online: false, state: 'checking' },
   chart: { cpu: Array(52).fill(0), ram: Array(52).fill(0), gpu: Array(52).fill(0) },
   neuralEnergy: 0.22, coreMode: 'system', voiceState: 'standby', voiceLevel: 0, searchResults: [], searchSelection: 0,
-  refreshFastPending: false, refreshSlowPending: false, pendingSpeech: null, audioPriming: false, wakeSession: 0,
+  refreshFastPending: false, refreshSlowPending: false, pendingSpeech: null, audioPriming: false, wakeSession: 0, thinkingSound: null,
   voiceCapture: { active: false, phase: 'idle', deadline: 0, ticker: 0, closeTimer: 0 },
   agentLive: { pending: false, timer: 0, frameVersion: 0 }, emailDraft: null, browserRequest: null, artifact: null
 };
 
 const VOICE_COMMAND_TIMEOUT_MS = 15_000;
+const COMMAND_ACKNOWLEDGEMENT = 'On it, sir.';
 
 const laneLabels = {
   code: { eyebrow: 'CODEACT STREAM', title: 'Code Assistant' },
@@ -568,6 +569,48 @@ function selectBrowserVoice() {
 
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
+async function startThinkingSound() {
+  if (state.thinkingSound) return true;
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return false;
+  let context = state.voice?.context || null;
+  let ownsContext = false;
+  try {
+    if (!context || context.state === 'closed') { context = new AudioContextClass({ latencyHint: 'interactive' }); ownsContext = true; }
+    if (context.state !== 'running') await context.resume();
+    if (context.state !== 'running') return false;
+    const master = context.createGain();
+    master.gain.value = Math.min(0.08, Math.max(0.01, Number(state.settings?.ttsVolume ?? 1) * 0.045));
+    master.connect(context.destination);
+    const sound = { context, master, ownsContext, timer: 0, stopped: false };
+    state.thinkingSound = sound;
+    document.body.dataset.thinking = 'true';
+    const pulse = () => {
+      if (sound.stopped) return;
+      const now = context.currentTime;
+      const oscillator = context.createOscillator(); const envelope = context.createGain();
+      oscillator.type = 'sine'; oscillator.frequency.setValueAtTime(310, now); oscillator.frequency.exponentialRampToValueAtTime(470, now + 0.16);
+      envelope.gain.setValueAtTime(0.0001, now); envelope.gain.exponentialRampToValueAtTime(1, now + 0.025); envelope.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
+      oscillator.connect(envelope).connect(master); oscillator.start(now); oscillator.stop(now + 0.38);
+      oscillator.onended = () => { try { oscillator.disconnect(); envelope.disconnect(); } catch {} };
+      sound.timer = window.setTimeout(pulse, 820);
+    };
+    pulse();
+    return true;
+  } catch { return false; }
+}
+
+function stopThinkingSound() {
+  const sound = state.thinkingSound;
+  if (!sound) return;
+  sound.stopped = true; clearTimeout(sound.timer); state.thinkingSound = null;
+  document.body.dataset.thinking = 'false';
+  try {
+    const now = sound.context.currentTime; sound.master.gain.cancelScheduledValues(now); sound.master.gain.setTargetAtTime(0.0001, now, 0.04);
+    window.setTimeout(() => { try { sound.master.disconnect(); } catch {} if (sound.ownsContext) void sound.context.close().catch(() => {}); }, 180);
+  } catch {}
+}
+
 async function requestFishSpeech(text) {
   let lastError = new Error('Fish Audio request failed.');
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -589,7 +632,7 @@ async function requestFishSpeech(text) {
   throw lastError;
 }
 
-async function speak(text, { pendingContext = null } = {}) {
+async function speak(text, { pendingContext = null, onPlaybackStart = null } = {}) {
   if (!state.settings?.autoSpeak || !text) return true;
   state.voice?.setSpeaking(true); updateVoiceVisual('speaking', .72);
   try {
@@ -599,6 +642,7 @@ async function speak(text, { pendingContext = null } = {}) {
       document.body.dataset.ttsState = 'requesting';
       try {
         const result = await requestFishSpeech(text);
+        onPlaybackStart?.();
         document.body.dataset.ttsState = 'playing';
         if (state.voice?.playAudio) await state.voice.playAudio(result.bytes, Number(state.settings?.ttsVolume ?? 1));
         else {
@@ -610,16 +654,18 @@ async function speak(text, { pendingContext = null } = {}) {
         state.pendingSpeech = null; document.body.classList.remove('audio-locked'); document.body.dataset.ttsState = 'complete'; return true;
       } catch (error) {
         if (error?.name === 'NotAllowedError') {
+          onPlaybackStart?.();
           state.pendingSpeech = { text, context: pendingContext }; document.body.classList.add('audio-locked'); document.body.dataset.ttsState = 'blocked'; state.galaxy?.setActivity('armed', 1); return false;
         }
         document.body.dataset.ttsState = 'error';
         console.warn(`Fish Audio playback failed without changing voices: ${error?.message || error}`);
-        if (!state.config?.allowBrowserTtsFallback) { state.galaxy?.setActivity('error', 1); return false; }
+        if (!state.config?.allowBrowserTtsFallback) { onPlaybackStart?.(); state.galaxy?.setActivity('error', 1); return false; }
       }
     }
     if ('speechSynthesis' in window) {
       document.body.dataset.ttsProvider = 'browser'; document.body.dataset.ttsVoice = selectBrowserVoice()?.voiceURI || 'system-default'; document.body.dataset.ttsState = 'requesting';
       if (navigator.userActivation && !navigator.userActivation.hasBeenActive) {
+        onPlaybackStart?.();
         state.pendingSpeech = { text, context: pendingContext }; document.body.classList.add('audio-locked'); document.body.dataset.ttsState = 'blocked'; state.galaxy?.setActivity('armed', 1); return false;
       }
       await new Promise((resolve) => {
@@ -629,10 +675,11 @@ async function speak(text, { pendingContext = null } = {}) {
         const voice = selectBrowserVoice(); if (voice) utterance.voice = voice;
         utterance.onstart = () => { document.body.dataset.ttsState = 'playing'; };
         utterance.onend = () => { clearTimeout(timeout); document.body.dataset.ttsState = 'complete'; resolve(); };
-        utterance.onerror = () => { clearTimeout(timeout); document.body.dataset.ttsState = 'error'; resolve(); }; speechSynthesis.speak(utterance);
+        utterance.onerror = () => { clearTimeout(timeout); document.body.dataset.ttsState = 'error'; resolve(); }; onPlaybackStart?.(); speechSynthesis.speak(utterance);
       });
       return document.body.dataset.ttsState === 'complete';
     }
+    onPlaybackStart?.();
     return false;
   } finally {
     state.voice?.setSpeaking(false);
@@ -702,8 +749,16 @@ async function sendPrompt(prompt, { browserGrant = '', appendUser = true } = {})
   if (appendUser) { appendMessage('user', text); state.history.push({ role: 'user', content: text }); state.history = state.history.slice(-16); }
   ui.prompt.value = ''; ui.send.disabled = true; ui.send.innerHTML = '<span>LINK</span><b>RUNNING</b>'; state.neuralEnergy = .95; updateVoiceVisual('processing', .92);
   window.setTimeout(() => void refreshAgentLive({ force: true }), 80);
+  let responseSettled = false; let thinkingStart = null; let responseSpeechPending = false;
+  const responsePromise = json('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: text, history: state.history.slice(0, -1), browserGrant }) })
+    .finally(() => { responseSettled = true; });
   try {
-    const result = await json('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: text, history: state.history.slice(0, -1), browserGrant }) });
+    if (state.settings?.autoSpeak !== false) {
+      await speak(COMMAND_ACKNOWLEDGEMENT).catch(() => false);
+    }
+    if (!responseSettled) thinkingStart = startThinkingSound();
+    const result = await responsePromise;
+    if (thinkingStart) await thinkingStart;
     ui.route.textContent = result.route;
     activateCoreMode(routeModes[result.route] || 'system');
     state.lastAssistant = result.content; appendMessage('assistant', result.content, result.source); state.history.push({ role: 'assistant', content: result.content }); state.history = state.history.slice(-16);
@@ -711,9 +766,11 @@ async function sendPrompt(prompt, { browserGrant = '', appendUser = true } = {})
     if (result.action?.type === 'email_draft') openEmailDraft(result.action);
     if (result.action?.type === 'browser_control_request') openBrowserControlRequest(result.action, text);
     if (result.action?.type === 'artifact_ready') openArtifact(result.action.artifact);
-    void speak(result.content);
-  } catch (error) { appendMessage('error', error.message); }
-  finally { ui.send.disabled = false; ui.send.innerHTML = '<span>RUN</span><b>EXECUTE</b>'; state.neuralEnergy = .42; if (state.voiceState !== 'speaking') updateVoiceVisual(state.voice?.active ? 'listening' : 'standby', .18); }
+    responseSpeechPending = Boolean(state.settings?.autoSpeak !== false && result.content);
+    if (responseSpeechPending) void speak(result.content, { onPlaybackStart: stopThinkingSound }).finally(stopThinkingSound);
+    else stopThinkingSound();
+  } catch (error) { stopThinkingSound(); appendMessage('error', error.message); }
+  finally { if (!responseSpeechPending) stopThinkingSound(); ui.send.disabled = false; ui.send.innerHTML = '<span>RUN</span><b>EXECUTE</b>'; state.neuralEnergy = .42; if (state.voiceState !== 'speaking') updateVoiceVisual(state.voice?.active ? 'listening' : 'standby', .18); }
 }
 
 function hideAgentLiveView() {
