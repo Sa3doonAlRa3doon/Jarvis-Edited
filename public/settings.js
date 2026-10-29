@@ -10,7 +10,7 @@ const form = $('#settings-form');
 
 const ui = {
   status: $('#settings-status'), message: $('#settings-message'), profile: $('#settings-profile'), version: $('#settings-version'), node: $('#settings-node'),
-  source: $('#source'), sourceBrowser: $('#source-browser'), sourcePi: $('#source-pi'), browserCamera: $('#browser-camera'), browserMicrophone: $('#browser-microphone'), piCamera: $('#pi-camera'), piMicrophone: $('#pi-microphone'),
+  source: $('#source'), sourceBrowser: $('#source-browser'), sourcePi: $('#source-pi'), browserCamera: $('#browser-camera'), browserMicrophone: $('#browser-microphone'), piCamera: $('#pi-camera'), piMicrophone: $('#pi-microphone'), defaultCountry: $('#default-country'), defaultLocation: $('#default-location'),
   browserDeviceCount: $('#browser-device-count'), piDeviceCount: $('#pi-device-count'), refreshDevices: $('#refresh-devices'),
   personDetection: $('#person-detection'), voiceActivity: $('#voice-activity'), wakeWord: $('#wake-word'), doubleClap: $('#double-clap'), gestureControl: $('#gesture-control'), autoSpeak: $('#auto-speak'), autoRepair: $('#auto-repair'),
   personThreshold: $('#person-threshold'), micSensitivity: $('#mic-sensitivity'), wakeSensitivity: $('#wake-sensitivity'), clapSensitivity: $('#clap-sensitivity'), gestureSensitivity: $('#gesture-sensitivity'), doubleClapWindow: $('#double-clap-window'), scanInterval: $('#scan-interval'), accent: $('#accent'),
@@ -28,6 +28,7 @@ const ui = {
 };
 
 const recommendedProfile = {
+  defaultCountry: 'AE', defaultLocation: 'Dubai',
   personDetection: true, voiceActivity: true, wakeWord: true, doubleClap: true, gestureControl: true, autoSpeak: true,
   personThreshold: 0.55, micSensitivity: 0.28, wakeSensitivity: 0.72, clapSensitivity: 0.42,
   gestureSensitivity: 0.42, doubleClapWindow: 700, scanInterval: 900, accent: '#64e8ff',
@@ -85,6 +86,7 @@ function fillSelect(select, items, placeholder, selected) {
 function currentSettings() {
   return {
     source: ui.source.value, browserCamera: normalizeDeviceId(ui.browserCamera.value), browserMicrophone: normalizeDeviceId(ui.browserMicrophone.value),
+    defaultCountry: ui.defaultCountry.value, defaultLocation: ui.defaultLocation.value.trim(),
     piCamera: ui.piCamera.value, piMicrophone: ui.piMicrophone.value,
     personDetection: ui.personDetection.checked, voiceActivity: ui.voiceActivity.checked, wakeWord: ui.wakeWord.checked,
     doubleClap: ui.doubleClap.checked, gestureControl: ui.gestureControl.checked, autoSpeak: ui.autoSpeak.checked, autoRepair: ui.autoRepair.checked,
@@ -135,7 +137,7 @@ function applySettings(settings, { saved = false, message = '' } = {}) {
   ui.voiceVocabulary.value = normalizeVocabulary(settings.voiceVocabulary ?? DEFAULT_VOICE_VOCABULARY).join(', ');
   if (settings.ttsVoice && ![...ui.ttsVoice.options].some((item) => item.value === settings.ttsVoice)) ui.ttsVoice.append(option(settings.ttsVoice, `Saved voice (currently unavailable): ${settings.ttsVoice}`));
   for (const [key, element] of [
-    ['source', ui.source], ['browserCamera', ui.browserCamera], ['browserMicrophone', ui.browserMicrophone], ['piCamera', ui.piCamera], ['piMicrophone', ui.piMicrophone],
+    ['source', ui.source], ['browserCamera', ui.browserCamera], ['browserMicrophone', ui.browserMicrophone], ['piCamera', ui.piCamera], ['piMicrophone', ui.piMicrophone], ['defaultCountry', ui.defaultCountry], ['defaultLocation', ui.defaultLocation],
     ['personThreshold', ui.personThreshold], ['micSensitivity', ui.micSensitivity], ['wakeSensitivity', ui.wakeSensitivity], ['clapSensitivity', ui.clapSensitivity],
     ['gestureSensitivity', ui.gestureSensitivity], ['doubleClapWindow', ui.doubleClapWindow], ['scanInterval', ui.scanInterval], ['accent', ui.accent],
     ['voiceLanguage', ui.voiceLanguage], ['recognitionConfidence', ui.recognitionConfidence], ['commandSilenceMs', ui.commandSilence],

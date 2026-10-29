@@ -32,6 +32,34 @@ test('normalizes a keyless weather lookup and preserves source citations', async
   assert.equal(result.citations.length, 2); assert.match(result.context, /UNTRUSTED PUBLIC API EVIDENCE/);
 });
 
+test('uses the saved country and city for location-free weather language', async () => {
+  const fetchImpl = async (url) => {
+    const value = String(url);
+    if (value.includes('geocoding-api.open-meteo.com')) {
+      assert.match(value, /name=Dubai/); assert.match(value, /countryCode=ae/);
+      return response({ results: [{ name: 'Dubai', country: 'United Arab Emirates', country_code: 'AE', latitude: 25.2, longitude: 55.3, timezone: 'Asia/Dubai' }] });
+    }
+    if (value.includes('api.open-meteo.com/v1/forecast')) return response({ timezone: 'Asia/Dubai', current: { temperature_2m: 30, relative_humidity_2m: 40, apparent_temperature: 31, is_day: 1, precipitation: 0, weather_code: 0, wind_speed_10m: 10, wind_direction_10m: 90 }, daily: { time: [], weather_code: [], temperature_2m_max: [], temperature_2m_min: [], precipitation_probability_max: [], sunrise: [], sunset: [] } });
+    throw new Error(`unexpected URL ${value}`);
+  };
+  const result = await runPublicService('What is the weather outside?', { lookup, fetchImpl, defaultLocation: 'Dubai', defaultCountry: 'AE' });
+  assert.equal(result.service, 'weather'); assert.equal(result.query, 'Dubai'); assert.equal(result.result.location.countryCode, 'AE');
+});
+
+test('keeps an explicit location ahead of the saved default', async () => {
+  const fetchImpl = async (url) => {
+    const value = String(url);
+    if (value.includes('geocoding-api.open-meteo.com')) {
+      assert.match(value, /name=London/); assert.doesNotMatch(value, /name=Dubai/);
+      return response({ results: [{ name: 'London', country: 'United Kingdom', country_code: 'GB', latitude: 51.5, longitude: -0.12, timezone: 'Europe/London' }] });
+    }
+    if (value.includes('api.open-meteo.com/v1/forecast')) return response({ timezone: 'Europe/London', current: { temperature_2m: 12, relative_humidity_2m: 70, apparent_temperature: 11, is_day: 1, precipitation: 0, weather_code: 2, wind_speed_10m: 8, wind_direction_10m: 270 }, daily: { time: [], weather_code: [], temperature_2m_max: [], temperature_2m_min: [], precipitation_probability_max: [], sunrise: [], sunset: [] } });
+    throw new Error(`unexpected URL ${value}`);
+  };
+  const result = await runPublicService('What is the weather in London?', { lookup, fetchImpl, defaultLocation: 'Dubai', defaultCountry: 'AE' });
+  assert.equal(result.query, 'London'); assert.equal(result.result.location.countryCode, 'GB');
+});
+
 test('normalizes currency conversion without accepting an API key', async () => {
   const fetchImpl = async (url) => {
     assert.match(String(url), /api\.frankfurter\.dev\/v1\/latest\?base=USD&symbols=EUR/);

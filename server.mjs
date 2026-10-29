@@ -99,6 +99,8 @@ function voiceVocabulary(value) {
 
 const defaultSettings = {
   source: 'browser', browserCamera: '', browserMicrophone: '', piCamera: '', piMicrophone: '',
+  defaultCountry: /^[A-Za-z]{2}$/.test(String(process.env.PUBLIC_API_DEFAULT_COUNTRY || 'AE').trim()) ? String(process.env.PUBLIC_API_DEFAULT_COUNTRY || 'AE').trim().toUpperCase() : 'AE',
+  defaultLocation: cleanText(process.env.PUBLIC_API_DEFAULT_LOCATION || 'Dubai', 100) || 'Dubai',
   personDetection: true, voiceActivity: true, wakeWord: true, doubleClap: true,
   autoSpeak: true, autoRepair: asBool(process.env.AUTO_REPAIR_ENABLED, process.platform === 'linux'), personThreshold: 0.55,
   micSensitivity: 0.28, wakeSensitivity: 0.72, clapSensitivity: 0.42,
@@ -117,11 +119,14 @@ function cleanBrowserDeviceId(value) {
 
 function validateSettings(input = {}) {
   const accent = /^#[0-9a-f]{6}$/i.test(String(input.accent || '')) ? String(input.accent) : defaultSettings.accent;
+  const defaultCountry = /^[A-Za-z]{2}$/.test(String(input.defaultCountry || '')) ? String(input.defaultCountry).toUpperCase() : defaultSettings.defaultCountry;
+  const defaultLocation = cleanText(input.defaultLocation, 100) || defaultSettings.defaultLocation;
   return {
     source: input.source === 'pi' ? 'pi' : 'browser',
     browserCamera: cleanBrowserDeviceId(input.browserCamera), browserMicrophone: cleanBrowserDeviceId(input.browserMicrophone),
     piCamera: /^\/dev\/video\d+$/.test(String(input.piCamera || '')) ? String(input.piCamera) : '',
     piMicrophone: /^plughw:\d+,\d+$/.test(String(input.piMicrophone || '')) ? String(input.piMicrophone) : '',
+    defaultCountry, defaultLocation,
     personDetection: input.personDetection !== false, voiceActivity: input.voiceActivity !== false,
     wakeWord: input.wakeWord !== false, doubleClap: input.doubleClap !== false,
     autoSpeak: input.autoSpeak !== false, autoRepair: input.autoRepair === true,
@@ -545,8 +550,8 @@ app.get('/api/public/catalog', (_request, response) => response.json({ keyless: 
 app.post('/api/public/query', async (request, response) => {
   const prompt = cleanText(request.body?.prompt, 1000);
   if (!prompt) { response.status(400).json({ error: 'Describe the public information to look up.' }); return; }
-  const result = await runPublicService(prompt);
-  if (!result.used) { response.status(400).json({ error: 'Try weather, air quality, a map location, local time, sunrise, exchange rates, holidays, earthquakes, ISS, a definition, Wikipedia, or crypto prices.' }); return; }
+  const result = await runPublicService(prompt, { defaultLocation: settings.defaultLocation, defaultCountry: settings.defaultCountry });
+  if (!result.used) { response.status(400).json({ error: 'Try weather, weather alerts, air quality, a map location, nearby restaurants, local time, sunrise, exchange rates, holidays, earthquakes, ISS, a definition, Wikipedia, or crypto prices.' }); return; }
   await eventStore.append('research', `Public API lookup ${result.service} completed`, { service: result.service, available: Boolean(result.result) });
   response.status(result.result ? 200 : 502).json({ ok: Boolean(result.result), service: result.service, query: result.query, result: result.result, citations: result.citations, error: result.result ? undefined : cleanText(result.context, 320) });
 });
@@ -716,7 +721,7 @@ app.post('/api/chat', async (request, response) => {
     citations.push(...google.citations);
     toolResults.push({ tool: 'google', service: google.service, ok: Boolean(google.result) });
   }
-  const publicApi = await runPublicService(prompt);
+  const publicApi = await runPublicService(prompt, { defaultLocation: settings.defaultLocation, defaultCountry: settings.defaultCountry });
   if (publicApi.used) {
     dataBlocks.push({ source: `public-api-${publicApi.service}-untrusted`, value: publicApi.result || { unavailable: true, error: cleanText(publicApi.context, 320) } });
     citations.push(...publicApi.citations);
