@@ -21,6 +21,13 @@ test('blocks localhost and private network destinations', async () => {
   await assert.rejects(() => validatePublicUrl('file:///etc/passwd', { lookup: publicLookup }), /HTTP or HTTPS/i);
 });
 
+test('bounds a stalled public DNS lookup instead of leaving website requests pending', async () => {
+  await assert.rejects(
+    () => validatePublicUrl('https://example.com/', { lookup: () => new Promise(() => {}), lookupTimeoutMs: 100 }),
+    /DNS lookup timed out/i
+  );
+});
+
 test('parses bounded RSS search results and preserves citations', async () => {
   const rss = '<?xml version="1.0"?><rss><channel><item><title>Pi update</title><link>https://example.com/pi</link><description>New local features.</description></item></channel></rss>';
   const result = await searchWeb('search the web for Pi updates', {

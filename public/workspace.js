@@ -11,7 +11,7 @@ const ui = {
   printerCameraFrame: $('#workspace-printer-camera-frame'), printerCameraPlaceholder: $('#workspace-printer-camera-placeholder'), printerCameraState: $('#workspace-printer-camera-state'), printerCameraHost: $('#workspace-printer-camera-host'), printerCameraTime: $('#workspace-printer-camera-time'),
   runStatus: $('#workspace-run-status'), taskCopy: $('#workspace-task-copy'), route: $('#workspace-route'), model: $('#workspace-model'), directiveForm: $('#workspace-directive-form'), directiveInput: $('#workspace-directive-input'), directivePlan: $('#workspace-directive-plan'), directiveRun: $('#workspace-directive-run'), directiveTalk: $('#workspace-directive-talk'), directiveStatus: $('#workspace-directive-status'), missionPlan: $('#workspace-mission-plan'), missionPlanMode: $('#workspace-mission-plan-mode'), missionPlanSummary: $('#workspace-mission-plan-summary'), missionPlanRoute: $('#workspace-mission-plan-route'), missionPlanSpecialists: $('#workspace-mission-plan-specialists'), missionPlanApprovals: $('#workspace-mission-plan-approvals'), missionPlanSteps: $('#workspace-mission-plan-steps'), missionPlanWarnings: $('#workspace-mission-plan-warnings'), eventCount: $('#workspace-event-count'), events: $('#workspace-events'), capabilityCount: $('#workspace-capability-count'), capabilityList: $('#workspace-capability-list'), analyticsWindow: $('#workspace-analytics-window'), analyticsEvents: $('#workspace-analytics-events'), analyticsWake: $('#workspace-analytics-wake'), analyticsCpu: $('#workspace-analytics-cpu'), analyticsRam: $('#workspace-analytics-ram'), analyticsServices: $('#workspace-analytics-services'), analyticsBroadcast: $('#workspace-analytics-broadcast'), analyticsNote: $('#workspace-analytics-note'), mediaState: $('#workspace-media-state'), mediaTitle: $('#workspace-media-title'), mediaQueue: $('#workspace-media-queue'), mediaHistory: $('#workspace-media-history'), mediaNote: $('#workspace-media-note'), liveDeckState: $('#workspace-live-deck-state'), liveDeckObs: $('#workspace-live-deck-obs'), liveDeckScene: $('#workspace-live-deck-scene'), liveDeckStream: $('#workspace-live-deck-stream'), liveDeckRecord: $('#workspace-live-deck-record'), liveDeckMedia: $('#workspace-live-deck-media'), liveDeckAutomation: $('#workspace-live-deck-automation'), liveDeckHealth: $('#workspace-live-deck-health'), liveDeckDropped: $('#workspace-live-deck-dropped'), liveDeckReplay: $('#workspace-live-deck-replay'), liveDeckVcam: $('#workspace-live-deck-vcam'), liveDeckNote: $('#workspace-live-deck-note'), multiDeckState: $('#workspace-multi-deck-state'), multiDeckObs: $('#workspace-multi-deck-obs'), multiDeckVoice: $('#workspace-multi-deck-voice'), multiDeckTwitch: $('#workspace-multi-deck-twitch'), multiDeckJarvis: $('#workspace-multi-deck-jarvis'), multiDeckMusic: $('#workspace-multi-deck-music'), multiDeckSocials: $('#workspace-multi-deck-socials'), multiDeckDesktop: $('#workspace-multi-deck-desktop'), multiDeckViewers: $('#workspace-multi-deck-viewers'), multiDeckChat: $('#workspace-multi-deck-chat'), multiDeckBitrate: $('#workspace-multi-deck-bitrate'), multiDeckNowPlaying: $('#workspace-multi-deck-now-playing'), multiDeckAutomations: $('#workspace-multi-deck-automations'), multiDeckAgents: $('#workspace-multi-deck-agents'), multiDeckNote: $('#workspace-multi-deck-note')
 };
-const state = { frameVersion: 0, live: null, printer: null, startedAt: 0, screenStream: null, screenRequest: 0, screenBusy: false, previewBusy: false, previewAutoBusy: false, previewRefreshQueued: false, previewRequest: 0, previewRefreshTimer: 0, directiveBusy: false, planBusy: false, talkBusy: false, lastDirectiveText: '', compactView: false, focusView: false, screenRetryTimer: 0, screenRetryCountdownTimer: 0, screenRetryDueAt: 0, screenRetryable: false, screenRetryRequested: false, screenRetryAttempts: 0, cameraTimer: 0, printerCameraAt: 0, printerCameraDiscoveryStarted: false, printerCameraDiscoveryTimer: 0, printerCameraDiscoveryBusy: false, camera: { settings: null, devices: [], available: false }, printerCamera: { configured: false } };
+const state = { frameVersion: 0, live: null, printer: null, startedAt: 0, screenStream: null, screenRequest: 0, screenBusy: false, previewBusy: false, previewAutoBusy: false, previewRefreshQueued: false, previewRequest: 0, previewRefreshTimer: 0, hostBrowserRequestId: 0, hostBrowserStatusRenderedAt: '', directiveBusy: false, planBusy: false, talkBusy: false, lastDirectiveText: '', compactView: false, focusView: false, screenRetryTimer: 0, screenRetryCountdownTimer: 0, screenRetryDueAt: 0, screenRetryable: false, screenRetryRequested: false, screenRetryAttempts: 0, cameraTimer: 0, printerCameraAt: 0, printerCameraDiscoveryStarted: false, printerCameraDiscoveryTimer: 0, printerCameraDiscoveryBusy: false, camera: { settings: null, devices: [], available: false }, printerCamera: { configured: false } };
 const SCREEN_RETRY_DELAY_MS = 20_000;
 const PREVIEW_REFRESH_INTERVAL_MS = 45_000;
 const PRINTER_CAMERA_DISCOVERY_RETRY_MS = 30_000;
@@ -343,6 +343,8 @@ async function openWorkspaceWebsite(event) {
   event?.preventDefault();
   const prompt = websitePrompt(ui.websiteInput?.value);
   if (!prompt) { text(ui.websiteStatus, 'Enter a public URL or a supported site alias first.'); ui.websiteInput?.focus(); return; }
+  state.hostBrowserRequestId = 0;
+  state.hostBrowserStatusRenderedAt = '';
   // A previous short-lived preview may already have an auto-refresh timer.
   // Cancel that timer before a new navigation so it cannot disable the fresh
   // preview button or race the new Camoufox page while the user is opening it.
@@ -352,18 +354,19 @@ async function openWorkspaceWebsite(event) {
   state.previewRefreshQueued = false;
   if (ui.websiteRefresh) { ui.websiteRefresh.textContent = 'REFRESH PREVIEW'; ui.websiteRefresh.disabled = !(state.live?.viewKind === 'browser-preview' && Boolean(state.live?.previewUrl)); }
   if (ui.websiteOpen) { ui.websiteOpen.disabled = true; ui.websiteOpen.textContent = 'OPENING…'; }
-  text(ui.websiteStatus, 'Validating public URL // launching isolated profile…');
+  text(ui.websiteStatus, 'VALIDATING PUBLIC URL // PREPARING PRIVATE PREVIEW…');
   try {
     const response = await (window.jarvisFetch || fetch)('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }) });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
     const opened = payload.action?.type === 'open_url';
     text(ui.websiteStatus, opened
-      ? `OPENED ${new URL(payload.action.url).hostname} // press SHARE YOUR SCREEN to watch it here`
+      ? `CAMOUFOX STARTING // ${new URL(payload.action.url).hostname.toUpperCase()} // ${payload.action.preview === 'ready-read-only' ? 'PREVIEW READY' : 'PREVIEW UNAVAILABLE'}`
       : String(payload.content || 'The browser did not return an open confirmation.').slice(0, 240));
     if (opened) {
-      text(ui.placeholderTitle, 'WEBSITE READY TO SHARE');
-      text(ui.placeholderCopy, 'The isolated JARVIS browser opened the public page. Press SHARE YOUR SCREEN to select that window or display, then use EXPLAIN VIEW for one local snapshot.');
+      state.hostBrowserRequestId = Number(payload.action.hostBrowserRequestId) || 0;
+      text(ui.placeholderTitle, 'PRIVATE WEBSITE PREVIEW');
+      text(ui.placeholderCopy, 'The read-only page snapshot appears here. The dedicated Camoufox window opens separately; its live status will appear above. SHARE YOUR SCREEN is only needed for a continuous display stream.');
       // The navigation and the short-lived screenshot use separate bounded
       // operations. If the first capture loses a Camoufox slot or times out,
       // make one explicit read-only retry so the own-screen preview can still
@@ -536,6 +539,13 @@ async function talkWorkspaceDirective() {
 }
 function renderLive(live) {
   state.live = live; const visible = Boolean(live?.visible); const active = Boolean(live?.active); const preview = live?.viewKind === 'browser-preview';
+  const hostBrowser = live?.hostBrowser;
+  if (state.hostBrowserRequestId && Number(hostBrowser?.requestId) === state.hostBrowserRequestId && ['open', 'error'].includes(hostBrowser?.state) && hostBrowser.updatedAt && hostBrowser.updatedAt !== state.hostBrowserStatusRenderedAt) {
+    state.hostBrowserStatusRenderedAt = hostBrowser.updatedAt;
+    text(ui.websiteStatus, hostBrowser.state === 'open'
+      ? `CAMOUFOX OPENED ${String(hostBrowser.host || '').toUpperCase()}${hostBrowser.title ? ` // ${hostBrowser.title}` : ''}`
+      : `CAMOUFOX OPEN FAILED // ${hostBrowser.error || 'check the local browser log'}`);
+  }
   const phase = String(live?.phase || 'standby').replaceAll('-', ' ').toUpperCase();
   text(ui.phase, preview ? 'BROWSER PREVIEW' : phase); text(ui.tool, preview ? 'READ-ONLY PREVIEW' : live?.tool || '—'); text(ui.screenState, visible ? (live.frameAvailable ? (preview ? 'BROWSER PREVIEW' : 'LIVE FRAME') : phase) : active ? phase : 'ARMED');
   text(ui.route, live?.route || 'GENERAL');

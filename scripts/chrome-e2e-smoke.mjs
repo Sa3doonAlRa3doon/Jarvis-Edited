@@ -557,11 +557,16 @@ try {
     const input = page.locator('#workspace-website-input');
     const form = page.locator('#workspace-website-form');
     await input.fill('https://example.com');
+    const chatResponsePromise = page.waitForResponse((response) => {
+      try { return new URL(response.url()).pathname === '/api/chat' && response.request().method() === 'POST'; } catch { return false; }
+    });
     await form.evaluate((node) => node.requestSubmit());
-    // The isolated Camoufox launch may wait behind a just-closed gesture or
-    // voice context on Windows. Keep the assertion bounded, but allow the
-    // dedicated profile its normal cold-start window.
-    await page.waitForFunction(() => /OPENED example\.com/i.test(document.querySelector('#workspace-website-status')?.textContent || ''), null, { timeout: 90_000 });
+    const chatResponse = await chatResponsePromise;
+    const chatPayload = await chatResponse.json();
+    const hostBrowserRequestId = Number(chatPayload.action?.hostBrowserRequestId) || 0;
+    assert(hostBrowserRequestId > 0, JSON.stringify(chatPayload.action || {}));
+    await page.waitForFunction(() => /CAMOUFOX STARTING|CAMOUFOX OPENED/i.test(document.querySelector('#workspace-website-status')?.textContent || ''), null, { timeout: 30_000 });
+    await page.waitForFunction(() => /CAMOUFOX OPENED EXAMPLE\.COM/i.test(document.querySelector('#workspace-website-status')?.textContent || ''), null, { timeout: 45_000, polling: 500 });
     await page.waitForFunction(async () => {
       const response = await fetch('/api/agent/live', { cache: 'no-store' });
       if (!response.ok) return false;

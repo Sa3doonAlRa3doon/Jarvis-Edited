@@ -107,3 +107,17 @@ test('public preview completion wins over a lingering browser-control state', ()
   assert.equal(status.tool, '');
   assert.equal(status.frameAvailable, true);
 });
+
+test('reports dedicated browser startup and completion without accepting stale opens', () => {
+  const bridge = new OpenJarvisLiveBridge({ baseUrl: 'http://127.0.0.1:8000' });
+  const first = bridge.noteHostBrowserOpening('https://example.com/');
+  assert.equal(bridge.status().hostBrowser.state, 'starting');
+  assert.equal(bridge.status().hostBrowser.host, 'example.com');
+  const second = bridge.noteHostBrowserOpening('https://example.org/');
+  assert.equal(bridge.noteHostBrowserOpened(first, { url: 'https://example.com/', pageTitle: 'Stale' }), false);
+  assert.equal(bridge.noteHostBrowserOpened(second, { url: 'https://example.org/', pageTitle: 'Example Org' }), true);
+  assert.deepEqual(bridge.status().hostBrowser, {
+    requestId: second, state: 'open', host: 'example.org', title: 'Example Org', error: '', updatedAt: bridge.status().hostBrowser.updatedAt
+  });
+  assert.equal(bridge.noteHostBrowserFailed(second, 'late failure'), false);
+});

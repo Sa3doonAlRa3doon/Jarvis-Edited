@@ -152,6 +152,7 @@ assert.match(await read('.env.example'), /OLLAMA_MAX_LOADED_MODELS=1/);
 assert.match(await read('.env.example'), /MULTI_PURPOSE_OLLAMA_TIMEOUT_MS=18000/);
 assert.match(await read('.env.example'), /JARVIS_BROWSER_PREVIEW_ENABLED=true/);
 assert.match(await read('.env.example'), /JARVIS_BROWSER_PREVIEW_TIMEOUT_MS=12000/);
+assert.match(await read('.env.example'), /JARVIS_CAMOUFOX_START_TIMEOUT_MS=12000/);
 assert.match(await read('.env.example'), /JARVIS_BROWSER_ENGINE=camoufox/);
 assert.match(server, /multiPurposeOllamaTimeoutMs/);
 assert.match(await read('install-pi.sh'), /OLLAMA_MAX_LOADED_MODELS=1/);

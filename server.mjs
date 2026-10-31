@@ -39,7 +39,7 @@ import { publicServiceCatalog, runPublicService } from './lib/public-services.mj
 import { summarizePublicResult } from './lib/public-response.mjs';
 import { normalizeResponseLength, normalizeResponseStyle, responseStyleInstruction } from './lib/response-style.mjs';
 import { buildReadOnlyFallback } from './lib/read-only-fallback.mjs';
-import { isWebResearchPrompt, openWebsiteOnHost, searchWeb, websiteFromPrompt } from './lib/web-tools.mjs';
+import { isWebResearchPrompt, openWebsiteOnHost, searchWeb, validatePublicUrl, websiteFromPrompt } from './lib/web-tools.mjs';
 import { buildMissionPlan } from './lib/mission-planner.mjs';
 import { boundedTtsHttpStatus, isRetryableTtsStatus, ttsFailureMessage, ttsRetryDelayMs } from './lib/tts-resilience.mjs';
 import { buildStatsDeck, summarizeStatsDeck, summarizeVoiceDiagnostics } from './lib/stats-deck.mjs';
@@ -1703,18 +1703,17 @@ app.post('/api/chat', async (request, response) => {
   if (website && !browserGrant) {
     openJarvisLive.noteLocalControl('browser_navigate');
     try {
-      const opened = await openWebsiteOnHost(website);
-      await eventStore.append('browser', 'Explicit website open requested', { host: new URL(opened.url).hostname });
-      // Await the bounded, read-only preview before completing the request. The
-      // old fire-and-forget callback could race the final live-state update:
-      // the page had opened, but the workspace still saw an empty agent frame
-      // and the browser smoke test reported a false failure. The preview is
-      // capped by browserPreviewTimeoutMs, and a failed capture still leaves
-      // the dedicated Camoufox page open with a truthful unavailable status.
+      const safeUrl = await validatePublicUrl(website);
+      const host = new URL(safeUrl.href).hostname;
+      await eventStore.append('browser', 'Explicit public website open requested', { host });
+      // Capture the isolated read-only frame first, then start the persistent
+      // host window without holding the chat request open. A stuck desktop
+      // process must not make JARVIS appear to ignore the user; the live API
+      // reports the host window's real starting/open/error state separately.
       let previewReady = false;
       if (browserPreviewEnabled) {
         try {
-          const preview = await capturePublicBrowserPreview(opened.url, { timeoutMs: browserPreviewTimeoutMs });
+          const preview = await capturePublicBrowserPreview(safeUrl.href, { timeoutMs: browserPreviewTimeoutMs });
           if (openJarvisLive.noteBrowserPreview(preview, { url: preview.url, title: preview.title })) {
             previewReady = true;
             await eventStore.append('browser', 'Private browser preview captured', { host: new URL(preview.url).hostname, title: preview.title || 'untitled', readOnly: true });
@@ -1723,8 +1722,22 @@ app.post('/api/chat', async (request, response) => {
           await eventStore.append('alert', 'Private browser preview unavailable', { error: cleanText(error.message, 220) });
         }
       }
-      response.json({ content: `Opening ${new URL(opened.url).hostname} in JARVIS's Camoufox browser profile. ${previewReady ? 'A short-lived read-only preview is ready in the workspace.' : 'The dedicated page is open, but its read-only preview is unavailable right now.'} Press SHARE YOUR SCREEN only if you want a continuous local display stream.`, route: 'GENERAL', agent: agentRoles.GENERAL.name, model: models.GENERAL, source: 'local-browser-tool', action: { type: 'open_url', url: opened.url, engine: opened.engine || camoufoxEngine(), scheduled: true, isolated: Boolean(opened.isolated), preview: browserPreviewEnabled ? (previewReady ? 'ready-read-only' : 'unavailable') : 'disabled', workspace: '/workspace' } });
+      const hostBrowserRequestId = openJarvisLive.noteHostBrowserOpening(safeUrl.href);
+      void (async () => {
+        try {
+          const opened = await openWebsiteOnHost(safeUrl.href);
+          if (openJarvisLive.noteHostBrowserOpened(hostBrowserRequestId, opened)) {
+            void eventStore.append('browser', 'Dedicated Camoufox website opened', { host: new URL(opened.url).hostname, title: opened.pageTitle || 'untitled' }).catch(() => {});
+          }
+        } catch (error) {
+          const detail = cleanText(error?.message || 'Camoufox could not open this page.', 220);
+          if (openJarvisLive.noteHostBrowserFailed(hostBrowserRequestId, detail)) {
+            await eventStore.append('alert', 'Dedicated Camoufox website failed to open', { host, error: detail }).catch(() => {});
+          }
+        }
+      })();
       openJarvisLive.noteRequestEnd(true);
+      response.json({ content: `Preparing ${host} in JARVIS's isolated Camoufox browser. ${previewReady ? 'A short-lived read-only preview is ready in the workspace.' : 'The read-only preview could not be captured this time.'} The dedicated browser window is starting in the background; its status will update in the workspace.`, route: 'GENERAL', agent: agentRoles.GENERAL.name, model: models.GENERAL, source: 'local-browser-tool', action: { type: 'open_url', url: safeUrl.href, engine: camoufoxEngine(), scheduled: true, isolated: true, hostBrowser: 'starting', hostBrowserRequestId, preview: browserPreviewEnabled ? (previewReady ? 'ready-read-only' : 'unavailable') : 'disabled', workspace: '/workspace' } });
     } catch (error) { openJarvisLive.noteRequestEnd(false); response.status(400).json({ error: cleanText(error.message, 260) }); }
     return;
   }

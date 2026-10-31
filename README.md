@@ -18,11 +18,15 @@
   approval and transient frame rules remain unchanged for interactive browser
   work.
 - **Configuration** — `JARVIS_BROWSER_PREVIEW_ENABLED=true`,
-  `JARVIS_BROWSER_PREVIEW_TIMEOUT_MS=12000`, and
+  `JARVIS_BROWSER_PREVIEW_TIMEOUT_MS=12000`,
+  `JARVIS_CAMOUFOX_START_TIMEOUT_MS=12000`, and
   `JARVIS_BROWSER_PREVIEW_HEADLESS=true` are documented in `.env.example`.
-  The isolated read-only screenshot is headless by default to avoid hidden
-  headful-window startup races; the approved host Camoufox profile remains
-  separate for interactive control and local screen sharing.
+  DNS, headless-preview startup, and persistent host-browser startup are
+  bounded. The public read-only preview is returned before the dedicated host
+  window finishes loading, and `/api/agent/live` reports whether that window
+  is starting, open, or failed. The isolated screenshot is headless by default;
+  the approved host Camoufox profile remains separate for interactive control
+  and local screen sharing.
 - **Profile reuse** — public navigation opens a new tab in JARVIS's dedicated
   browser profile when that profile is already running, instead of spawning a
   detached window for every request. The personal browser profile is never
