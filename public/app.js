@@ -862,7 +862,10 @@ async function speak(text, { pendingContext = null, onPlaybackStart = null, fish
       document.body.dataset.ttsVoice = state.config.fishVoiceId || 'unconfigured';
       document.body.dataset.ttsState = 'requesting';
       try {
-        const result = await requestFishSpeech(text, { timeoutMs: fishTimeoutMs || (pendingContext?.kind === 'wake' ? FISH_TTS_WAKE_TIMEOUT_MS : FISH_TTS_REPLY_TIMEOUT_MS) });
+        const configuredTimeout = pendingContext?.kind === 'wake'
+          ? Number(state.config?.fishWakeTimeoutMs) || FISH_TTS_WAKE_TIMEOUT_MS
+          : Number(state.config?.fishReplyTimeoutMs) || FISH_TTS_REPLY_TIMEOUT_MS;
+        const result = await requestFishSpeech(text, { timeoutMs: fishTimeoutMs || configuredTimeout });
         onPlaybackStart?.();
         document.body.dataset.ttsState = 'playing';
         if (state.voice?.playAudio) await state.voice.playAudio(result.bytes, Number(state.settings?.ttsVolume ?? 1));
@@ -970,7 +973,8 @@ async function handleWake(event) {
   ui.wakeState.textContent = event?.detail?.kind === 'double_clap' ? 'CLAP' : event?.detail?.kind === 'push_to_talk' ? 'PTT' : 'HEARD'; state.neuralEnergy = 1;
   updateVoiceVisual('armed', 1);
   const context = { kind: 'wake', session, command: initialCommand };
-  const played = isEmbeddedPreview() || !state.settings?.wakeResponse ? true : await speak(state.settings.wakeResponse, { pendingContext: context, fishTimeoutMs: FISH_TTS_WAKE_TIMEOUT_MS });
+  const wakeTimeout = Number(state.config?.fishWakeTimeoutMs) || FISH_TTS_WAKE_TIMEOUT_MS;
+  const played = isEmbeddedPreview() || !state.settings?.wakeResponse ? true : await speak(state.settings.wakeResponse, { pendingContext: context, fishTimeoutMs: wakeTimeout });
   if (session !== state.wakeSession || !state.voiceCapture.active) return;
   if (!played && document.body.dataset.ttsState === 'blocked') {
     ui.voiceCaptureState.textContent = 'TAP TO ENABLE AUDIO'; ui.voiceCaptureTranscript.textContent = 'Tap anywhere once. JARVIS will reply, then begin listening.';

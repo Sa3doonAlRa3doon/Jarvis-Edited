@@ -956,9 +956,13 @@ try {
       return { http: response.status, body, note: document.querySelector('#tts-provider-note')?.textContent?.trim() || '' };
     });
     const retry = policy.body.fishRetryPolicy || {};
+    const wakeTimeoutMs = Number(policy.body.fishWakeTimeoutMs);
+    const replyTimeoutMs = Number(policy.body.fishReplyTimeoutMs);
     assert(policy.http === 200 && Number(retry.maxAttempts) === 2 && Number(retry.backoffMs) === 350 && Array.isArray(retry.retryableStatusCodes) && retry.retryableStatusCodes.join(',') === '500,502,503,504', JSON.stringify(policy));
+    assert(Number.isFinite(wakeTimeoutMs) && wakeTimeoutMs >= 4_000 && wakeTimeoutMs <= 60_000 && Number.isFinite(replyTimeoutMs) && replyTimeoutMs >= 5_000 && replyTimeoutMs <= 120_000, `Fish Audio timeout bounds missing: ${JSON.stringify(policy.body)}`);
     assert(/retry/i.test(policy.note), `Fish Audio retry policy missing from Settings: ${policy.note}`);
-    return { maxAttempts: retry.maxAttempts, backoffMs: retry.backoffMs, retryableStatusCodes: retry.retryableStatusCodes, note: policy.note.slice(0, 180) };
+    assert(/Wake ack <=\d+s/i.test(policy.note), `Fish Audio wake deadline missing from Settings: ${policy.note}`);
+    return { maxAttempts: retry.maxAttempts, backoffMs: retry.backoffMs, retryableStatusCodes: retry.retryableStatusCodes, wakeTimeoutMs, replyTimeoutMs, note: policy.note.slice(0, 180) };
   });
 
   await check('Settings sees the selected browser devices', async () => {

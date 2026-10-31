@@ -44,7 +44,7 @@ const state = {
   testRecognition: null, testRecognitionStream: null, testRecognitionPending: false, testRecognitionTimer: 0, speechCheck: 0, noiseFloor: .008, noiseFloorBaseline: .008, lastNoiseFloor: .008, lastSignalToNoiseDb: 18, voiceDiagnosticsFresh: false, lastAudioLevel: 0,
   voiceEvidenceActive: false, voiceCandidateSince: 0, voiceQuietSince: 0, voiceEvidenceEpoch: 0,
   screenStream: null, screenRequest: 0, screenBusy: false, screenRetryTimer: 0, screenRetryCountdownTimer: 0, screenRetryDueAt: 0, screenRetryable: false, screenRetryRequested: false, screenRetryAttempts: 0, routines: [], notes: [], reminders: [],
-  config: { ttsMode: 'local', fishVoiceId: '', fishConfigured: false, fishRetryPolicy: { maxAttempts: 2, retryableStatusCodes: [500, 502, 503, 504], backoffMs: 350 }, allowBrowserTtsFallback: false, visionModel: '', visionConfigured: false }
+  config: { ttsMode: 'local', fishVoiceId: '', fishConfigured: false, fishRetryPolicy: { maxAttempts: 2, retryableStatusCodes: [500, 502, 503, 504], backoffMs: 350 }, fishReplyTimeoutMs: 30_000, fishWakeTimeoutMs: 12_000, allowBrowserTtsFallback: false, visionModel: '', visionConfigured: false }
 };
 const SCREEN_RETRY_DELAY_MS = 20_000;
 
@@ -1496,9 +1496,12 @@ async function init() {
     if (config.ttsMode === 'fish') {
       const retry = config.fishRetryPolicy || {};
       const retryNote = `Transient ${Number(retry.maxAttempts || 2) - 1}x retry // ${Number(retry.backoffMs || 350)} ms`;
+      const wakeSeconds = Math.max(1, Math.round(Number(config.fishWakeTimeoutMs || 12_000) / 1000));
+      const replySeconds = Math.max(1, Math.round(Number(config.fishReplyTimeoutMs || 30_000) / 1000));
+      const timingNote = `Wake ack <=${wakeSeconds}s // normal reply <=${replySeconds}s`;
       ui.ttsProviderNote.textContent = config.fishConfigured
-        ? `Locked: Fish Audio ${config.fishVoiceId} // ${config.fishModel}. ${retryNote}. Browser voice substitution is ${config.allowBrowserTtsFallback ? 'enabled' : 'disabled'}.`
-        : `Fish Audio ${config.fishVoiceId} is selected, but FISH_AUDIO_API_KEY is not configured. ${retryNote}. JARVIS will stay silent instead of changing voices.`;
+        ? `Locked: Fish Audio ${config.fishVoiceId} // ${config.fishModel}. ${retryNote}. ${timingNote}. Browser voice substitution is ${config.allowBrowserTtsFallback ? 'enabled' : 'disabled'}.`
+        : `Fish Audio ${config.fishVoiceId} is selected, but FISH_AUDIO_API_KEY is not configured. ${retryNote}. ${timingNote}. JARVIS will stay silent instead of changing voices.`;
     }
     loadSpeechVoices(settings.ttsVoice || '');
     state.savedSettings = { ...settings };
