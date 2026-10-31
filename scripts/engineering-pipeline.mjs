@@ -23,7 +23,7 @@ function parseArgs(argv) {
   return args;
 }
 
-function runFixedCommand(spec, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+export function runFixedCommand(spec, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   return new Promise((resolve) => {
     // Windows cannot spawn a .cmd file with shell:false (Node reports EINVAL).
     // Invoke npm's bundled CLI through the current Node executable instead; the
@@ -45,10 +45,22 @@ function runFixedCommand(spec, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
     let output = ''; let timedOut = false; let settled = false;
     const append = (chunk) => { output = `${output}${String(chunk || '')}`.slice(-PIPELINE_MAX_OUTPUT_LENGTH); };
     child.stdout?.on('data', append); child.stderr?.on('data', append);
+    let timeoutKiller = null;
     const timer = setTimeout(() => {
       timedOut = true;
-      try { child.kill('SIGTERM'); } catch {}
-      if (process.platform === 'win32') try { child.kill(); } catch {}
+      // On Windows, killing the npm Node process alone leaves cmd/Camoufox
+      // descendants alive. That used to leave the Architect pipeline waiting
+      // forever after its bounded timeout. Terminate the whole process tree,
+      // then resolve even if a descendant has already lost its parent handle.
+      if (process.platform === 'win32' && child.pid) {
+        timeoutKiller = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+        timeoutKiller.once('close', () => finish(1, 'TIMEOUT'));
+        setTimeout(() => finish(1, 'TIMEOUT'), 1_000).unref?.();
+      } else {
+        try { child.kill('SIGTERM'); } catch {}
+        setTimeout(() => { try { child.kill('SIGKILL'); } catch {} }, 750).unref?.();
+        finish(1, 'TIMEOUT');
+      }
     }, timeoutMs);
     const finish = (exitCode, signal = null) => {
       if (settled) return; settled = true; clearTimeout(timer);

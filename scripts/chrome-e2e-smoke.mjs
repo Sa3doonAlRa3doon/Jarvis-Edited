@@ -1096,10 +1096,12 @@ try {
   observations.pageErrors = pageErrors;
   const passed = checks.filter((item) => item.ok).length;
   const failed = checks.length - passed;
-const failures = checks.filter((item) => !item.ok).map((item) => ({ name: item.name, error: item.error }));
-console.log(`CAMOUFOX SUMMARY // passed=${passed} failed=${failed} pageErrors=${pageErrors.length}`);
-if (failures.length || pageErrors.length) console.error(`CAMOUFOX FAILURES // ${JSON.stringify({ failures, pageErrors })}`);
+  const failures = checks.filter((item) => !item.ok).map((item) => ({ name: item.name, error: item.error }));
   console.log(JSON.stringify({ camoufox: true, baseUrl, checks, observations, summary: { passed, failed, pageErrors: pageErrors.length } }, null, 2));
+  // Keep a compact verdict after the large JSON payload so the bounded
+  // Architect/CRITIC evidence tail always retains the failing check names.
+  console.log(`CAMOUFOX SUMMARY // passed=${passed} failed=${failed} pageErrors=${pageErrors.length}`);
+  if (failures.length || pageErrors.length) console.error(`CAMOUFOX FAILURES // ${JSON.stringify({ failures, pageErrors })}`);
   process.exitCode = failed || pageErrors.length ? 1 : 0;
 } finally {
   await browser.close();

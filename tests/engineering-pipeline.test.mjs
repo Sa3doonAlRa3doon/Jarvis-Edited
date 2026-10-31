@@ -6,7 +6,7 @@ import {
   finishPipelineRun, normalizePipelineRequest, profileCommands, redactSecrets, safeWorkspacePath,
   validatePatch
 } from '../lib/engineering-pipeline.mjs';
-import { runEngineeringPipeline } from '../scripts/engineering-pipeline.mjs';
+import { runEngineeringPipeline, runFixedCommand } from '../scripts/engineering-pipeline.mjs';
 
 const projectRoot = path.resolve(process.cwd());
 
@@ -88,4 +88,17 @@ test('engineering pipeline retries the same bounded recipe and records the debug
   assert.match(report.roles.DEBUGGER.note, /later bounded retry passed/);
   assert.deepEqual(calls.map((item) => item.attempt), [1, 2]);
   assert.ok(updates.some((update) => update.status === 'retrying'));
+});
+
+test('fixed pipeline commands terminate a Windows process tree after timeout', async () => {
+  if (process.platform !== 'win32') return;
+  const startedAt = Date.now();
+  const result = await runFixedCommand({
+    name: 'intentional timeout fixture',
+    command: process.execPath,
+    args: ['-e', 'setInterval(() => {}, 60_000)']
+  }, { timeoutMs: 200 });
+  assert.equal(result.timedOut, true);
+  assert.equal(result.exitCode, 1);
+  assert.ok(Date.now() - startedAt < 5_000, `timeout fixture took ${Date.now() - startedAt}ms`);
 });
