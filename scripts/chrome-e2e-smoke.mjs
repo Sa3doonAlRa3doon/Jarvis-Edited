@@ -51,6 +51,13 @@ async function closeBounded(resource, timeoutMs = 3_000) {
   ]);
 }
 
+async function settleCaptureDevice() {
+  // Firefox/Camoufox can release a synthetic capture device one event-loop
+  // turn after context.close() resolves. Give the next isolated process a
+  // short deterministic hand-off window instead of racing the old track.
+  await new Promise((resolve) => setTimeout(resolve, 350));
+}
+
 async function launchSmokeBrowser() {
   return Camoufox(browserOptions);
 }
@@ -87,7 +94,7 @@ async function releaseDashboardMedia(page) {
 // close the isolated probe page, and retry the same real browser operation in
 // a fresh document. Production media behavior is unchanged; a genuine device
 // or permission failure still bubbles out on the final bounded attempt.
-async function probeBrowserMedia(browser, baseUrl) {
+async function probeBrowserMedia(browser, baseUrl, authCookies = []) {
   let lastError;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     // Use a fresh context for every attempt. Firefox can invalidate the
@@ -97,7 +104,10 @@ async function probeBrowserMedia(browser, baseUrl) {
     // device can outlive a stopped stream across contexts in the same process;
     // that is a harness lifecycle race, not a dashboard failure.
     const probeBrowser = await launchSmokeBrowser();
-    const mediaContext = await probeBrowser.newContext({ viewport: { width: 1440, height: 900 } });
+    const mediaContext = await probeBrowser.newContext({
+      viewport: { width: 1440, height: 900 },
+      ...(authCookies.length ? { storageState: { cookies: authCookies, origins: [] } } : {})
+    });
     const mediaPage = await mediaContext.newPage();
     mediaPage.setDefaultTimeout(12_000);
     try {
@@ -130,6 +140,7 @@ async function probeBrowserMedia(browser, baseUrl) {
     } finally {
       await closeBounded(mediaContext);
       await closeBounded(probeBrowser, 5_000);
+      await settleCaptureDevice();
     }
   }
   throw lastError || new Error('The browser media probe failed.');
@@ -175,6 +186,7 @@ async function check(name, operation) {
 
 const browser = await launchSmokeBrowser();
 let context;
+let authCookies = [];
 try {
   context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   context.setDefaultTimeout(12_000);
@@ -190,8 +202,15 @@ try {
     await dialog.locator('input').fill(String(process.env.DASHBOARD_ACCESS_PIN || ''));
     await dialog.locator('button[type="submit"]').click({ force: true });
     await dialog.waitFor({ state: 'detached' });
+    authCookies = await context.cookies().catch(() => []);
     return 'authenticated through the visible Camoufox dialog';
   });
+
+  // Fresh browser processes are intentional for fake-device isolation, but
+  // they must not submit the PIN again. Reuse the short-lived authenticated
+  // dashboard cookie in those contexts so bounded retries cannot trip the
+  // server's login rate limiter.
+  if (!authCookies.length) authCookies = await context.cookies().catch(() => []);
 
   await check('Command screen core DOM', async () => {
     await page.locator('#brain-canvas').waitFor({ state: 'visible' });
@@ -246,7 +265,7 @@ try {
     // The command-screen checks intentionally open and close voice sessions.
     // Probe hardware in a separate authenticated document so a Firefox media
     // object from the interactive page cannot invalidate the next capture.
-    const media = await probeBrowserMedia(browser, baseUrl);
+    const media = await probeBrowserMedia(browser, baseUrl, authCookies);
     assert(media.audioInputs > 0 && media.videoInputs > 0, `missing device ${JSON.stringify(media)}`);
     assert(media.tracks.every((track) => track.readyState === 'live' && track.labeled), `tracks were not live ${JSON.stringify(media)}`);
     observations.media = media;
@@ -404,7 +423,10 @@ try {
     // retain a stopped fake video device across contexts in the same process,
     // which made an otherwise healthy gesture controller appear disabled.
     const gestureBrowser = await launchSmokeBrowser();
-    const gestureContext = await gestureBrowser.newContext({ viewport: { width: 1440, height: 900 } });
+    const gestureContext = await gestureBrowser.newContext({
+      viewport: { width: 1440, height: 900 },
+      ...(authCookies.length ? { storageState: { cookies: authCookies, origins: [] } } : {})
+    });
     const gesturePage = await gestureContext.newPage();
     gesturePage.setDefaultTimeout(12_000);
     try {
@@ -418,9 +440,9 @@ try {
       await gesturePage.locator('#brain-canvas').waitFor({ state: 'visible', timeout: 15_000 });
       await releaseDashboardMedia(gesturePage);
       const button = gesturePage.locator('#gesture-button');
-      await gesturePage.waitForFunction(() => !document.querySelector('#gesture-button')?.disabled, null, { timeout: 30_000 });
+      await gesturePage.waitForFunction(() => !document.querySelector('#gesture-button')?.disabled, null, { timeout: 60_000 });
       if (!await button.evaluate((node) => node.classList.contains('active'))) await button.evaluate((node) => node.click());
-      await gesturePage.waitForFunction(() => document.querySelector('#gesture-button')?.classList.contains('active') && !document.querySelector('#gesture-button')?.disabled, null, { timeout: 30_000 });
+      await gesturePage.waitForFunction(() => document.querySelector('#gesture-button')?.classList.contains('active') && !document.querySelector('#gesture-button')?.disabled, null, { timeout: 60_000 });
       await gesturePage.waitForTimeout(5000);
       assert(await button.evaluate((node) => node.classList.contains('active')), 'gesture link did not become active');
       await gesturePage.waitForFunction(() => document.querySelector('#gesture-button')?.classList.contains('active') && !document.querySelector('#gesture-button')?.disabled, null, { timeout: 30_000 });
@@ -432,6 +454,7 @@ try {
     } finally {
       await closeBounded(gestureContext);
       await closeBounded(gestureBrowser, 5_000);
+      await settleCaptureDevice();
     }
   });
 
@@ -726,7 +749,10 @@ try {
     // page has changed views; the new document still exercises the real UI
     // toggle without inheriting that stale object.
     const screenBrowser = await launchSmokeBrowser();
-    const screenContext = await screenBrowser.newContext({ viewport: { width: 1440, height: 900 } });
+    const screenContext = await screenBrowser.newContext({
+      viewport: { width: 1440, height: 900 },
+      ...(authCookies.length ? { storageState: { cookies: authCookies, origins: [] } } : {})
+    });
     const screenPage = await screenContext.newPage();
     screenPage.setDefaultTimeout(12_000);
     try {
@@ -742,16 +768,27 @@ try {
       await evaluateWithRetry(screenPage, async () => {
         const mediaDevices = navigator.mediaDevices;
         const originalOwnDescriptor = Object.getOwnPropertyDescriptor(mediaDevices, 'getDisplayMedia');
-        let stream;
-        let lastError;
-        for (let attempt = 0; attempt < 3 && !stream; attempt += 1) {
-          try { stream = await mediaDevices.getUserMedia({ video: true, audio: false }); }
-          catch (error) { lastError = error; await new Promise((resolve) => setTimeout(resolve, 220)); }
-        }
-        if (!stream) throw lastError || new Error('camera stream could not be opened');
-        Object.defineProperty(mediaDevices, 'getDisplayMedia', { configurable: true, writable: true, value: async () => stream });
-        window.__jarvisScreenSmoke = { stream, originalOwnDescriptor };
-        return { ready: true, track: stream.getVideoTracks()[0]?.readyState || 'missing' };
+        // Defer the synthetic camera open until the real UI click calls
+        // getDisplayMedia. Keeping the MediaStream out of the evaluation
+        // return value avoids Firefox remote-object invalidation after a
+        // previous fake track was released.
+        Object.defineProperty(mediaDevices, 'getDisplayMedia', {
+          configurable: true,
+          writable: true,
+          value: async () => {
+            let stream;
+            let lastError;
+            for (let attempt = 0; attempt < 3 && !stream; attempt += 1) {
+              try { stream = await mediaDevices.getUserMedia({ video: true, audio: false }); }
+              catch (error) { lastError = error; await new Promise((resolve) => setTimeout(resolve, 220)); }
+            }
+            if (!stream) throw lastError || new Error('camera stream could not be opened');
+            window.__jarvisScreenSmoke = { originalOwnDescriptor, stream };
+            return stream;
+          }
+        });
+        window.__jarvisScreenSmoke = { originalOwnDescriptor };
+        return { ready: true };
       });
       // Use trusted Playwright clicks for the user-facing button. This keeps
       // the production gesture requirement intact while the page-side mock
@@ -764,7 +801,7 @@ try {
       const stopped = await screenPage.evaluate(() => ({ state: document.querySelector('#workspace-screen-share-state')?.textContent?.trim(), videoHidden: document.querySelector('#workspace-screen-share-video')?.hidden }));
       const active = await screenPage.evaluate(() => {
         const smoke = window.__jarvisScreenSmoke;
-        const active = smoke?.stream?.getVideoTracks?.().some((track) => track.readyState === 'live') || false;
+        const active = Boolean(document.querySelector('#workspace-screen-share-video')?.srcObject?.getVideoTracks?.().some((track) => track.readyState === 'live'));
         const mediaDevices = navigator.mediaDevices;
         if (smoke?.originalOwnDescriptor) Object.defineProperty(mediaDevices, 'getDisplayMedia', smoke.originalOwnDescriptor);
         else delete mediaDevices.getDisplayMedia;
@@ -779,6 +816,7 @@ try {
     } finally {
       await closeBounded(screenContext);
       await closeBounded(screenBrowser, 5_000);
+      await settleCaptureDevice();
     }
   });
 
