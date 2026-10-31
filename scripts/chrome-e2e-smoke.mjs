@@ -59,10 +59,14 @@ async function releaseDashboardMedia(page) {
 // close the isolated probe page, and retry the same real browser operation in
 // a fresh document. Production media behavior is unchanged; a genuine device
 // or permission failure still bubbles out on the final bounded attempt.
-async function probeBrowserMedia(context, baseUrl) {
+async function probeBrowserMedia(browser, baseUrl) {
   let lastError;
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const mediaPage = await context.newPage();
+    // Use a fresh context for every attempt. Firefox can invalidate the
+    // previous context's media remote object after a fake track is stopped;
+    // a new page in that same context is not always enough to recover.
+    const mediaContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const mediaPage = await mediaContext.newPage();
     mediaPage.setDefaultTimeout(12_000);
     try {
       await mediaPage.goto(`${baseUrl}/?smoke=1&media-probe=${attempt + 1}`, { waitUntil: 'domcontentloaded' });
@@ -73,7 +77,11 @@ async function probeBrowserMedia(context, baseUrl) {
         await authDialog.waitFor({ state: 'detached' });
       }
       await mediaPage.locator('#brain-canvas').waitFor({ state: 'visible', timeout: 15_000 });
-      await releaseDashboardMedia(mediaPage);
+      // This probe owns a fresh context with no dashboard stream yet. Do not
+      // run the interactive page's release helper here: stopping a stream that
+      // does not exist can invalidate Firefox's media remote object just before
+      // getUserMedia resolves. The context is closed in finally, which releases
+      // every synthetic track deterministically.
       const media = await evaluateWithRetry(mediaPage, async () => {
         const listed = await navigator.mediaDevices.enumerateDevices();
         let stream;
@@ -88,7 +96,7 @@ async function probeBrowserMedia(context, baseUrl) {
       lastError = error;
       if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 500));
     } finally {
-      await mediaPage.close().catch(() => {});
+      await mediaContext.close().catch(() => {});
     }
   }
   throw lastError || new Error('The browser media probe failed.');
@@ -225,7 +233,7 @@ try {
     // The command-screen checks intentionally open and close voice sessions.
     // Probe hardware in a separate authenticated document so a Firefox media
     // object from the interactive page cannot invalidate the next capture.
-    const media = await probeBrowserMedia(context, baseUrl);
+    const media = await probeBrowserMedia(browser, baseUrl);
     assert(media.audioInputs > 0 && media.videoInputs > 0, `missing device ${JSON.stringify(media)}`);
     assert(media.tracks.every((track) => track.readyState === 'live' && track.labeled), `tracks were not live ${JSON.stringify(media)}`);
     observations.media = media;
@@ -379,6 +387,17 @@ try {
   });
 
   await check('Gesture camera link starts and stops in Camoufox', async () => {
+    // Reopen the dashboard after the isolated media probe. This gives the
+    // gesture controller a fresh document and avoids Firefox carrying a
+    // stopped fake video track into the interactive camera assertion.
+    await page.goto(`${baseUrl}/?smoke=gesture`, { waitUntil: 'domcontentloaded' });
+    const gestureAuth = page.locator('#auth-dialog');
+    if (await gestureAuth.isVisible().catch(() => false)) {
+      await gestureAuth.locator('input').fill(String(process.env.DASHBOARD_ACCESS_PIN || ''));
+      await gestureAuth.locator('button[type="submit"]').click({ force: true });
+      await gestureAuth.waitFor({ state: 'detached' });
+    }
+    await page.locator('#brain-canvas').waitFor({ state: 'visible', timeout: 15_000 });
     await releaseDashboardMedia(page);
     const button = page.locator('#gesture-button');
     await page.waitForFunction(() => !document.querySelector('#gesture-button')?.disabled, null, { timeout: 30_000 });
