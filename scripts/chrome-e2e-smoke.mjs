@@ -11,6 +11,22 @@ const captureLabel = fakeMedia ? 'Synthetic' : 'Real';
 const checks = [];
 const observations = {};
 const pageErrors = [];
+const browserOptions = {
+  headless,
+  os: process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux',
+  windowsHide: !headless,
+  // Camoufox keeps Playwright's page agent isolated by default. Enable the
+  // documented main-world bridge only for this smoke harness so assertions
+  // can inspect JARVIS-owned globals without mistaking isolation for failure.
+  main_world_eval: true,
+  // The default path intentionally uses the installed camera and microphone.
+  // CI can opt into deterministic devices with --fake-media without changing
+  // the production browser path used by the dashboard.
+  firefox_user_prefs: {
+    'media.navigator.permission.disabled': true,
+    ...(fakeMedia ? { 'media.navigator.streams.fake': true } : {})
+  }
+};
 
 function assert(condition, message) { if (!condition) throw new Error(message); }
 
@@ -25,6 +41,18 @@ async function evaluateWithRetry(page, expression, arg, { attempts = 3, delayMs 
     catch (error) { lastError = error; if (attempt + 1 < attempts) await page.waitForTimeout(delayMs).catch(() => {}); }
   }
   throw lastError || new Error('page evaluation failed');
+}
+
+async function closeBounded(resource, timeoutMs = 3_000) {
+  if (!resource || typeof resource.close !== 'function') return;
+  await Promise.race([
+    Promise.resolve().then(() => resource.close()).catch(() => {}),
+    new Promise((resolve) => setTimeout(resolve, timeoutMs))
+  ]);
+}
+
+async function launchSmokeBrowser() {
+  return Camoufox(browserOptions);
 }
 
 // Camoufox's bundled fake devices can be exclusive even though a normal
@@ -65,7 +93,11 @@ async function probeBrowserMedia(browser, baseUrl) {
     // Use a fresh context for every attempt. Firefox can invalidate the
     // previous context's media remote object after a fake track is stopped;
     // a new page in that same context is not always enough to recover.
-    const mediaContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    // Use a dedicated browser process for the probe. A fake Firefox capture
+    // device can outlive a stopped stream across contexts in the same process;
+    // that is a harness lifecycle race, not a dashboard failure.
+    const probeBrowser = await launchSmokeBrowser();
+    const mediaContext = await probeBrowser.newContext({ viewport: { width: 1440, height: 900 } });
     const mediaPage = await mediaContext.newPage();
     mediaPage.setDefaultTimeout(12_000);
     try {
@@ -96,7 +128,8 @@ async function probeBrowserMedia(browser, baseUrl) {
       lastError = error;
       if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 500));
     } finally {
-      await mediaContext.close().catch(() => {});
+      await closeBounded(mediaContext);
+      await closeBounded(probeBrowser, 5_000);
     }
   }
   throw lastError || new Error('The browser media probe failed.');
@@ -140,28 +173,7 @@ async function check(name, operation) {
   }
 }
 
-const browser = await Camoufox({
-  headless,
-  os: process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux',
-  windowsHide: !headless,
-  // Camoufox keeps Playwright's page agent isolated by default. Enable the
-  // documented main-world bridge only for this smoke harness so assertions
-  // can inspect JARVIS-owned globals without mistaking isolation for failure.
-  main_world_eval: true,
-  // The default path intentionally uses the installed camera and microphone.
-  // CI can opt into deterministic devices with --fake-media without changing
-  // the production browser path used by the dashboard.
-  // Firefox/Camoufox does not expose Chromium's context permission names.
-  // The smoke harness grants local media through Firefox's test-only pref;
-  // production profiles retain normal user permission prompts.
-  // Camoufox's launch options intentionally use the documented snake_case
-  // names; passing firefoxUserPrefs here would silently fall through as a
-  // Playwright option and leave the supposedly synthetic run on real devices.
-  firefox_user_prefs: {
-    'media.navigator.permission.disabled': true,
-    ...(fakeMedia ? { 'media.navigator.streams.fake': true } : {})
-  }
-});
+const browser = await launchSmokeBrowser();
 let context;
 try {
   context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -388,30 +400,39 @@ try {
   });
 
   await check('Gesture camera link starts and stops in Camoufox', async () => {
-    // Reopen the dashboard after the isolated media probe. This gives the
-    // gesture controller a fresh document and avoids Firefox carrying a
-    // stopped fake video track into the interactive camera assertion.
-    await page.goto(`${baseUrl}/?smoke=gesture`, { waitUntil: 'domcontentloaded' });
-    const gestureAuth = page.locator('#auth-dialog');
-    if (await gestureAuth.isVisible().catch(() => false)) {
+    // Use a fresh browser process after the isolated media probe. Firefox can
+    // retain a stopped fake video device across contexts in the same process,
+    // which made an otherwise healthy gesture controller appear disabled.
+    const gestureBrowser = await launchSmokeBrowser();
+    const gestureContext = await gestureBrowser.newContext({ viewport: { width: 1440, height: 900 } });
+    const gesturePage = await gestureContext.newPage();
+    gesturePage.setDefaultTimeout(12_000);
+    try {
+      await gesturePage.goto(`${baseUrl}/?smoke=gesture`, { waitUntil: 'domcontentloaded' });
+      const gestureAuth = gesturePage.locator('#auth-dialog');
+      if (await gestureAuth.isVisible().catch(() => false)) {
       await gestureAuth.locator('input').fill(String(process.env.DASHBOARD_ACCESS_PIN || ''));
       await gestureAuth.locator('button[type="submit"]').click({ force: true });
       await gestureAuth.waitFor({ state: 'detached' });
+      }
+      await gesturePage.locator('#brain-canvas').waitFor({ state: 'visible', timeout: 15_000 });
+      await releaseDashboardMedia(gesturePage);
+      const button = gesturePage.locator('#gesture-button');
+      await gesturePage.waitForFunction(() => !document.querySelector('#gesture-button')?.disabled, null, { timeout: 30_000 });
+      if (!await button.evaluate((node) => node.classList.contains('active'))) await button.evaluate((node) => node.click());
+      await gesturePage.waitForFunction(() => document.querySelector('#gesture-button')?.classList.contains('active') && !document.querySelector('#gesture-button')?.disabled, null, { timeout: 30_000 });
+      await gesturePage.waitForTimeout(5000);
+      assert(await button.evaluate((node) => node.classList.contains('active')), 'gesture link did not become active');
+      await gesturePage.waitForFunction(() => document.querySelector('#gesture-button')?.classList.contains('active') && !document.querySelector('#gesture-button')?.disabled, null, { timeout: 30_000 });
+      await button.evaluate((node) => node.click());
+      await gesturePage.waitForTimeout(250);
+      assert(!await button.evaluate((node) => node.classList.contains('active')), 'gesture link did not stop');
+      await releaseDashboardMedia(gesturePage);
+      return 'camera gesture stream started and stopped';
+    } finally {
+      await closeBounded(gestureContext);
+      await closeBounded(gestureBrowser, 5_000);
     }
-    await page.locator('#brain-canvas').waitFor({ state: 'visible', timeout: 15_000 });
-    await releaseDashboardMedia(page);
-    const button = page.locator('#gesture-button');
-    await page.waitForFunction(() => !document.querySelector('#gesture-button')?.disabled, null, { timeout: 30_000 });
-    if (!await button.evaluate((node) => node.classList.contains('active'))) await button.evaluate((node) => node.click());
-    await page.waitForFunction(() => document.querySelector('#gesture-button')?.classList.contains('active') && !document.querySelector('#gesture-button')?.disabled, null, { timeout: 30_000 });
-    await page.waitForTimeout(5000);
-    assert(await button.evaluate((node) => node.classList.contains('active')), 'gesture link did not become active');
-    await page.waitForFunction(() => document.querySelector('#gesture-button')?.classList.contains('active') && !document.querySelector('#gesture-button')?.disabled, null, { timeout: 30_000 });
-    await button.evaluate((node) => node.click());
-    await page.waitForTimeout(250);
-    assert(!await button.evaluate((node) => node.classList.contains('active')), 'gesture link did not stop');
-    await releaseDashboardMedia(page);
-    return 'camera gesture stream started and stopped';
   });
 
   // The workspace keeps live telemetry and media state active, so networkidle
@@ -704,7 +725,9 @@ try {
     // can invalidate a MediaStream remote object after the preview/analytics
     // page has changed views; the new document still exercises the real UI
     // toggle without inheriting that stale object.
-    const screenPage = await context.newPage();
+    const screenBrowser = await launchSmokeBrowser();
+    const screenContext = await screenBrowser.newContext({ viewport: { width: 1440, height: 900 } });
+    const screenPage = await screenContext.newPage();
     screenPage.setDefaultTimeout(12_000);
     try {
       await screenPage.goto(`${baseUrl}/workspace?smoke=1&screen-probe=1`, { waitUntil: 'domcontentloaded' });
@@ -754,7 +777,8 @@ try {
       assert(transition.stopped.state === 'LOCAL SCREEN OFF // NO UPLOAD' && transition.stopped.videoHidden === true, JSON.stringify(transition));
       return transition;
     } finally {
-      await screenPage.close().catch(() => {});
+      await closeBounded(screenContext);
+      await closeBounded(screenBrowser, 5_000);
     }
   });
 
