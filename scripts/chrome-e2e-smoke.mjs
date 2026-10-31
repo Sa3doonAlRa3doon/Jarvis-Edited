@@ -162,8 +162,9 @@ const browser = await Camoufox({
     ...(fakeMedia ? { 'media.navigator.streams.fake': true } : {})
   }
 });
+let context;
 try {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   context.setDefaultTimeout(12_000);
   const page = await context.newPage();
   page.on('pageerror', (error) => pageErrors.push(String(error.message || error).slice(0, 240)));
@@ -1104,5 +1105,17 @@ try {
   if (failures.length || pageErrors.length) console.error(`CAMOUFOX FAILURES // ${JSON.stringify({ failures, pageErrors })}`);
   process.exitCode = failed || pageErrors.length ? 1 : 0;
 } finally {
-  await browser.close();
+  // Close the explicit outer context before the browser. On Camoufox/Firefox,
+  // relying on browser.close() to discover and tear down a media-heavy context
+  // can leave the smoke command appearing hung while tracks and preview pages
+  // drain. Both shutdown steps are bounded so a teardown race cannot consume
+  // the pipeline's entire retry budget.
+  await Promise.race([
+    context?.close().catch(() => {}),
+    new Promise((resolve) => setTimeout(resolve, 3_000))
+  ]);
+  await Promise.race([
+    browser.close().catch(() => {}),
+    new Promise((resolve) => setTimeout(resolve, 5_000))
+  ]);
 }
