@@ -841,7 +841,7 @@ npm.cmd run doctor -- --require-openjarvis --require-ollama --require-vision --r
 
 `doctor` probes only the local dashboard session and its bounded local status endpoints. It reports Camoufox-only browser configuration, OpenJarvis/Ollama reachability, verified vision capability, Google OAuth availability, Stirling health, Moonraker printer reachability, same-host printer-camera discovery, and Pi ALSA/V4L2 devices when running on Linux. It never prints `.env` values, never calls a public API, and never changes services; optional Google, Stirling, printer, printer-camera, camera, and microphone warnings become failures only when explicitly required. On Windows, the camera and microphone checks remain browser-side; use the real Camoufox smoke test below for physical device evidence.
 
-Fish Audio talkback is bounded by `FISH_AUDIO_TIMEOUT_MS` (30 seconds by default, with one bounded retry) so an unavailable provider cannot leave a wake acknowledgement or reply hanging indefinitely; enable the browser voice fallback in Settings when you need local speech during an outage.
+Fish Audio talkback is bounded by `FISH_AUDIO_TIMEOUT_MS` (30 seconds by default, with one bounded retry) so an unavailable provider cannot leave a normal reply hanging indefinitely. Wake acknowledgements also have a shorter 12-second browser deadline, so a slow provider cannot block the 15-second command window; JARVIS proceeds to listen and leaves the selected Fish voice unchanged. Enable the browser voice fallback in Settings when you need local speech during an outage.
 
 For a visible Camoufox end-to-end check of the actual command screen, camera, microphone, gestures, search, Settings, sensor calibration, and Google verification UI, run:
 

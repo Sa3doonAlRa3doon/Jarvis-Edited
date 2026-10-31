@@ -80,6 +80,12 @@ window.__jarvisReleaseMedia = async () => {
 };
 
 const VOICE_COMMAND_TIMEOUT_MS = 15_000;
+// Wake acknowledgements must not hold the command window behind a slow TTS
+// provider. Normal replies keep the server's longer bounded timeout, while
+// the short acknowledgement timeout lets JARVIS remain responsive and start
+// listening even when Fish Audio is temporarily slow or unavailable.
+const FISH_TTS_WAKE_TIMEOUT_MS = 12_000;
+const FISH_TTS_REPLY_TIMEOUT_MS = 30_000;
 const COMMAND_ACKNOWLEDGEMENT = 'On it, sir.';
 let mediaDeviceChangeTimer = 0;
 
@@ -817,28 +823,37 @@ function installSmokeThinkingCue() {
 }
 installSmokeThinkingCue();
 
-async function requestFishSpeech(text) {
+async function requestFishSpeech(text, { timeoutMs = FISH_TTS_REPLY_TIMEOUT_MS } = {}) {
   let lastError = new Error('Fish Audio request failed.');
   for (let attempt = 0; attempt < 2; attempt += 1) {
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    let timeout = 0;
     try {
-      const response = await (window.jarvisFetch || fetch)('/api/tts', {
+      const request = {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, mode: 'fish' })
-      });
+      };
+      if (controller) {
+        request.signal = controller.signal;
+        timeout = window.setTimeout(() => controller.abort(), Math.max(4_000, Math.min(60_000, Number(timeoutMs) || FISH_TTS_REPLY_TIMEOUT_MS)));
+      }
+      const response = await (window.jarvisFetch || fetch)('/api/tts', request);
       if (response.ok) return { bytes: await response.arrayBuffer(), contentType: response.headers.get('content-type') || 'audio/mpeg' };
       const detail = await response.json().catch(() => ({}));
       const error = new Error(detail.error || `Fish Audio returned HTTP ${response.status}.`);
       error.status = response.status;
       throw error;
     } catch (error) {
-      lastError = error;
+      lastError = error?.name === 'AbortError'
+        ? Object.assign(new Error('Fish Audio timed out before audio was ready.'), { name: 'TimeoutError' })
+        : error;
       if (error?.name === 'NotAllowedError' || Number(error?.status) < 500 || attempt === 1) break;
       await wait(350);
-    }
+    } finally { if (timeout) window.clearTimeout(timeout); }
   }
   throw lastError;
 }
 
-async function speak(text, { pendingContext = null, onPlaybackStart = null } = {}) {
+async function speak(text, { pendingContext = null, onPlaybackStart = null, fishTimeoutMs = null } = {}) {
   if (!state.settings?.autoSpeak || !text) return true;
   state.voice?.setSpeaking(true); updateVoiceVisual('speaking', .72);
   try {
@@ -847,7 +862,7 @@ async function speak(text, { pendingContext = null, onPlaybackStart = null } = {
       document.body.dataset.ttsVoice = state.config.fishVoiceId || 'unconfigured';
       document.body.dataset.ttsState = 'requesting';
       try {
-        const result = await requestFishSpeech(text);
+        const result = await requestFishSpeech(text, { timeoutMs: fishTimeoutMs || (pendingContext?.kind === 'wake' ? FISH_TTS_WAKE_TIMEOUT_MS : FISH_TTS_REPLY_TIMEOUT_MS) });
         onPlaybackStart?.();
         document.body.dataset.ttsState = 'playing';
         if (state.voice?.playAudio) await state.voice.playAudio(result.bytes, Number(state.settings?.ttsVolume ?? 1));
@@ -863,7 +878,7 @@ async function speak(text, { pendingContext = null, onPlaybackStart = null } = {
           onPlaybackStart?.();
           state.pendingSpeech = { text, context: pendingContext }; document.body.classList.add('audio-locked'); document.body.dataset.ttsState = 'blocked'; state.galaxy?.setActivity('armed', 1); return false;
         }
-        document.body.dataset.ttsState = 'error';
+        document.body.dataset.ttsState = error?.name === 'TimeoutError' ? 'timeout' : 'error';
         console.warn(`Fish Audio playback failed without changing voices: ${error?.message || error}`);
         if (!state.config?.allowBrowserTtsFallback) { onPlaybackStart?.(); state.galaxy?.setActivity('error', 1); return false; }
       }
@@ -955,7 +970,7 @@ async function handleWake(event) {
   ui.wakeState.textContent = event?.detail?.kind === 'double_clap' ? 'CLAP' : event?.detail?.kind === 'push_to_talk' ? 'PTT' : 'HEARD'; state.neuralEnergy = 1;
   updateVoiceVisual('armed', 1);
   const context = { kind: 'wake', session, command: initialCommand };
-  const played = isEmbeddedPreview() || !state.settings?.wakeResponse ? true : await speak(state.settings.wakeResponse, { pendingContext: context });
+  const played = isEmbeddedPreview() || !state.settings?.wakeResponse ? true : await speak(state.settings.wakeResponse, { pendingContext: context, fishTimeoutMs: FISH_TTS_WAKE_TIMEOUT_MS });
   if (session !== state.wakeSession || !state.voiceCapture.active) return;
   if (!played && document.body.dataset.ttsState === 'blocked') {
     ui.voiceCaptureState.textContent = 'TAP TO ENABLE AUDIO'; ui.voiceCaptureTranscript.textContent = 'Tap anywhere once. JARVIS will reply, then begin listening.';
