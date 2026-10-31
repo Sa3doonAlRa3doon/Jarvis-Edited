@@ -10,6 +10,8 @@ test('browser preview stays bounded and is pinned to Camoufox', () => {
 
 test('browser preview passes the selected headless mode to Camoufox', async () => {
   const calls = [];
+  let contextClosed = 0;
+  let browserClosed = 0;
   const page = {
     async goto() {},
     async waitForTimeout() {},
@@ -23,10 +25,11 @@ test('browser preview passes the selected headless mode to Camoufox', async () =
       async newContext() {
         return {
           async route() {},
-          async newPage() { return page; }
+          async newPage() { return page; },
+          async close() { contextClosed += 1; }
         };
       },
-      async close() {}
+      async close() { browserClosed += 1; }
     };
   };
   const preview = await capturePublicBrowserPreview('https://example.com/', {
@@ -39,4 +42,6 @@ test('browser preview passes the selected headless mode to Camoufox', async () =
   assert.equal(calls[0].windowsHide, true);
   assert.equal(preview.engine, 'camoufox');
   assert.equal(preview.title, 'Example Domain');
+  assert.equal(contextClosed, 1);
+  assert.equal(browserClosed, 1);
 });
