@@ -419,43 +419,63 @@ try {
   });
 
   await check('Gesture camera link starts and stops in Camoufox', async () => {
-    // Use a fresh browser process after the isolated media probe. Firefox can
-    // retain a stopped fake video device across contexts in the same process,
-    // which made an otherwise healthy gesture controller appear disabled.
-    const gestureBrowser = await launchSmokeBrowser();
-    const gestureContext = await gestureBrowser.newContext({
-      viewport: { width: 1440, height: 900 },
-      ...(authCookies.length ? { storageState: { cookies: authCookies, origins: [] } } : {})
-    });
-    const gesturePage = await gestureContext.newPage();
-    gesturePage.setDefaultTimeout(12_000);
-    try {
-      await gesturePage.goto(`${baseUrl}/?smoke=gesture`, { waitUntil: 'domcontentloaded' });
-      const gestureAuth = gesturePage.locator('#auth-dialog');
-      if (await gestureAuth.isVisible().catch(() => false)) {
-      await gestureAuth.locator('input').fill(String(process.env.DASHBOARD_ACCESS_PIN || ''));
-      await gestureAuth.locator('button[type="submit"]').click({ force: true });
-      await gestureAuth.waitFor({ state: 'detached' });
+    let lastError;
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      // Use a fresh browser process after the isolated media probe. Firefox can
+      // retain a stopped fake video device across contexts in the same process,
+      // which made an otherwise healthy gesture controller appear disabled.
+      const gestureBrowser = await launchSmokeBrowser();
+      const gestureContext = await gestureBrowser.newContext({
+        viewport: { width: 1440, height: 900 },
+        ...(authCookies.length ? { storageState: { cookies: authCookies, origins: [] } } : {})
+      });
+      const gesturePage = await gestureContext.newPage();
+      gesturePage.setDefaultTimeout(12_000);
+      try {
+        await gesturePage.goto(`${baseUrl}/?smoke=1&smoke-kind=gesture&attempt=${attempt}`, { waitUntil: 'domcontentloaded' });
+        // Camoufox can defer an external module script on a newly isolated
+        // private page. Importing the same module is idempotent and starts the
+        // real dashboard initializer before we wait for its auth dialog.
+        await gesturePage.evaluate(() => import('/app.js'));
+        const gestureAuth = gesturePage.locator('#auth-dialog');
+        await gesturePage.waitForFunction(() => Boolean(document.querySelector('#auth-dialog')) || window.__jarvisReady === true, null, { timeout: 30_000 });
+        if (await gestureAuth.isVisible().catch(() => false)) {
+          await gestureAuth.locator('input').fill(String(process.env.DASHBOARD_ACCESS_PIN || ''));
+          await gestureAuth.locator('button[type="submit"]').click({ force: true });
+          await gestureAuth.waitFor({ state: 'detached' });
+        }
+        await gesturePage.locator('#brain-canvas').waitFor({ state: 'visible', timeout: 15_000 });
+        await gesturePage.waitForFunction(() => window.__jarvisReady === true, null, { timeout: 30_000 });
+        await releaseDashboardMedia(gesturePage);
+        const button = gesturePage.locator('#gesture-button');
+        await gesturePage.waitForFunction(() => !document.querySelector('#gesture-button')?.disabled, null, { timeout: 45_000 });
+        if (!await button.evaluate((node) => node.classList.contains('active'))) await button.evaluate((node) => node.click());
+        await gesturePage.waitForFunction(() => document.querySelector('#gesture-button')?.classList.contains('active') && !document.querySelector('#gesture-button')?.disabled, null, { timeout: 45_000 });
+        await gesturePage.waitForTimeout(5000);
+        assert(await button.evaluate((node) => node.classList.contains('active')), 'gesture link did not become active');
+        await gesturePage.waitForFunction(() => document.querySelector('#gesture-button')?.classList.contains('active') && !document.querySelector('#gesture-button')?.disabled, null, { timeout: 30_000 });
+        await button.evaluate((node) => node.click());
+        await gesturePage.waitForTimeout(250);
+        assert(!await button.evaluate((node) => node.classList.contains('active')), 'gesture link did not stop');
+        await releaseDashboardMedia(gesturePage);
+        return `camera gesture stream started and stopped on attempt ${attempt}`;
+      } catch (error) {
+        const diagnostics = await gesturePage.evaluate(() => ({
+          disabled: Boolean(document.querySelector('#gesture-button')?.disabled),
+          active: Boolean(document.querySelector('#gesture-button')?.classList.contains('active')),
+          status: document.querySelector('#gesture-state')?.textContent?.trim() || '',
+          button: document.querySelector('#gesture-button')?.textContent?.trim() || '',
+          errors: [...document.querySelectorAll('#messages .message.error')].slice(-3).map((node) => node.textContent?.trim() || '')
+        })).catch(() => ({}));
+        lastError = new Error(`${error.message || error} // gesture diagnostics ${JSON.stringify(diagnostics)}`);
+        if (attempt < 2) await settleCaptureDevice();
+      } finally {
+        await closeBounded(gestureContext);
+        await closeBounded(gestureBrowser, 5_000);
+        await settleCaptureDevice();
       }
-      await gesturePage.locator('#brain-canvas').waitFor({ state: 'visible', timeout: 15_000 });
-      await releaseDashboardMedia(gesturePage);
-      const button = gesturePage.locator('#gesture-button');
-      await gesturePage.waitForFunction(() => !document.querySelector('#gesture-button')?.disabled, null, { timeout: 60_000 });
-      if (!await button.evaluate((node) => node.classList.contains('active'))) await button.evaluate((node) => node.click());
-      await gesturePage.waitForFunction(() => document.querySelector('#gesture-button')?.classList.contains('active') && !document.querySelector('#gesture-button')?.disabled, null, { timeout: 60_000 });
-      await gesturePage.waitForTimeout(5000);
-      assert(await button.evaluate((node) => node.classList.contains('active')), 'gesture link did not become active');
-      await gesturePage.waitForFunction(() => document.querySelector('#gesture-button')?.classList.contains('active') && !document.querySelector('#gesture-button')?.disabled, null, { timeout: 30_000 });
-      await button.evaluate((node) => node.click());
-      await gesturePage.waitForTimeout(250);
-      assert(!await button.evaluate((node) => node.classList.contains('active')), 'gesture link did not stop');
-      await releaseDashboardMedia(gesturePage);
-      return 'camera gesture stream started and stopped';
-    } finally {
-      await closeBounded(gestureContext);
-      await closeBounded(gestureBrowser, 5_000);
-      await settleCaptureDevice();
     }
+    throw lastError || new Error('Gesture camera smoke failed.');
   });
 
   // The workspace keeps live telemetry and media state active, so networkidle
@@ -1180,4 +1200,5 @@ try {
     browser.close().catch(() => {}),
     new Promise((resolve) => setTimeout(resolve, 5_000))
   ]);
+  await settleCaptureDevice();
 }

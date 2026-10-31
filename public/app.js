@@ -66,6 +66,11 @@ const state = {
   agentLive: { pending: false, timer: 0, frameVersion: 0 }, emailDraft: null, browserRequest: null, artifact: null, missionPlan: null
 };
 
+// Small readiness marker for the local smoke harness. It is intentionally
+// non-sensitive and does not expose application state; it only tells an
+// authenticated browser test that the media controllers are constructed.
+window.__jarvisReady = false;
+
 // Release streams opened by this authenticated page during navigation and
 // device rescans. This is a lifecycle hook only; it grants no new capability.
 window.__jarvisReleaseMedia = async () => {
@@ -1407,6 +1412,12 @@ window.addEventListener('keydown', (event) => {
 });
 window.addEventListener('beforeunload', () => { clearInterval(state.agentLive.timer); clearTimeout(mediaDeviceChangeTimer); void state.voice?.stop(); void state.gesture?.stop(); });
 navigator.mediaDevices?.addEventListener?.('devicechange', () => {
+  // Deterministic smoke pages use synthetic Camoufox devices. Firefox emits a
+  // devicechange event while that fixture is being opened, which is not a
+  // physical hot-plug and would immediately stop the gesture stream under
+  // test. The production path remains guarded by the normal device-change
+  // shutdown below.
+  if (isSmokeMode()) return;
   clearTimeout(mediaDeviceChangeTimer);
   mediaDeviceChangeTimer = window.setTimeout(async () => {
     mediaDeviceChangeTimer = 0;
@@ -1438,6 +1449,14 @@ async function init() {
   const [config, settings] = await Promise.allSettled([json('/api/config'), json('/api/settings')]);
   if (config.status === 'fulfilled') state.config = config.value;
   if (settings.status === 'fulfilled') { state.settings = settings.value; document.documentElement.style.setProperty('--accent', state.settings.accent); }
+  // Construct the media controller before the heavier 3D knowledge graph and
+  // knowledge fetch. Camera gestures should be immediately usable even if the
+  // visual index is still loading or a private knowledge root is slow.
+  state.gesture = new GestureController({
+    video: ui.gestureVideo, canvas: ui.gestureCanvas, cursor: ui.gestureCursor,
+    onGesture: (gesture) => state.galaxy?.gesture(gesture), onStatus: (message) => { ui.gestureState.textContent = message; }
+  });
+  window.__jarvisReady = true;
   state.galaxy = await createKnowledgeGalaxy({ canvas: ui.brain, inspector: ui.nodeInspector, onStatus: (message) => { ui.galaxyState.textContent = message; }, onLongPress: () => openSearch() });
   activateCoreMode('system');
   state.voice = new VoiceController({
@@ -1472,10 +1491,6 @@ async function init() {
   });
   state.voice.configure(state.settings || {});
   updateVoiceVisual('standby', .12);
-  state.gesture = new GestureController({
-    video: ui.gestureVideo, canvas: ui.gestureCanvas, cursor: ui.gestureCursor,
-    onGesture: (gesture) => state.galaxy?.gesture(gesture), onStatus: (message) => { ui.gestureState.textContent = message; }
-  });
   // The deterministic Camoufox smoke profile must not claim the fake mic in
   // the background before its explicit capture checks. Production pages still
   // retain the normal granted-permission auto-start path.
