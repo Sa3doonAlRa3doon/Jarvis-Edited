@@ -2,6 +2,9 @@ import { createKnowledgeGalaxy } from './galaxy.js';
 import { GestureController } from './gesture-controller.js';
 import { VoiceController } from './voice-controller.js';
 import { searchCatalog } from './search-utils.js';
+import { shouldApplyTranscriptToInput } from './voice-utils.js';
+import { hasWakeCommand, normalizeWakeCommand } from './wake-command.js';
+import { wakeCaptureLabel } from './wake-state.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -14,9 +17,9 @@ const ui = {
   gpuDetail: $('#gpu-detail'), temperatureValue: $('#temperature-value'), temperatureBar: $('#temperature-bar'),
   chart: $('#telemetry-chart'), storageList: $('#storage-list'), storageCount: $('#storage-count'),
   serviceList: $('#service-list'), serviceCount: $('#service-count'), brain: $('#brain-canvas'), coreStage: $('#core-stage'),
-  coreState: $('#core-state'), coreSubtitle: $('#core-subtitle'), coreKicker: $('#core-kicker'), modelLabel: $('#model-label'), wakeState: $('#wake-state'),
+  coreState: $('#core-state'), coreSubtitle: $('#core-subtitle'), coreKicker: $('#core-kicker'), modelLabel: $('#model-label'), wakeState: $('#wake-state'), missionState: $('#mission-state'), missionInspect: $('#mission-inspect'),
   memoryState: $('#memory-state'), wakeFlash: $('#wake-flash'), messages: $('#messages'), composer: $('#composer'),
-  prompt: $('#prompt'), send: $('#send-button'), voiceButton: $('#voice-button'), agentLink: $('#agent-link-state'),
+  prompt: $('#prompt'), send: $('#send-button'), voiceButton: $('#voice-button'), voiceDeckState: $('#voice-deck-state'), agentLink: $('#agent-link-state'),
   laneEyebrow: $('#lane-eyebrow'), laneTitle: $('#lane-title'), laneState: $('#lane-state'), laneFeed: $('#lane-feed'),
   traceId: $('#trace-id'), traceSteps: $('#trace-steps'), traceLatency: $('#trace-latency'),
   citationList: $('#citation-list'), citationCount: $('#citation-count'), dockerList: $('#docker-list'),
@@ -30,7 +33,7 @@ const ui = {
   printerState: $('#printer-state'), printerFile: $('#printer-file'), printerEta: $('#printer-eta'),
   printerProgress: $('#printer-progress'), printerPercent: $('#printer-percent'), printerTemps: $('#printer-temps'),
   fullscreenButton: $('#fullscreen-button'), fullscreenGate: $('#fullscreen-gate'), coreLayer: $('#core-layer'),
-  coreLink: $('#core-link'), coreHealth: $('#core-health'), reactorScan: $('#reactor-scan'),
+  coreLink: $('#core-link'), coreHealth: $('#core-health'), reactorScan: $('#reactor-scan'), missionInspectCore: $('#mission-inspect-core'),
   searchDialog: $('#jarvis-search'), searchForm: $('#jarvis-search-form'), searchInput: $('#jarvis-search-input'), searchTitle: $('#jarvis-search-title'),
   searchResults: $('#jarvis-search-results'), searchClose: $('#jarvis-search-close'), searchMode: $('#jarvis-search-mode'), searchCount: $('#jarvis-search-count'),
   voiceCapture: $('#jarvis-voice-capture'), voiceCaptureState: $('#jarvis-voice-capture-state'), voiceCaptureTranscript: $('#jarvis-voice-capture-transcript'),
@@ -44,23 +47,36 @@ const ui = {
   browserControlTask: $('#browser-control-task'), browserControlSafety: $('#browser-control-safety'), browserControlPin: $('#browser-control-pin'),
   browserControlConfirmation: $('#browser-control-confirmation'), browserControlError: $('#browser-control-error'), confirmBrowserControl: $('#confirm-browser-control'),
   artifactDialog: $('#artifact-dialog'), artifactClose: $('#artifact-close'), artifactTitle: $('#artifact-title'), artifactSubtitle: $('#artifact-subtitle'),
-  artifactType: $('#artifact-type'), artifactFile: $('#artifact-file'), artifactSize: $('#artifact-size'), artifactOutline: $('#artifact-outline'), artifactDownload: $('#artifact-download')
+  artifactType: $('#artifact-type'), artifactFile: $('#artifact-file'), artifactSize: $('#artifact-size'), artifactOutline: $('#artifact-outline'), artifactDownload: $('#artifact-download'),
+  missionDialog: $('#mission-dialog'), missionClose: $('#mission-close'), missionMode: $('#mission-dialog-mode'), missionSubtitle: $('#mission-dialog-subtitle'),
+  missionRoute: $('#mission-dialog-route'), missionAgent: $('#mission-dialog-agent'), missionModel: $('#mission-dialog-model'), missionScope: $('#mission-dialog-scope'), missionWorkflow: $('#mission-dialog-workflow'),
+  missionCapabilityCount: $('#mission-capability-count'), missionCapabilities: $('#mission-capabilities'), missionStepCount: $('#mission-step-count'), missionSteps: $('#mission-steps'),
+  missionApprovalCount: $('#mission-approval-count'), missionApprovals: $('#mission-approvals'), missionWarningCount: $('#mission-warning-count'), missionWarnings: $('#mission-warnings')
 };
 
 const state = {
   config: null, settings: null, metrics: null, status: null, storage: [], docker: null,
   agents: { lanes: { code: [], research: [], monitor: [] }, traces: [] }, events: [], eventSummary: {},
-  history: [], lane: 'code', operation: null, operationKind: 'system', operationStatus: null, lastAssistant: '',
+  history: [], lane: 'code', operation: null, operationKind: 'system', obsSceneName: '', obsInputName: '', obsVolumeDb: null, obsSceneItemId: null, obsEnabled: null, obsFilterName: '', obsTransitionName: '', desktopAppId: '', desktopAppName: '', operationStatus: null, lastAssistant: '',
   galaxy: null, gesture: null, voice: null, printer: { configured: false, online: false, state: 'checking' },
   chart: { cpu: Array(52).fill(0), ram: Array(52).fill(0), gpu: Array(52).fill(0) },
   neuralEnergy: 0.22, coreMode: 'system', voiceState: 'standby', voiceLevel: 0, searchResults: [], searchSelection: 0,
   refreshFastPending: false, refreshSlowPending: false, pendingSpeech: null, audioPriming: false, wakeSession: 0, thinkingSound: null,
   voiceCapture: { active: false, phase: 'idle', deadline: 0, ticker: 0, closeTimer: 0 },
-  agentLive: { pending: false, timer: 0, frameVersion: 0 }, emailDraft: null, browserRequest: null, artifact: null
+  agentLive: { pending: false, timer: 0, frameVersion: 0 }, emailDraft: null, browserRequest: null, artifact: null, missionPlan: null
+};
+
+// Release streams opened by this authenticated page during navigation and
+// device rescans. This is a lifecycle hook only; it grants no new capability.
+window.__jarvisReleaseMedia = async () => {
+  try { closeSearch({ cancelVoice: true }); } catch {}
+  try { await state.voice?.stop(); } catch {}
+  try { await state.gesture?.stop(); } catch {}
 };
 
 const VOICE_COMMAND_TIMEOUT_MS = 15_000;
 const COMMAND_ACKNOWLEDGEMENT = 'On it, sir.';
+let mediaDeviceChangeTimer = 0;
 
 const laneLabels = {
   code: { eyebrow: 'CODEACT STREAM', title: 'Code Assistant' },
@@ -79,7 +95,7 @@ const coreModes = {
 
 const routeModes = {
   GENERAL: 'system', CODEACT: 'agents', RESEARCH: 'research', MONITOR: 'docker',
-  MEMORY: 'memory', FABRICATOR: 'printer', CONNECTOR: 'system'
+  MEMORY: 'memory', FABRICATOR: 'printer', CONNECTOR: 'system', BROADCAST: 'agents', MEDIA: 'system', SOCIAL: 'research'
 };
 
 const dashboardSearchItems = [
@@ -96,12 +112,26 @@ const dashboardSearchItems = [
   { id: 'settings-voice', label: 'Voice Core Settings', detail: 'Tune recognition, language, microphone, and talkback', keywords: 'voice speech tts fish audio language wake accuracy', category: 'SETTINGS', kind: 'navigate', value: '/settings#voice', priority: 61 },
   { id: 'settings-interface', label: 'Interface Settings', detail: 'Change accent and preview the command screen', keywords: 'appearance visual hud color accent preview', category: 'SETTINGS', kind: 'navigate', value: '/settings#interface', priority: 60 },
   { id: 'settings-integrations', label: 'Google Integrations', detail: 'Inspect the private Google Workspace bridge', keywords: 'gmail drive calendar tasks contacts oauth google', category: 'SETTINGS', kind: 'navigate', value: '/settings#integrations', priority: 59 },
+  { id: 'workspace-screen', label: 'JARVIS Private Workspace', detail: 'Open JARVIS’s dedicated screen for agent, browser, printer, and service activity', keywords: 'own screen workspace private browser live agent task printer services', category: 'WORKSPACE', kind: 'navigate', value: '/workspace', priority: 78 },
+  { id: 'workspace-live-view', label: 'Live Website + Camera View', detail: 'Share one display, explain one snapshot, or inspect the selected Pi camera', keywords: 'website live screen share explain compact camera pi printer current page ads paywall', category: 'WORKSPACE', kind: 'navigate', value: '/workspace', priority: 79 },
+  { id: 'workspace-apps', label: 'Host App Bridge', detail: 'See the host application catalog and guarded launch rules', keywords: 'desktop app application launch calculator windows linux macos host', category: 'WORKSPACE', kind: 'navigate', value: '/settings#integrations', priority: 77 },
+  { id: 'workspace-routines', label: 'Read-only Routines', detail: 'Schedule safe local health, Docker, printer, weather, news, Calendar, or briefing checks', keywords: 'routine automation schedule reminder health docker printer weather news calendar briefing digest read only', category: 'WORKSPACE', kind: 'navigate', value: '/settings#integrations', priority: 76 },
+  { id: 'workspace-memory', label: 'Local Notes & Reminders', detail: 'Capture private notes and local due reminders on this host', keywords: 'notes remember reminder todo memory local private schedule', category: 'WORKSPACE', kind: 'navigate', value: '/settings#integrations', priority: 75 },
+  { id: 'workspace-analytics', label: 'Local Activity Analytics', detail: 'Inspect bounded wake, tool, broadcast, and service counts', keywords: 'analytics activity events wakes commands broadcast services metrics history', category: 'WORKSPACE', kind: 'navigate', value: '/workspace#analytics', priority: 74 },
+  { id: 'workspace-media', label: 'Local Media Deck', detail: 'Stage local music, ambient audio, podcasts, and track history', keywords: 'music media playlist song track podcast lofi ambient queue now playing', category: 'WORKSPACE', kind: 'navigate', value: '/settings#integrations', priority: 73 },
+  { id: 'workspace-knowledge', label: 'Local Knowledge Index', detail: 'Inspect bounded project files and private knowledge roots', keywords: 'knowledge files folders project structure index archive memory second brain', category: 'WORKSPACE', kind: 'navigate', value: '/workspace', priority: 72 },
+  { id: 'workspace-engineering', label: 'Architect / Critic / Debugger', detail: 'Open the bounded engineering pipeline state and evidence', keywords: 'architect critic debugger tests checks pipeline code repair verify', category: 'WORKSPACE', kind: 'navigate', value: '/workspace', priority: 70 },
   { id: 'action-voice', label: 'Toggle Voice Listener', detail: 'Start or stop the selected microphone listener', keywords: 'speak listen microphone wake voice', category: 'ACTION', kind: 'voice', priority: 76 },
+  { id: 'action-ptt', label: 'Push-to-talk Voice', detail: 'Press Ctrl+Space or Ctrl+Alt+Space to open a focused 15-second command session', keywords: 'push to talk ptt keyboard shortcut microphone voice command dexter talk button', category: 'ACTION', kind: 'ptt', priority: 75 },
   { id: 'action-gestures', label: 'Toggle Camera Gestures', detail: 'Start or stop local hand tracking', keywords: 'camera hands pinch zoom gesture vision', category: 'ACTION', kind: 'gestures', priority: 72 },
+  { id: 'action-mission', label: 'Mission Inspector', detail: 'View the latest route, steps, approvals, and warnings', keywords: 'mission plan preflight route approvals warnings capabilities', category: 'ACTION', kind: 'mission', priority: 71 },
   { id: 'action-fullscreen', label: 'Toggle Fullscreen', detail: 'Enter or leave the immersive neural display', keywords: 'screen immersive f11 display', category: 'ACTION', kind: 'fullscreen', priority: 68 },
   { id: 'prompt-health', label: 'Ask for a Health Report', detail: 'CPU, RAM, storage, temperature, and services', keywords: 'system status cpu ram gpu storage temperature', category: 'JARVIS', kind: 'prompt', value: 'Give me a concise health report for this Pi and its services.', priority: 56 },
   { id: 'prompt-docker', label: 'Ask about Docker', detail: 'Explain containers, resource use, and unhealthy services', keywords: 'docker compose containers status', category: 'JARVIS', kind: 'prompt', value: 'Explain the current Docker containers, resource use, and anything unhealthy.', priority: 54 },
-  { id: 'prompt-printer', label: 'Ask for Print ETA', detail: 'Current print progress, time left, and temperatures', keywords: 'printer print eta time nozzle bed', category: 'JARVIS', kind: 'prompt', value: 'How much time is left on my 3D print and what are the current printer temperatures?', priority: 52 }
+  { id: 'prompt-printer', label: 'Ask for Print ETA', detail: 'Current print progress, time left, and temperatures', keywords: 'printer print eta time nozzle bed', category: 'JARVIS', kind: 'prompt', value: 'How much time is left on my 3D print and what are the current printer temperatures?', priority: 52 },
+  { id: 'prompt-github', label: 'Research GitHub', detail: 'Find public repositories for a technical topic', keywords: 'github repository repo open source code project research', category: 'JARVIS', kind: 'prompt', value: 'Search GitHub for local Raspberry Pi voice assistant projects.', priority: 50 },
+  { id: 'prompt-briefing', label: 'Run a Morning Briefing', detail: 'Health, weather, news, printer, Docker, and Calendar', keywords: 'briefing morning start day weather news calendar docker printer health', category: 'JARVIS', kind: 'prompt', value: 'Give me a morning briefing with local system health, default-location weather, current technology news, printer status, Docker status, and Google Calendar if connected.', priority: 49 },
+  { id: 'prompt-map', label: 'Look Up a Place', detail: 'Keyless OpenStreetMap location and coordinates', keywords: 'map maps location coordinates nearby place geocode openstreetmap weather time', category: 'JARVIS', kind: 'prompt', value: 'Show me a map and coordinates for my default location.', priority: 48 }
 ];
 
 function activateCoreMode(mode, { focus = false } = {}) {
@@ -133,6 +163,34 @@ const printerCopy = {
   pause: { title: 'Pause the active 3D print', confirmation: 'PAUSE PRINT', description: 'Requests a Moonraker pause for the currently active job. The printer URL is fixed on the Pi and cannot be changed here.' },
   resume: { title: 'Resume the paused 3D print', confirmation: 'RESUME PRINT', description: 'Requests a Moonraker resume for a paused job after the control PIN and exact confirmation.' },
   cancel: { title: 'End the active 3D print', confirmation: 'CANCEL PRINT', description: 'Destructive: permanently cancels the active print. JARVIS never performs this automatically or from model output.' }
+};
+const obsCopy = {
+  'start-stream': { title: 'Start the OBS stream', confirmation: 'START STREAM', description: 'Starts the configured local OBS output only after the dashboard PIN and exact confirmation phrase. JARVIS never publishes a stream automatically.' },
+  'stop-stream': { title: 'Stop the OBS stream', confirmation: 'STOP STREAM', description: 'Stops the active local OBS output only after the dashboard PIN and exact confirmation phrase.' },
+  'start-record': { title: 'Start OBS recording', confirmation: 'START RECORDING', description: 'Starts the configured local OBS recording only after the dashboard PIN and exact confirmation phrase.' },
+  'stop-record': { title: 'Stop OBS recording', confirmation: 'STOP RECORDING', description: 'Stops the active local OBS recording only after the dashboard PIN and exact confirmation phrase.' },
+  'pause-record': { title: 'Pause OBS recording', confirmation: 'PAUSE RECORDING', description: 'Pauses the active local OBS recording only after the dashboard PIN and exact confirmation phrase.' },
+  'resume-record': { title: 'Resume OBS recording', confirmation: 'RESUME RECORDING', description: 'Resumes the paused local OBS recording only after the dashboard PIN and exact confirmation phrase.' },
+  'start-replay': { title: 'Start the OBS replay buffer', confirmation: 'START REPLAY BUFFER', description: 'Starts the local OBS replay buffer only after the dashboard PIN and exact confirmation phrase.' },
+  'stop-replay': { title: 'Stop the OBS replay buffer', confirmation: 'STOP REPLAY BUFFER', description: 'Stops the local OBS replay buffer only after the dashboard PIN and exact confirmation phrase.' },
+  'save-replay': { title: 'Save the OBS replay', confirmation: 'SAVE REPLAY', description: 'Saves the current local OBS replay buffer only after the dashboard PIN and exact confirmation phrase.' },
+  'start-virtualcam': { title: 'Start the OBS virtual camera', confirmation: 'START VIRTUAL CAMERA', description: 'Starts the local OBS virtual camera only after the dashboard PIN and exact confirmation phrase.' },
+  'stop-virtualcam': { title: 'Stop the OBS virtual camera', confirmation: 'STOP VIRTUAL CAMERA', description: 'Stops the local OBS virtual camera only after the dashboard PIN and exact confirmation phrase.' },
+  'studio-take': { title: 'Take the OBS studio preview', confirmation: 'TAKE PREVIEW', description: 'Transitions the OBS studio preview to program only after the dashboard PIN and exact confirmation phrase.' },
+  'enable-studio': { title: 'Enable OBS studio mode', confirmation: 'ENABLE STUDIO MODE', description: 'Enables OBS studio mode only after the dashboard PIN and exact confirmation phrase.' },
+  'disable-studio': { title: 'Disable OBS studio mode', confirmation: 'DISABLE STUDIO MODE', description: 'Disables OBS studio mode only after the dashboard PIN and exact confirmation phrase.' },
+  'refresh-browser-source': { title: 'Refresh an OBS browser source', confirmation: 'REFRESH BROWSER SOURCE', description: 'Refreshes one local OBS browser source without changing its URL or settings, only after the dashboard PIN and exact confirmation phrase.' },
+  'restart-media-source': { title: 'Restart an OBS media source', confirmation: 'RESTART MEDIA SOURCE', description: 'Restarts one local OBS media source only after the dashboard PIN and exact confirmation phrase.' },
+  'set-transition': { title: 'Set the OBS scene transition', confirmation: 'SET OBS TRANSITION', description: 'Selects one configured OBS transition by name only after the dashboard PIN and exact confirmation phrase.' },
+  'toggle-filter': { title: 'Toggle an OBS source filter', confirmation: 'TOGGLE OBS FILTER', description: 'Enables or disables one named filter on one OBS source only after the dashboard PIN and exact confirmation phrase.' },
+  'switch-scene': { title: 'Switch the OBS scene', confirmation: 'SWITCH SCENE', description: 'Switches the configured local OBS program scene only after the dashboard PIN and exact confirmation phrase.' },
+  'mute-source': { title: 'Mute an OBS source', confirmation: 'MUTE SOURCE', description: 'Mutes one configured local OBS audio input only after the dashboard PIN and exact confirmation phrase.' },
+  'unmute-source': { title: 'Unmute an OBS source', confirmation: 'UNMUTE SOURCE', description: 'Unmutes one configured local OBS audio input only after the dashboard PIN and exact confirmation phrase.' },
+  'set-volume': { title: 'Set OBS source volume', confirmation: 'SET OBS VOLUME', description: 'Changes one configured local OBS audio input in decibels, clamped to the safe OBS range, only after the dashboard PIN and exact confirmation phrase.' },
+  'toggle-source': { title: 'Toggle an OBS source', confirmation: 'TOGGLE SOURCE', description: 'Enables or disables one scene item in the configured local OBS scene only after the dashboard PIN and exact confirmation phrase.' }
+};
+const desktopCopy = {
+  launch: { title: 'Launch a host application', confirmation: 'LAUNCH APP', description: 'Starts only an app discovered from this host’s allow-listed application catalog. JARVIS never accepts arbitrary executable paths or shell commands.' }
 };
 
 function escapeHtml(value) {
@@ -186,8 +244,10 @@ function liveSearchItems() {
     { id: 'openjarvis', label: 'OpenJarvis API', detail: services.openjarvis?.online ? 'Online and reachable' : services.openjarvis?.detail || 'Offline', keywords: 'api agent codeact', value: 'system-agents', mode: 'agents', online: services.openjarvis?.online },
     { id: 'ollama', label: 'Ollama Runtime', detail: services.ollama?.online ? `${services.ollama.models?.length || 0} local models installed` : 'Offline', keywords: 'model llm local inference', value: 'system-system', mode: 'system', online: services.ollama?.online },
     { id: 'google', label: 'Google Workspace', detail: state.status?.google?.connected ? 'Private OAuth bridge connected' : 'Not connected', keywords: 'gmail drive calendar tasks contacts oauth', value: 'system-google', mode: 'system', online: state.status?.google?.connected },
+    { id: 'obs', label: 'OBS Stream Studio', detail: services.obs?.online ? `Connected${services.obs.scene ? ` // ${services.obs.scene}` : ''}` : services.obs?.configured ? services.obs?.detail || 'Offline' : 'Not configured', keywords: 'obs stream broadcast recording scene overlay twitch youtube producer', value: 'system-agents', mode: 'agents', online: services.obs?.online },
     { id: 'wake', label: 'Wake Listener', detail: state.status?.wake?.ready ? 'Hey JARVIS is listening' : state.status?.wake?.configured ? 'Starting' : 'Standby', keywords: 'voice microphone clap openwakeword', value: 'system-system', mode: 'system', online: state.status?.wake?.ready }
   ];
+  if (state.status?.routines) liveServices.push({ id: 'routines', label: 'Read-only Routines', detail: `${state.status.routines.active || 0} active // ${state.status.routines.count || 0} total`, keywords: 'routine automation schedule health docker printer weather news calendar briefing', value: 'system-system', mode: 'system', online: true });
   for (const service of liveServices) items.push({ ...service, id: `live-${service.id}`, category: service.online ? 'ONLINE' : 'OFFLINE', kind: 'node', priority: 48 });
 
   for (const model of services.ollama?.models || []) items.push({ id: `model-${model}`, label: model, detail: 'Installed local Ollama model', keywords: `ollama llm artificial intelligence ${model}`, category: 'MODEL', kind: 'node', value: 'system-system', mode: 'system', priority: 40 });
@@ -358,7 +418,9 @@ function executeSearchItem(item = state.searchResults[state.searchSelection]) {
     state.galaxy?.selectById(item.value); return;
   }
   if (item.kind === 'voice') { void toggleVoice(); return; }
+  if (item.kind === 'ptt') { beginPushToTalk(); return; }
   if (item.kind === 'gestures') { void toggleGestures(); return; }
+  if (item.kind === 'mission') { openMissionInspector(); return; }
   if (item.kind === 'fullscreen') { void toggleFullscreen(); return; }
   if (item.kind === 'prompt' || item.kind === 'ask') void sendPrompt(item.value);
 }
@@ -369,7 +431,78 @@ function handleVoiceCommand(command) {
   if (/^(?:open|show)(?: the)? (?:jarvis )?search$/i.test(text)) { openSearch(); return; }
   const searchMatch = text.match(/^(?:search (?:the )?dashboard for|find in jarvis)\s+(.+)$/i);
   if (searchMatch) { openSearch(searchMatch[1]); return; }
-  void sendPrompt(text);
+  void sendPrompt(text, { fromVoice: true });
+}
+
+function beginPushToTalk() {
+  if (state.voiceCapture.active || ui.operationDialog?.open || ui.emailDialog?.open || ui.browserControlDialog?.open) return false;
+  void handleWake({ detail: { kind: 'push_to_talk', phrase: 'push to talk', score: 1 } });
+  return true;
+}
+
+function missionModeLabel(value) { return String(value || 'standby').replaceAll('-', ' ').toUpperCase(); }
+
+function missionList(container, items, renderItem, emptyText) {
+  if (!container) return;
+  container.replaceChildren();
+  const values = Array.isArray(items) ? items : [];
+  if (!values.length) {
+    const empty = document.createElement('li'); empty.className = 'mission-empty'; empty.textContent = emptyText; container.append(empty); return;
+  }
+  for (const item of values) container.append(renderItem(item));
+}
+
+function missionItem(label, detail, tag = '') {
+  const item = document.createElement('li');
+  const strong = document.createElement('strong'); strong.textContent = String(label || 'ITEM'); item.append(strong);
+  if (detail) { const small = document.createElement('small'); small.textContent = String(detail); item.append(small); }
+  if (tag) { const badge = document.createElement('small'); badge.textContent = String(tag); item.append(badge); }
+  return item;
+}
+
+function renderMissionPlan(plan = state.missionPlan) {
+  if (!plan) {
+    if (ui.missionMode) ui.missionMode.textContent = 'STANDBY';
+    if (ui.missionSubtitle) ui.missionSubtitle.textContent = 'No mission has been planned yet.';
+    if (ui.missionRoute) ui.missionRoute.textContent = '—';
+    if (ui.missionAgent) ui.missionAgent.textContent = '—';
+    if (ui.missionModel) ui.missionModel.textContent = '—';
+    if (ui.missionScope) ui.missionScope.textContent = '—';
+    if (ui.missionWorkflow) ui.missionWorkflow.textContent = '—';
+    missionList(ui.missionCapabilities, [], () => missionItem('NONE'), 'No plan yet.');
+    missionList(ui.missionSteps, [], () => missionItem('NONE'), 'No plan yet.');
+    missionList(ui.missionApprovals, [], () => missionItem('NONE'), 'None.');
+    missionList(ui.missionWarnings, [], () => missionItem('NONE'), 'None.');
+    return;
+  }
+  const mode = missionModeLabel(plan.executionMode);
+  if (ui.missionMode) ui.missionMode.textContent = mode;
+  if (ui.missionSubtitle) ui.missionSubtitle.textContent = `Classified ${Number(plan.requestLength) || 0} characters // policy preview only`;
+  if (ui.missionRoute) ui.missionRoute.textContent = plan.route || 'GENERAL';
+  if (ui.missionAgent) ui.missionAgent.textContent = plan.agent || 'JARVIS';
+  if (ui.missionModel) ui.missionModel.textContent = plan.model || 'LOCAL';
+  if (ui.missionScope) ui.missionScope.textContent = plan.localOnly ? 'LOCAL' : 'WEB / CONNECTORS';
+  if (ui.missionWorkflow) ui.missionWorkflow.textContent = plan.orchestration?.mode === 'fan-out-then-synthesize'
+    ? `${plan.orchestration.specialistCount || 0} LANES`
+    : 'DIRECT';
+  const capabilities = Array.isArray(plan.capabilities) ? plan.capabilities : [];
+  const steps = Array.isArray(plan.steps) ? plan.steps : [];
+  const approvals = Array.isArray(plan.approvals) ? plan.approvals : [];
+  const warnings = Array.isArray(plan.warnings) ? plan.warnings : [];
+  if (ui.missionCapabilityCount) ui.missionCapabilityCount.textContent = String(capabilities.length);
+  if (ui.missionStepCount) ui.missionStepCount.textContent = String(steps.length);
+  if (ui.missionApprovalCount) ui.missionApprovalCount.textContent = String(approvals.length);
+  if (ui.missionWarningCount) ui.missionWarningCount.textContent = String(warnings.length);
+  missionList(ui.missionCapabilities, capabilities, (item) => missionItem(item.label, item.kind, `${item.available ? 'AVAILABLE' : 'OFFLINE'} // ${item.readOnly ? 'READ' : 'CONTROL'}`), 'No capability selected.');
+  missionList(ui.missionSteps, steps, (item) => missionItem(item.label, '', item.mode || 'read'), 'No execution steps.');
+  missionList(ui.missionApprovals, approvals, (item) => missionItem(item.label, item.confirmation, item.available ? 'READY' : 'UNAVAILABLE'), 'No approval required.');
+  missionList(ui.missionWarnings, warnings, (item) => missionItem(item.code, item.message), 'No warnings.');
+}
+
+function openMissionInspector() {
+  renderMissionPlan();
+  if (!ui.missionDialog) return;
+  try { ui.missionDialog.showModal(); } catch { ui.missionDialog.setAttribute('open', ''); }
 }
 
 function refreshSearchIfOpen() { if (ui.searchDialog.open) renderSearchResults(); }
@@ -439,6 +572,7 @@ function renderStatus(payload) {
     { name: 'OpenJarvis', ok: payload.services?.openjarvis?.online, detail: payload.services?.openjarvis?.detail || 'offline' },
     { name: 'Ollama runtime', ok: payload.services?.ollama?.online, detail: `${payload.services?.ollama?.models?.length || 0} models` },
     { name: 'Google Workspace', ok: payload.google?.connected, detail: payload.google?.connected ? 'OAuth linked' : 'not linked' },
+    { name: 'OBS stream studio', ok: payload.services?.obs?.online, detail: payload.services?.obs?.online ? `LIVE // ${payload.services.obs.scene || 'scene ready'} // ${(payload.services.obs.streamHealth || 'idle').toUpperCase()}${payload.services.obs.previewScene ? ` // PREVIEW ${payload.services.obs.previewScene}` : ''} // ${payload.services.obs.sourceCount || 0} sources` : payload.services?.obs?.configured ? payload.services.obs.detail || 'offline' : 'not configured' },
     { name: 'Local wake listener', ok: payload.wake?.ready, detail: payload.wake?.model ? 'Hey Jarvis + clap' : payload.wake?.running ? 'clap only' : 'standby' }
   ];
   const online = services.filter((item) => item.ok).length;
@@ -449,11 +583,26 @@ function renderStatus(payload) {
   const statusLabel = payload.services?.openjarvis?.online ? 'SYSTEM NOMINAL' : ollamaFallback ? 'OLLAMA FALLBACK' : 'DEGRADED';
   ui.systemDot.className = healthy ? 'online' : 'warning'; ui.systemState.textContent = statusLabel;
   if (state.coreMode === 'system') ui.coreSubtitle.textContent = healthy ? 'SPEAK // PINCH // INSPECT // COMMAND' : 'VISUAL CORE READY // MODEL SERVICES STANDBY';
-  ui.modelLabel.textContent = payload.services?.ollama?.models?.[0] || 'NO MODEL';
-  ui.wakeState.textContent = payload.wake?.ready ? 'LISTENING' : payload.wake?.configured ? 'STARTING' : 'STANDBY';
+  setModelDisplay({ model: payload.services?.ollama?.models?.[0] || 'NO MODEL' });
+  const capture = payload.wake?.commandCapture;
+  const captureAt = Date.parse(capture?.at || '');
+  const captureFresh = capture && (capture.state === 'warming' || capture.state === 'listening' || (capture.state === 'complete' && Number.isFinite(captureAt) && Date.now() - captureAt < 8_000));
+  ui.wakeState.textContent = captureFresh ? (wakeCaptureLabel(capture) || 'CAPTURING') : payload.wake?.ready ? 'LISTENING' : payload.wake?.configured ? 'STARTING' : 'STANDBY';
   state.neuralEnergy = healthy ? .42 : .18;
   renderOperationStatus(payload.operations);
   refreshSearchIfOpen();
+}
+
+function setModelDisplay({ route = '', agent = '', model = '', requestedModel = '', modelFallback = '' } = {}) {
+  const chosen = String(model || '').trim() || 'NO MODEL';
+  const role = String(agent || route || '').trim().toUpperCase();
+  const label = role && chosen !== 'NO MODEL' ? `${role} // ${chosen}` : chosen;
+  ui.modelLabel.textContent = label;
+  ui.modelLabel.dataset.fallback = modelFallback ? 'true' : 'false';
+  ui.modelLabel.title = modelFallback
+    ? `${role || 'SPECIALIST'} requested ${requestedModel || 'a specialist model'}; using ${chosen}. ${modelFallback}`
+    : role ? `${role} specialist // ${chosen}` : chosen;
+  ui.modelLabel.setAttribute('aria-label', ui.modelLabel.title);
 }
 
 function renderOperationStatus(operations) {
@@ -555,6 +704,20 @@ function updateVoiceVisual(mode = 'standby', level = state.voiceLevel) {
   ui.voiceButton?.setAttribute('aria-label', label);
   ui.voiceButton?.setAttribute('title', label);
   if (ui.voiceButton) ui.voiceButton.dataset.voiceMode = mode;
+  const deckCopy = {
+    standby: 'MIC OFF // CLICK TO ENABLE',
+    listening: 'LISTENING // HEY JARVIS',
+    hearing: 'HEARING // PHYSICAL MIC',
+    armed: 'ARMED // COMMAND WINDOW OPEN',
+    speaking: 'TALKBACK // FISH AUDIO',
+    processing: 'THINKING // LOCAL ROUTER',
+    'audio-only': 'MIC LIVE // SPEECH API UNAVAILABLE',
+    error: 'VOICE ERROR // OPEN SETTINGS'
+  };
+  if (ui.voiceDeckState) {
+    ui.voiceDeckState.textContent = deckCopy[mode] || 'VOICE LINK // READY';
+    ui.voiceDeckState.dataset.voiceMode = mode;
+  }
   state.galaxy?.setActivity(mode, state.voiceLevel);
 }
 
@@ -569,22 +732,40 @@ function selectBrowserVoice() {
 
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-async function startThinkingSound() {
-  if (state.thinkingSound) return true;
+async function startThinkingSound({ phase = 'thinking' } = {}) {
+  if (state.thinkingSound) {
+    document.body.dataset.thinking = 'true';
+    document.body.dataset.thinkingPhase = phase;
+    return true;
+  }
+  // Keep the thinking state observable even when Web Audio is unavailable or
+  // the browser refuses to resume an audio context. The visual neural field
+  // must never look idle just because a sound device is locked down.
+  const sound = { context: null, master: null, ownsContext: false, timer: 0, stopped: false, audioReady: false };
+  state.thinkingSound = sound;
+  document.body.dataset.thinking = 'true';
+  document.body.dataset.thinkingPhase = phase;
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
   if (!AudioContextClass) return false;
   let context = state.voice?.context || null;
   let ownsContext = false;
   try {
     if (!context || context.state === 'closed') { context = new AudioContextClass({ latencyHint: 'interactive' }); ownsContext = true; }
-    if (context.state !== 'running') await context.resume();
+    if (context.state !== 'running') {
+      // Some headless/browser-policy paths leave AudioContext.resume() pending
+      // forever. Keep the visual thinking state, but never block the actual
+      // command/TTS request on a sound device that cannot be resumed.
+      const resumed = await Promise.race([
+        context.resume().then(() => true).catch(() => false),
+        wait(1_500).then(() => false)
+      ]);
+      if (!resumed) return false;
+    }
     if (context.state !== 'running') return false;
     const master = context.createGain();
     master.gain.value = Math.min(0.08, Math.max(0.01, Number(state.settings?.ttsVolume ?? 1) * 0.045));
     master.connect(context.destination);
-    const sound = { context, master, ownsContext, timer: 0, stopped: false };
-    state.thinkingSound = sound;
-    document.body.dataset.thinking = 'true';
+    sound.context = context; sound.master = master; sound.ownsContext = ownsContext; sound.audioReady = true;
     const pulse = () => {
       if (sound.stopped) return;
       const now = context.currentTime;
@@ -602,14 +783,34 @@ async function startThinkingSound() {
 
 function stopThinkingSound() {
   const sound = state.thinkingSound;
-  if (!sound) return;
+  if (!sound) { document.body.dataset.thinking = 'false'; delete document.body.dataset.thinkingPhase; return; }
   sound.stopped = true; clearTimeout(sound.timer); state.thinkingSound = null;
   document.body.dataset.thinking = 'false';
+  delete document.body.dataset.thinkingPhase;
   try {
+    if (!sound.context || !sound.master) return;
     const now = sound.context.currentTime; sound.master.gain.cancelScheduledValues(now); sound.master.gain.setTargetAtTime(0.0001, now, 0.04);
     window.setTimeout(() => { try { sound.master.disconnect(); } catch {} if (sound.ownsContext) void sound.context.close().catch(() => {}); }, 180);
   } catch {}
 }
+
+// A smoke-only handle lets the real browser test exercise the same cue without
+// spending a full local-model generation just to hold a request open. It is
+// never created on the normal dashboard route and carries no host capability.
+// Install it both before and after authentication: the auth helper may reload
+// the protected route, and a fresh module evaluation must expose the handle
+// deterministically even when a browser restores a cached document.
+function installSmokeThinkingCue() {
+  let smoke = false;
+  try { smoke = new URLSearchParams(window.location.search).get('smoke') === '1'; } catch {}
+  if (!smoke || window.__jarvisThinkingCue) return;
+  window.__jarvisThinkingCue = {
+    start: (options) => startThinkingSound(options),
+    stop: () => stopThinkingSound(),
+    state: () => ({ thinking: document.body.dataset.thinking || 'false', phase: document.body.dataset.thinkingPhase || '' })
+  };
+}
+installSmokeThinkingCue();
 
 async function requestFishSpeech(text) {
   let lastError = new Error('Fish Audio request failed.');
@@ -704,6 +905,16 @@ async function unlockAudioFromGesture() {
 
 async function beginWakeCommandCapture(session, initialCommand = '') {
   if (session !== state.wakeSession || !state.voiceCapture.active) return;
+  // The Pi listener can finish a bounded local Vosk sentence before the wake
+  // event reaches the dashboard. Route that verified command immediately;
+  // opening a second browser microphone first would drop it on a headless Pi
+  // or any host where the dashboard tab has no capture permission.
+  const directCommand = normalizeWakeCommand(initialCommand);
+  if (hasWakeCommand(directCommand)) {
+    updateVoiceCommandTranscript(directCommand, true);
+    handleVoiceCommand(directCommand);
+    return;
+  }
   try {
     if (!state.voice?.active) await state.voice?.start(state.settings);
   } catch (error) {
@@ -718,11 +929,25 @@ async function beginWakeCommandCapture(session, initialCommand = '') {
   }
 }
 
+async function beginConversationCapture() {
+  if (!state.settings?.conversationMode || state.voiceCapture.active || ui.operationDialog?.open || ui.emailDialog?.open || ui.browserControlDialog?.open) return false;
+  const session = ++state.wakeSession;
+  if (!openVoiceCommandWindow()) return false;
+  ui.wakeState.textContent = 'FOLLOW-UP';
+  ui.voiceCaptureState.textContent = 'FOLLOW-UP READY';
+  ui.voiceCaptureTranscript.textContent = 'Ask another question without saying Hey Jarvis.';
+  ui.searchMode.textContent = 'VOICE SESSION // FOLLOW-UP';
+  try {
+    await beginWakeCommandCapture(session);
+    return session === state.wakeSession && state.voiceCapture.active;
+  } catch { return false; }
+}
+
 async function handleWake(event) {
   const session = ++state.wakeSession; const initialCommand = String(event?.detail?.command || '').trim();
   if (!openVoiceCommandWindow()) return;
   ui.wakeFlash.classList.remove('active'); void ui.wakeFlash.offsetWidth; ui.wakeFlash.classList.add('active');
-  ui.wakeState.textContent = event?.detail?.kind === 'double_clap' ? 'CLAP' : 'HEARD'; state.neuralEnergy = 1;
+  ui.wakeState.textContent = event?.detail?.kind === 'double_clap' ? 'CLAP' : event?.detail?.kind === 'push_to_talk' ? 'PTT' : 'HEARD'; state.neuralEnergy = 1;
   updateVoiceVisual('armed', 1);
   const context = { kind: 'wake', session, command: initialCommand };
   const played = isEmbeddedPreview() || !state.settings?.wakeResponse ? true : await speak(state.settings.wakeResponse, { pendingContext: context });
@@ -735,9 +960,20 @@ async function handleWake(event) {
   setTimeout(() => { ui.wakeState.textContent = state.status?.wake?.ready ? 'LISTENING' : 'STANDBY'; }, 2200);
 }
 
-async function sendPrompt(prompt, { browserGrant = '', appendUser = true } = {}) {
+async function sendPrompt(prompt, { browserGrant = '', appendUser = true, fromVoice = false } = {}) {
   const text = String(prompt || '').trim(); if (!text || ui.send.disabled) return;
   state.galaxy?.focusFromText(text);
+  const desktopMatch = text.match(/^\s*(?:please\s+)?(?:open|launch|start)\s+(?:the\s+)?(?:(?:desktop|host)\s+)?(?:app|application)\s+["']?(.{1,120}?)["']?\s*$/i);
+  if (desktopMatch) { await openDesktopAction(desktopMatch[1].trim().replace(/^["']|["']$/g, '')); return; }
+  // Natural host-app phrasing is accepted only when the redacted catalog has a
+  // match. Otherwise the request continues through the normal web/AI lane.
+  const naturalDesktopMatch = text.match(/^\s*(?:please\s+)?(?:open|launch|start)\s+(?:the\s+)?["']?([^"']{1,120}?)["']?\s*$/i);
+  if (naturalDesktopMatch && !/[/:?&=]/.test(naturalDesktopMatch[1])) {
+    const catalog = await json('/api/desktop/apps').catch(() => null);
+    if (findDesktopApp(catalog, naturalDesktopMatch[1])) {
+      await openDesktopAction(naturalDesktopMatch[1], { catalog }); return;
+    }
+  }
   const directPrinterAction = /\b(?:cancel|end|stop)\s+(?:my\s+|the\s+)?(?:3d\s+)?print\b/i.test(text) ? 'cancel'
     : /\bpause\s+(?:my\s+|the\s+)?(?:3d\s+)?print\b/i.test(text) ? 'pause'
       : /\bresume\s+(?:my\s+|the\s+)?(?:3d\s+)?print\b/i.test(text) ? 'resume' : '';
@@ -746,10 +982,54 @@ async function sendPrompt(prompt, { browserGrant = '', appendUser = true } = {})
     appendMessage('user', text); appendMessage('assistant', `I opened the guarded ${directPrinterAction} control. Enter the operations PIN and type ${printerCopy[directPrinterAction].confirmation} exactly. I will not execute it automatically.`, 'LOCAL SAFETY');
     openPrinterAction(directPrinterAction); return;
   }
+  const sceneMatch = text.match(/^\s*(?:please\s+)?(?:switch|change)\s+(?:the\s+)?(?:obs\s+)?scene\s+(?:to\s+)?["']?([^"']{1,100})["']?\s*$/i);
+  const muteMatch = text.match(/^\s*(?:please\s+)?(mute|unmute)\s+(?:the\s+)?(?:obs\s+)?(?:audio\s+)?source\s+["']?(.{1,120}?)["']?\s*$/i);
+  const volumeMatch = text.match(/^\s*(?:please\s+)?set\s+(?:the\s+)?(?:obs\s+)?(?:audio\s+)?source\s+["']?(.{1,100}?)["']?\s+(?:volume|gain)\s+(?:to\s+)?(-?\d+(?:\.\d+)?)\s*d?b\s*$/i);
+  const toggleMatch = text.match(/^\s*(?:please\s+)?(enable|disable|show|hide)\s+(?:the\s+)?(?:obs\s+)?source\s+["']?(.{1,120}?)["']?\s+(?:in|on)\s+(?:scene\s+)?["']?(.{1,100}?)["']?\s*$/i);
+  const browserSourceMatch = text.match(/^\s*(?:please\s+)?refresh\s+(?:the\s+)?(?:obs\s+)?browser\s+source\s+["']?(.{1,120}?)["']?\s*$/i);
+  const mediaSourceMatch = text.match(/^\s*(?:please\s+)?restart\s+(?:the\s+)?(?:obs\s+)?media\s+source\s+["']?(.{1,120}?)["']?\s*$/i);
+  const transitionMatch = text.match(/^\s*(?:please\s+)?set\s+(?:the\s+)?(?:obs\s+)?(?:scene\s+)?transition\s+(?:to\s+)?["']?(.{1,120}?)["']?\s*$/i);
+  const filterMatch = text.match(/^\s*(enable|disable)\s+(?:the\s+)?(?:obs\s+)?filter\s+["']?(.{1,100}?)["']?\s+(?:on|for)\s+(?:source\s+)?["']?(.{1,120}?)["']?\s*$/i);
+  const directObsAction = sceneMatch ? 'switch-scene'
+    : /^(?:\s*please\s+)?(?:start|begin)\s+(?:the\s+)?(?:obs\s+)?stream\s*$/i.test(text) || /^\s*go\s+live\s*$/i.test(text) ? 'start-stream'
+      : /^(?:\s*please\s+)?(?:stop|end)\s+(?:the\s+)?(?:obs\s+)?stream\s*$/i.test(text) ? 'stop-stream'
+        : /^(?:\s*please\s+)?(?:start|begin)\s+(?:obs\s+)?record(?:ing)?\s*$/i.test(text) ? 'start-record'
+          : /^(?:\s*please\s+)?(?:stop|end)\s+(?:obs\s+)?record(?:ing)?\s*$/i.test(text) ? 'stop-record'
+            : /^\s*(?:please\s+)?pause\s+(?:the\s+)?obs\s+record(?:ing)?\s*$/i.test(text) ? 'pause-record'
+              : /^\s*(?:please\s+)?resume\s+(?:the\s+)?obs\s+record(?:ing)?\s*$/i.test(text) ? 'resume-record'
+                : /^\s*(?:please\s+)?(?:start|begin)\s+(?:the\s+)?obs\s+replay(?:\s+buffer)?\s*$/i.test(text) ? 'start-replay'
+                  : /^\s*(?:please\s+)?(?:stop|end)\s+(?:the\s+)?obs\s+replay(?:\s+buffer)?\s*$/i.test(text) ? 'stop-replay'
+                    : /^\s*(?:please\s+)?(?:save|clip)\s+(?:the\s+)?obs\s+replay(?:\s+buffer)?\s*$/i.test(text) ? 'save-replay'
+                      : /^\s*(?:please\s+)?(?:start|begin)\s+(?:the\s+)?obs\s+virtual\s+camera\s*$/i.test(text) ? 'start-virtualcam'
+                        : /^\s*(?:please\s+)?(?:stop|end)\s+(?:the\s+)?obs\s+virtual\s+camera\s*$/i.test(text) ? 'stop-virtualcam'
+                          : /^\s*(?:please\s+)?(?:take|apply)\s+(?:the\s+)?obs\s+preview\s*$/i.test(text) ? 'studio-take'
+                            : /^\s*(?:please\s+)?enable\s+(?:the\s+)?obs\s+studio\s+mode\s*$/i.test(text) ? 'enable-studio'
+                              : /^\s*(?:please\s+)?disable\s+(?:the\s+)?obs\s+studio\s+mode\s*$/i.test(text) ? 'disable-studio'
+                                : browserSourceMatch ? 'refresh-browser-source'
+                                  : mediaSourceMatch ? 'restart-media-source'
+                                    : transitionMatch ? 'set-transition'
+                                      : filterMatch ? 'toggle-filter'
+                                        : muteMatch ? (muteMatch[1].toLowerCase() === 'mute' ? 'mute-source' : 'unmute-source')
+                              : volumeMatch ? 'set-volume' : toggleMatch ? 'toggle-source' : '';
+  if (directObsAction) {
+    activateCoreMode('agents');
+    const sceneName = sceneMatch ? sceneMatch[1].trim() : '';
+    const inputName = muteMatch ? muteMatch[2].trim() : volumeMatch ? volumeMatch[1].trim() : toggleMatch ? toggleMatch[2].trim() : browserSourceMatch ? browserSourceMatch[1].trim() : mediaSourceMatch ? mediaSourceMatch[1].trim() : filterMatch ? filterMatch[3].trim() : '';
+    const volumeDb = volumeMatch ? Number(volumeMatch[2]) : null;
+    const enabled = toggleMatch ? ['enable', 'show'].includes(toggleMatch[1].toLowerCase()) : filterMatch ? filterMatch[1].toLowerCase() === 'enable' : null;
+    const filterName = filterMatch ? filterMatch[2].trim() : '';
+    const transitionName = transitionMatch ? transitionMatch[1].trim() : '';
+    const targetScene = toggleMatch ? toggleMatch[3].trim() : sceneName;
+    const target = filterName ? ` Target filter: ${filterName} on ${inputName}.` : transitionName ? ` Target transition: ${transitionName}.` : inputName ? ` Target source: ${inputName}${Number.isFinite(volumeDb) ? ` at ${volumeDb} dB` : ''}.` : targetScene ? ` Target scene: ${targetScene}.` : '';
+    appendMessage('user', text); appendMessage('assistant', `I opened the guarded OBS ${directObsAction.replaceAll('-', ' ')} control. Enter the operations PIN and type ${obsCopy[directObsAction].confirmation} exactly. I will not execute it automatically.`, 'LOCAL SAFETY');
+    openObsAction(directObsAction, targetScene, { inputName, volumeDb, enabled, filterName, transitionName, sceneItemId: null, target }); return;
+  }
   if (appendUser) { appendMessage('user', text); state.history.push({ role: 'user', content: text }); state.history = state.history.slice(-16); }
+  if (ui.missionState) { ui.missionState.textContent = 'PLANNING'; ui.missionState.title = 'JARVIS is classifying data sources, specialist route, and required approvals.'; }
   ui.prompt.value = ''; ui.send.disabled = true; ui.send.innerHTML = '<span>LINK</span><b>RUNNING</b>'; state.neuralEnergy = .95; updateVoiceVisual('processing', .92);
   window.setTimeout(() => void refreshAgentLive({ force: true }), 80);
   let responseSettled = false; let thinkingStart = null; let responseSpeechPending = false;
+  const missionPlanPromise = json('/api/mission/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: text }) }).catch(() => null);
   const responsePromise = json('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: text, history: state.history.slice(0, -1), browserGrant }) })
     .finally(() => { responseSettled = true; });
   try {
@@ -758,18 +1038,41 @@ async function sendPrompt(prompt, { browserGrant = '', appendUser = true } = {})
     }
     if (!responseSettled) thinkingStart = startThinkingSound();
     const result = await responsePromise;
+    const missionPlan = await missionPlanPromise;
+    state.missionPlan = missionPlan;
+    renderMissionPlan(missionPlan);
+    if (missionPlan && ui.missionState) {
+      const mode = String(missionPlan.executionMode || 'read-only-local').replaceAll('-', ' ').toUpperCase();
+      ui.missionState.textContent = mode;
+      ui.missionState.title = [
+        `ROUTE ${missionPlan.route || 'GENERAL'}`,
+        `${missionPlan.steps?.length || 0} STEPS`,
+        missionPlan.approvals?.length ? `${missionPlan.approvals.length} APPROVAL${missionPlan.approvals.length === 1 ? '' : 'S'}` : 'NO APPROVAL',
+        missionPlan.warnings?.length ? `${missionPlan.warnings.length} WARNING${missionPlan.warnings.length === 1 ? '' : 'S'}` : 'NO WARNINGS'
+      ].join(' // ');
+    }
     if (thinkingStart) await thinkingStart;
     ui.route.textContent = result.route;
     activateCoreMode(routeModes[result.route] || 'system');
-    state.lastAssistant = result.content; appendMessage('assistant', result.content, result.source); state.history.push({ role: 'assistant', content: result.content }); state.history = state.history.slice(-16);
+    setModelDisplay(result);
+    const coordinationLabel = Array.isArray(result.coordination) && result.coordination.length > 1 ? `${result.coordination.length} SPECIALIST LANES` : '';
+    const responseSource = [result.source, coordinationLabel, result.modelFallback ? 'MODEL FALLBACK' : ''].filter(Boolean).join(' // ');
+    state.lastAssistant = result.content; appendMessage('assistant', result.content, responseSource); state.history.push({ role: 'assistant', content: result.content }); state.history = state.history.slice(-16);
     if (Array.isArray(result.citations) && result.citations.length) { renderCitations(result.citations); activateCoreMode('research'); }
     if (result.action?.type === 'email_draft') openEmailDraft(result.action);
     if (result.action?.type === 'browser_control_request') openBrowserControlRequest(result.action, text);
     if (result.action?.type === 'artifact_ready') openArtifact(result.action.artifact);
     responseSpeechPending = Boolean(state.settings?.autoSpeak !== false && result.content);
-    if (responseSpeechPending) void speak(result.content, { onPlaybackStart: stopThinkingSound }).finally(stopThinkingSound);
-    else stopThinkingSound();
-  } catch (error) { stopThinkingSound(); appendMessage('error', error.message); }
+    const continueConversation = Boolean(fromVoice && state.settings?.conversationMode && result.content && !result.action);
+    if (responseSpeechPending) {
+      void speak(result.content, { onPlaybackStart: stopThinkingSound })
+        .then(() => { if (continueConversation) void beginConversationCapture(); })
+        .finally(stopThinkingSound);
+    } else {
+      stopThinkingSound();
+      if (continueConversation) void beginConversationCapture();
+    }
+  } catch (error) { stopThinkingSound(); if (ui.missionState) { ui.missionState.textContent = 'ERROR'; ui.missionState.title = error.message || 'Mission failed.'; } appendMessage('error', error.message); }
   finally { if (!responseSpeechPending) stopThinkingSound(); ui.send.disabled = false; ui.send.innerHTML = '<span>RUN</span><b>EXECUTE</b>'; state.neuralEnergy = .42; if (state.voiceState !== 'speaking') updateVoiceVisual(state.voice?.active ? 'listening' : 'standby', .18); }
 }
 
@@ -811,6 +1114,7 @@ async function toggleVoice() {
 }
 
 function isEmbeddedPreview() { try { return window.self !== window.top; } catch { return true; } }
+function isSmokeMode() { try { return new URLSearchParams(window.location.search).get('smoke') === '1'; } catch { return false; } }
 function fullscreenElement() { return document.fullscreenElement || document.webkitFullscreenElement || null; }
 function browserFullscreenActive() {
   const nativeViewport = Math.abs((window.screen?.height || 0) - window.innerHeight) <= 3 && Math.abs((window.screen?.width || 0) - window.innerWidth) <= 3;
@@ -929,16 +1233,60 @@ function openPrinterAction(action) {
   state.operation = action; state.operationKind = 'printer'; ui.operationTitle.textContent = copy.title; ui.operationDescription.textContent = copy.description; ui.confirmationPhrase.textContent = copy.confirmation;
   ui.operationPin.value = ''; ui.operationConfirmation.value = ''; ui.operationError.textContent = ''; ui.confirmOperation.disabled = false; ui.confirmOperation.textContent = action === 'cancel' ? 'CONFIRM END PRINT' : 'SEND TO PRINTER'; ui.operationDialog.showModal(); ui.operationPin.focus();
 }
+function openObsAction(action, sceneName = '', details = {}) {
+  const copy = obsCopy[action]; if (!copy) return;
+  state.operation = action; state.operationKind = 'obs'; state.obsSceneName = sceneName; state.obsInputName = String(details.inputName || ''); state.obsVolumeDb = Number.isFinite(Number(details.volumeDb)) ? Number(details.volumeDb) : null; state.obsSceneItemId = Number.isSafeInteger(Number(details.sceneItemId)) ? Number(details.sceneItemId) : null; state.obsEnabled = typeof details.enabled === 'boolean' ? details.enabled : null; state.obsFilterName = String(details.filterName || ''); state.obsTransitionName = String(details.transitionName || '');
+  ui.operationTitle.textContent = copy.title; ui.operationDescription.textContent = `${copy.description}${details.target || (sceneName ? ` Target scene: ${sceneName}.` : state.obsInputName ? ` Target source: ${state.obsInputName}.` : '')}`; ui.confirmationPhrase.textContent = copy.confirmation;
+  ui.operationPin.value = ''; ui.operationConfirmation.value = ''; ui.operationError.textContent = ''; ui.confirmOperation.disabled = false; ui.confirmOperation.textContent = 'RUN OBS CONTROL'; ui.operationDialog.showModal(); ui.operationPin.focus();
+}
+function findDesktopApp(catalog, requestedName) {
+  const normalized = String(requestedName || '').trim().toLocaleLowerCase();
+  if (!normalized || !Array.isArray(catalog?.apps)) return null;
+  return catalog.apps.find((item) => String(item.name || '').toLocaleLowerCase() === normalized)
+    || catalog.apps.find((item) => String(item.name || '').toLocaleLowerCase().includes(normalized));
+}
+async function openDesktopAction(requestedName, { catalog = null } = {}) {
+  const name = String(requestedName || '').trim();
+  if (!name) return;
+  appendMessage('user', `Open app ${name}`);
+  try {
+    const resolvedCatalog = catalog || await json('/api/desktop/apps');
+    const app = findDesktopApp(resolvedCatalog, name);
+    if (!app) {
+      const examples = (catalog.apps || []).slice(0, 8).map((item) => item.name).join(', ');
+      appendMessage('error', examples ? `I could not find “${name}” in the host app catalog. Available examples: ${examples}.` : 'No host applications were discovered. Refresh the dashboard on the computer that should launch the app.');
+      return;
+    }
+    state.operationKind = 'desktop'; state.operation = 'launch'; state.desktopAppId = app.id; state.desktopAppName = app.name;
+    const copy = desktopCopy.launch;
+    ui.operationTitle.textContent = `${copy.title}: ${app.name}`; ui.operationDescription.textContent = `${copy.description} Platform: ${app.platform}.`;
+    ui.confirmationPhrase.textContent = copy.confirmation; ui.operationPin.value = ''; ui.operationConfirmation.value = ''; ui.operationError.textContent = '';
+    ui.confirmOperation.disabled = false; ui.confirmOperation.textContent = 'LAUNCH HOST APP'; ui.operationDialog.showModal(); ui.operationPin.focus();
+  } catch (error) { appendMessage('error', `Host app catalog unavailable: ${error.message}`); }
+}
 async function runOperation() {
-  const copy = state.operationKind === 'printer' ? printerCopy[state.operation] : operationCopy[state.operation]; if (!copy) return;
+  const copy = state.operationKind === 'printer' ? printerCopy[state.operation] : state.operationKind === 'obs' ? obsCopy[state.operation] : state.operationKind === 'desktop' ? desktopCopy[state.operation] : operationCopy[state.operation]; if (!copy) return;
   ui.operationError.textContent = ''; ui.confirmOperation.disabled = true; ui.confirmOperation.textContent = 'EXECUTING';
   try {
-    const endpoint = state.operationKind === 'printer' ? '/api/printer/action' : '/api/operations/action';
-    const result = await json(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: state.operation, pin: ui.operationPin.value, confirmation: ui.operationConfirmation.value }) });
-    if (state.operationKind === 'printer') renderPrinter(result.result); else renderOperationStatus(result.result);
-    ui.operationDialog.close(); addEvent({ id: `local-${Date.now()}`, at: new Date().toISOString(), type: state.operationKind === 'printer' ? 'printer' : 'control', message: `${state.operation} completed`, detail: {} });
+    const endpoint = state.operationKind === 'printer' ? '/api/printer/action' : state.operationKind === 'obs' ? '/api/obs/action' : state.operationKind === 'desktop' ? '/api/desktop/launch' : '/api/operations/action';
+    const body = { action: state.operation, pin: ui.operationPin.value, confirmation: ui.operationConfirmation.value };
+    if (state.operationKind === 'desktop') body.appId = state.desktopAppId;
+    if (state.operationKind === 'obs') {
+      if (state.obsSceneName) body.sceneName = state.obsSceneName;
+      if (state.obsInputName) body.inputName = state.obsInputName;
+      if (state.obsVolumeDb !== null) body.volumeDb = state.obsVolumeDb;
+      if (state.obsSceneItemId !== null) body.sceneItemId = state.obsSceneItemId;
+      if (state.obsEnabled !== null) body.enabled = state.obsEnabled;
+      if (state.obsFilterName) body.filterName = state.obsFilterName;
+      if (state.obsTransitionName) body.transitionName = state.obsTransitionName;
+    }
+    const result = await json(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (state.operationKind === 'printer') renderPrinter(result.result); else if (state.operationKind !== 'obs' && state.operationKind !== 'desktop') renderOperationStatus(result.result);
+    if (state.operationKind === 'obs' && result.status) { state.status = { ...(state.status || {}), services: { ...(state.status?.services || {}), obs: { online: result.status.online, configured: result.status.configured, detail: result.status.error || (result.status.online ? 'ready' : 'offline'), scene: result.status.scenes?.current || '', previewScene: result.status.scenes?.preview || '', streaming: result.status.streaming?.active, streamHealth: result.status.streaming?.health?.status || 'idle', streamCongestion: result.status.streaming?.health?.congestion || 0, streamSkippedFrames: result.status.streaming?.health?.skippedFrames || 0, streamDroppedPercent: result.status.streaming?.health?.droppedPercent || 0, recording: result.status.recording?.active, recordingPaused: result.status.recording?.paused, replayBuffer: result.status.replayBuffer?.active, virtualCamera: result.status.virtualCamera?.active, studioMode: result.status.studioMode?.enabled, sourceCount: Object.values(result.status.scenes?.sources || {}).reduce((total, items) => total + (Array.isArray(items) ? items.length : 0), 0) } } }; renderStatus(state.status); }
+    ui.operationDialog.close(); addEvent({ id: `local-${Date.now()}`, at: new Date().toISOString(), type: state.operationKind === 'printer' ? 'printer' : state.operationKind === 'desktop' ? 'desktop' : 'control', message: state.operationKind === 'desktop' ? `${state.desktopAppName} launched` : `${state.operation} completed`, detail: {} });
+    if (state.operationKind === 'desktop') { appendMessage('assistant', `${state.desktopAppName} launched on the host.`, 'LOCAL APP BRIDGE'); void speak(`${state.desktopAppName} is open, sir.`); }
   } catch (error) { ui.operationError.textContent = error.message; }
-  finally { ui.confirmOperation.disabled = false; ui.confirmOperation.textContent = state.operationKind === 'printer' ? (state.operation === 'cancel' ? 'CONFIRM END PRINT' : 'SEND TO PRINTER') : 'RUN ON RASPBERRY PI'; }
+  finally { ui.confirmOperation.disabled = false; ui.confirmOperation.textContent = state.operationKind === 'printer' ? (state.operation === 'cancel' ? 'CONFIRM END PRINT' : 'SEND TO PRINTER') : state.operationKind === 'obs' ? 'RUN OBS CONTROL' : state.operationKind === 'desktop' ? 'LAUNCH HOST APP' : 'RUN ON RASPBERRY PI'; }
 }
 
 function startEventStream() {
@@ -985,7 +1333,7 @@ async function toggleGestures() {
 }
 
 async function autoStartGesturesIfGranted() {
-  if (isEmbeddedPreview() || state.settings?.source !== 'browser' || state.settings?.gestureControl === false || !navigator.permissions?.query) return false;
+  if (isEmbeddedPreview() || isSmokeMode() || state.settings?.source !== 'browser' || state.settings?.gestureControl === false || !navigator.permissions?.query) return false;
   try {
     const permission = await navigator.permissions.query({ name: 'camera' });
     if (permission.state !== 'granted') return false;
@@ -1005,6 +1353,11 @@ ui.gestureButton.addEventListener('click', () => void toggleGestures());
 ui.fullscreenButton?.addEventListener('click', () => void toggleFullscreen());
 ui.fullscreenGate?.addEventListener('click', () => void toggleFullscreen());
 ui.reactorScan?.addEventListener('click', pulseCore);
+ui.missionInspect?.addEventListener('click', openMissionInspector);
+ui.missionInspectCore?.addEventListener('click', openMissionInspector);
+ui.missionClose?.addEventListener('click', () => ui.missionDialog?.close());
+ui.missionDialog?.addEventListener('cancel', (event) => { event.preventDefault(); ui.missionDialog.close(); });
+ui.missionDialog?.addEventListener('pointerdown', (event) => { if (event.target === ui.missionDialog) ui.missionDialog.close(); });
 ui.searchForm.addEventListener('submit', (event) => { event.preventDefault(); if (!state.voiceCapture.active) executeSearchItem(); });
 ui.searchInput.addEventListener('input', () => { if (!state.voiceCapture.active) renderSearchResults({ resetSelection: true }); });
 ui.searchClose.addEventListener('click', closeSearch);
@@ -1033,14 +1386,43 @@ window.addEventListener('keydown', (event) => {
     else if (event.key === 'Escape') { event.preventDefault(); closeSearch(); }
     return;
   }
+  if ((event.ctrlKey || event.metaKey) && event.altKey && event.code === 'Space' && !event.repeat && !event.target?.matches('input,textarea,select,[contenteditable="true"]')) {
+    event.preventDefault(); beginPushToTalk(); return;
+  }
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && event.code === 'Space' && !event.repeat && !event.target?.matches('input,textarea,select,[contenteditable="true"]')) {
+    event.preventDefault(); beginPushToTalk(); return;
+  }
   const editable = event.target?.matches('input,textarea,select,[contenteditable="true"]');
+  // Fast local wake path inspired by the observable desktop-assistant flow.
+  // It opens the same acknowledgement and microphone session as a wake word;
+  // it never grants a browser, host, email, printer, OBS, or PDF mutation.
+  if (event.ctrlKey && event.altKey && event.code === 'KeyD' && !event.repeat && !editable) {
+    event.preventDefault(); void handleWake({ detail: { kind: 'hotkey', phrase: 'ctrl alt d', score: 1 } }); return;
+  }
   if (!editable && event.key === '/') { event.preventDefault(); openSearch(); return; }
   if (editable) return;
   if (event.key.toLowerCase() === 'v') void toggleVoice();
   if (event.key.toLowerCase() === 'g') void toggleGestures();
   if (event.key === 'Escape') { void state.voice?.stop(); void state.gesture?.stop(); }
 });
-window.addEventListener('beforeunload', () => { clearInterval(state.agentLive.timer); void state.voice?.stop(); void state.gesture?.stop(); });
+window.addEventListener('beforeunload', () => { clearInterval(state.agentLive.timer); clearTimeout(mediaDeviceChangeTimer); void state.voice?.stop(); void state.gesture?.stop(); });
+navigator.mediaDevices?.addEventListener?.('devicechange', () => {
+  clearTimeout(mediaDeviceChangeTimer);
+  mediaDeviceChangeTimer = window.setTimeout(async () => {
+    mediaDeviceChangeTimer = 0;
+    const voiceWasActive = Boolean(state.voice?.active);
+    const gestureWasActive = Boolean(state.gesture?.active);
+    if (!voiceWasActive && !gestureWasActive) return;
+    await state.voice?.stop();
+    await state.gesture?.stop();
+    updateVoiceVisual('standby', 0);
+    ui.voiceButton.title = 'Start JARVIS voice listener';
+    ui.gestureButton.classList.remove('active');
+    ui.gestureButton.textContent = 'ENABLE GESTURES';
+    ui.gestureFeed.hidden = true;
+    appendMessage('assistant', 'A camera or microphone changed. I stopped the active listener safely; choose the device in Settings, then re-enable it.', 'DEVICE BUS');
+  }, 250);
+});
 document.addEventListener('pointerdown', () => void unlockAudioFromGesture(), { capture: true });
 document.addEventListener('keydown', () => void unlockAudioFromGesture(), { capture: true });
 document.addEventListener('visibilitychange', () => {
@@ -1050,6 +1432,7 @@ document.addEventListener('visibilitychange', () => {
 async function init() {
   updateClock(); setInterval(updateClock, 1000);
   await window.ensureDashboardAuthentication?.();
+  installSmokeThinkingCue();
   syncFullscreenUi();
   startEventStream(); startPrinterStream();
   const [config, settings] = await Promise.allSettled([json('/api/config'), json('/api/settings')]);
@@ -1068,11 +1451,21 @@ async function init() {
     },
     onWake: (detail) => void handleWake({ detail }),
     onCommand: handleVoiceCommand,
-    onTranscript: ({ text, final }) => {
+    onTranscript: ({ text, final, accepted = true }) => {
+      // A speech provider can emit confident text while the physical audio
+      // gate is quiet. VoiceController marks those guesses rejected; do not
+      // surface them in the command window or overwrite the user's text.
+      if (accepted === false) return;
       if (state.voiceCapture.active) { updateVoiceCommandTranscript(text, final); return; }
       if (!final) return;
-      if (ui.searchDialog.open) { ui.searchInput.value = text; renderSearchResults({ resetSelection: true }); }
-      else if (ui.prompt) ui.prompt.value = text;
+      const transcript = String(text || '').trim();
+      // Recognition providers can emit a delayed empty/final segment after a
+      // listener is stopped. Never let that clear a typed command. Likewise,
+      // a live provider result must not overwrite text while the user is
+      // actively editing the directive field.
+      if (!shouldApplyTranscriptToInput(transcript, { focused: document.activeElement === ui.prompt, currentValue: ui.prompt?.value })) return;
+      if (ui.searchDialog.open) { ui.searchInput.value = transcript; renderSearchResults({ resetSelection: true }); }
+      else if (ui.prompt && !(document.activeElement === ui.prompt && ui.prompt.value.trim())) ui.prompt.value = transcript;
     },
     onCapture: updateVoiceCapture,
     onError: (error) => { appendMessage('error', error.message); updateVoiceVisual('error', 1); }
@@ -1083,7 +1476,10 @@ async function init() {
     video: ui.gestureVideo, canvas: ui.gestureCanvas, cursor: ui.gestureCursor,
     onGesture: (gesture) => state.galaxy?.gesture(gesture), onStatus: (message) => { ui.gestureState.textContent = message; }
   });
-  if (!isEmbeddedPreview()) void state.voice.autoStartIfGranted(state.settings).catch(() => {});
+  // The deterministic Camoufox smoke profile must not claim the fake mic in
+  // the background before its explicit capture checks. Production pages still
+  // retain the normal granted-permission auto-start path.
+  if (!isEmbeddedPreview() && !isSmokeMode()) void state.voice.autoStartIfGranted(state.settings).catch(() => {});
   if (!isEmbeddedPreview()) void autoStartGesturesIfGranted();
   await Promise.all([refreshFast({ force: true }), refreshSlow({ force: true }), refreshAgentLive({ force: true })]);
   state.agentLive.timer = window.setInterval(() => void refreshAgentLive(), 700);

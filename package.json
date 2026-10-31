@@ -1,32 +1,46 @@
 {
   "name": "openjarvis-pi-command-center",
-  "version": "3.11.1",
+  "version": "3.31.0",
   "private": true,
   "description": "Private Pi 5 JARVIS with one full-screen neural field and one local model that automatically switches specialist roles",
   "type": "module",
   "main": "server.mjs",
   "scripts": {
     "assets": "node scripts/install-model.mjs",
-    "postinstall": "node scripts/install-model.mjs",
+    "postinstall": "node scripts/install-model.mjs && node scripts/patch-camoufox-windows.mjs",
     "start": "node server.mjs",
+    "start:local": "powershell -ExecutionPolicy Bypass -File scripts/start-local-stack.ps1",
+    "restart:local": "powershell -ExecutionPolicy Bypass -File scripts/restart-local-stack.ps1",
     "smoke:live": "node scripts/live-smoke.mjs",
-    "smoke:chrome": "node scripts/chrome-e2e-smoke.mjs",
+    "doctor": "node scripts/doctor.mjs",
+    "smoke:pi": "node scripts/pi-smoke.mjs",
+    "smoke:camoufox": "node scripts/camoufox-e2e-smoke.mjs",
+    "smoke:chrome": "node scripts/camoufox-e2e-smoke.mjs",
     "google:authorize": "node scripts/google-oauth-local.mjs",
     "voice:calibrate": "node scripts/calibrate-fish-voice.mjs",
-    "check": "node --check server.mjs && node --check lib/agent-security.mjs && node --check lib/artifact-studio.mjs && node --check lib/browser-control.mjs && node --check lib/dashboard-session.mjs && node --check lib/email-drafts.mjs && node --check lib/event-store.mjs && node --check lib/system-probe.mjs && node --check lib/printer-client.mjs && node --check lib/knowledge-index.mjs && node --check lib/google-workspace.mjs && node --check lib/news-tools.mjs && node --check lib/public-services.mjs && node --check lib/request-security.mjs && node --check lib/web-tools.mjs && node --check lib/openjarvis-live.mjs && node --check scripts/google-oauth-local.mjs && node --check scripts/live-smoke.mjs && node --check scripts/chrome-e2e-smoke.mjs && node --check scripts/mcp-prefix.mjs && node --check scripts/start-browser-mcp.mjs && node --check public/auth.js && node --check public/app.js && node --check public/galaxy.js && node --check public/gesture-controller.js && node --check public/media-utils.js && node --check public/voice-utils.js && node --check public/voice-controller.js && node --check public/search-utils.js && node --check public/settings.js && node --test tests/*.test.mjs && node scripts/verify.mjs"
+    "vision:install": "node scripts/install-vision-model.mjs",
+    "vision:check": "node scripts/install-vision-model.mjs --check",
+    "browser:patch": "node scripts/patch-camoufox-windows.mjs",
+    "smoke:stirling": "node scripts/stirling-roundtrip.mjs",
+    "check:stirling": "node --check scripts/stirling-roundtrip.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "pipeline": "node scripts/engineering-pipeline.mjs",
+    "check": "node --check server.mjs && node --check lib/agent-security.mjs && node --check lib/agent-router.mjs && node --check lib/artifact-studio.mjs && node --check lib/stats-deck.mjs && node --check lib/local-response.mjs && node --check lib/read-only-fallback.mjs && node --check lib/stirling-pdf.mjs && node --check lib/stirling-fixture.mjs && node --check lib/morning-briefing.mjs && node --check lib/response-style.mjs && node --check lib/printer-camera.mjs && node --check lib/browser-control.mjs && node --check lib/camoufox-browser.mjs && node --check lib/browser-preview.mjs && node --check lib/desktop-apps.mjs && node --check lib/capability-registry.mjs && node --check lib/dashboard-session.mjs && node --check lib/email-drafts.mjs && node --check lib/event-store.mjs && node --check lib/system-probe.mjs && node --check lib/printer-client.mjs && node --check lib/knowledge-index.mjs && node --check lib/local-memory.mjs && node --check lib/google-workspace.mjs && node --check lib/google-response.mjs && node --check lib/public-services.mjs && node --check lib/public-response.mjs && node --check lib/google-auth-flow.mjs && node --check lib/news-tools.mjs && node --check lib/obs-client.mjs && node --check lib/obs-overlay.mjs && node --check lib/broadcast-hub.mjs && node --check lib/request-security.mjs && node --check lib/web-tools.mjs && node --check lib/openjarvis-live.mjs && node --check lib/routine-engine.mjs && node --check lib/tts-resilience.mjs && node --check lib/vision-model-profile.mjs && node --check scripts/doctor.mjs && node --check scripts/google-oauth-local.mjs && node --check scripts/install-vision-model.mjs && node --check scripts/stirling-roundtrip.mjs && node --check scripts/live-smoke.mjs && node --check scripts/chrome-e2e-smoke.mjs && node --check scripts/camoufox-e2e-smoke.mjs && node --check scripts/patch-camoufox-windows.mjs && node --check scripts/mcp-prefix.mjs && node --check scripts/start-browser-mcp.mjs && node --check scripts/pi-smoke.mjs && node --check public/auth.js && node --check public/app.js && node --check public/galaxy.js && node --check public/gesture-controller.js && node --check public/media-utils.js && node --check public/voice-utils.js && node --check public/voice-controller.js && node --check public/wake-command.js && node --check public/wake-state.js && node --check public/search-utils.js && node --check public/settings.js && node --test tests/*.test.mjs && node scripts/verify.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.15"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.22-rc.20250304",
     "@playwright/mcp": "0.0.83",
     "@tensorflow-models/coco-ssd": "^2.2.3",
     "@tensorflow/tfjs": "^4.22.0",
+    "camoufox": "^0.5.8",
     "docx": "^9.14.0",
     "dotenv": "^17.2.3",
     "exceljs": "^4.4.0",
     "express": "^5.1.0",
+    "playwright-core": "^1.62.1",
     "pptxgenjs": "^4.0.1",
     "three": "^0.180.0",
     "ws": "^8.22.0"

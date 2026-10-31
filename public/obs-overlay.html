@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>JARVIS // OBS overlay</title>
+  <link rel="stylesheet" href="/obs-overlay.css">
+</head>
+<body data-theme="jarvis">
+  <main class="overlay" aria-live="polite">
+    <header class="overlay-head">
+      <div class="brand"><i></i><span>J.A.R.V.I.S. // BROADCAST</span></div>
+      <div class="live-state"><i id="overlay-live-dot"></i><b id="overlay-live">OFFLINE</b></div>
+    </header>
+    <section class="overlay-scene">
+      <small>PROGRAM SCENE</small>
+      <strong id="overlay-scene">NO SCENE</strong>
+      <span id="overlay-preview" hidden></span>
+    </section>
+    <section class="overlay-metrics">
+      <div><small>STREAM</small><b id="overlay-stream">IDLE</b><span id="overlay-health">—</span></div>
+      <div><small>RECORD</small><b id="overlay-record">OFF</b><span id="overlay-record-time">—</span></div>
+      <div><small>REPLAY</small><b id="overlay-replay">OFF</b><span id="overlay-camera">V-CAM OFF</span></div>
+    </section>
+    <footer class="overlay-foot"><span id="overlay-updated">JARVIS OVERLAY</span><span id="overlay-activity">WAITING FOR OBS</span></footer>
+    <div class="overlay-error" id="overlay-error" hidden>OVERLAY OFFLINE</div>
+  </main>
+  <script type="module" src="/obs-overlay.js"></script>
+</body>
+</html>

@@ -91,3 +91,30 @@ test('coalesces concurrent OAuth refreshes and names rejected Google probes', as
   assert.deepEqual(Object.keys(status.errors).sort(), ['gcalendar', 'gcontacts', 'gdrive', 'gmail', 'gtasks']);
   assert.match(status.errors.gmail, /google:authorize/);
 });
+
+test('names a deleted OAuth client without exposing provider details', async () => {
+  const bridge = new GoogleWorkspaceBridge({
+    environment: {}, home: '/tmp/jarvis-google',
+    reader: async (file) => file.endsWith('credentials.json')
+      ? JSON.stringify({ installed: { client_id: 'client', client_secret: 'secret' } })
+      : JSON.stringify({ refresh_token: 'refresh' }),
+    fetchImpl: async () => response({ error: 'deleted_client', error_description: 'The OAuth client was deleted.' }, 401)
+  });
+  const status = await bridge.status({ probe: true });
+  assert.match(status.errors.gmail, /client was deleted or disabled/i);
+  assert.doesNotMatch(status.errors.gmail, /secret|refresh|client_secret/i);
+});
+
+test('keeps the requested Google service name when a connector read fails', async () => {
+  const bridge = new GoogleWorkspaceBridge({
+    environment: {}, home: '/tmp/jarvis-google',
+    reader: async (file) => file.endsWith('credentials.json')
+      ? JSON.stringify({ installed: { client_id: 'client', client_secret: 'secret' } })
+      : JSON.stringify({ refresh_token: 'refresh' }),
+    fetchImpl: async () => response({ error: 'deleted_client', error_description: 'The OAuth client was deleted.' }, 401)
+  });
+  const result = await bridge.runIntent('Show my latest Gmail emails');
+  assert.equal(result.used, true);
+  assert.equal(result.service, 'gmail');
+  assert.equal(result.result, null);
+});

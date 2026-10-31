@@ -17,7 +17,7 @@
       </div>
       <div class="settings-health" aria-label="System context">
         <span><i class="pulse-dot"></i> LOCAL NODE <b id="settings-node">PI-5</b></span>
-        <span>BUILD <b id="settings-version">3.11.1</b></span>
+        <span>BUILD <b id="settings-version">3.31.0</b></span>
         <span>PROFILE <b id="settings-profile">LOADING</b></span>
       </div>
       <div class="settings-header-actions">
@@ -88,7 +88,7 @@
               <div class="zone-title"><span>BROWSER INPUTS</span><b id="browser-device-count">SCANNING</b></div>
               <div class="settings-grid">
                 <label class="setting" data-search="browser gesture camera webcam"><span>BROWSER / GESTURE CAMERA</span><select id="browser-camera" data-sensor-source><option value="">Default browser camera</option></select><small>Used for presence and hand tracking.</small></label>
-                <label class="setting" data-search="browser microphone mic voice"><span>BROWSER MICROPHONE</span><select id="browser-microphone" data-sensor-source><option value="">Default browser microphone</option></select><small>Used for talkback, wake phrase, and clap.</small></label>
+                <label class="setting" data-search="browser microphone mic voice"><span>BROWSER MICROPHONE</span><select id="browser-microphone" data-sensor-source><option value="">Default browser microphone</option></select><small>Used for talkback, wake phrase, and clap.</small><div class="microphone-profile-row"><em class="microphone-profile" id="microphone-profile">NO LOCAL PROFILE // CALIBRATE THIS MIC</em><button class="microphone-profile-reset" id="reset-microphone-profile" type="button">RESET</button></div></label>
               </div>
             </div>
             <div class="device-zone" data-host="pi">
@@ -152,12 +152,21 @@
               <div><span>LIVE TRANSCRIPT</span><b id="voice-transcript">VOICE TEST STANDBY</b><small id="voice-confidence">No speech sample captured</small></div>
               <i aria-hidden="true"><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b></i>
             </div>
+            <div class="voice-diagnostics" aria-live="polite">
+              <div><span>MIC EVIDENCE</span><b id="voice-evidence">STANDBY</b><small id="voice-evidence-detail">Start calibration to watch the physical gate.</small></div>
+              <div><span>SIGNAL / NOISE</span><b id="voice-snr">-- dB</b><small id="voice-gate">GATE -- // CREST --</small></div>
+              <div><span>SPECTRUM GATE</span><b id="voice-spectrum">--</b><small id="voice-spectrum-detail">Waiting for a calibrated microphone sample.</small></div>
+              <div><span>PHYSICAL EPOCH</span><b id="voice-epoch">0</b><small id="voice-decision">NO DECISION</small></div>
+              <div><span>RECOGNITION PATH</span><b id="voice-provider">NOT TESTED</b><small>Provider and on-device mode stay visible here.</small></div>
+            </div>
             <div class="settings-grid voice-grid">
               <label class="setting" data-search="speech language accent locale"><span>RECOGNITION LANGUAGE</span><select id="voice-language"><option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="en-AE">English (UAE)</option><option value="ar-AE">Arabic (UAE)</option></select><small>Choose the language and accent closest to your speech.</small></label>
               <label class="setting" data-search="wake phrase jarvis aliases"><span>WAKE PHRASES</span><input id="wake-phrases" type="text" maxlength="160" placeholder="hey jarvis, jarvis"><small>Comma-separated phrases; common Jarvis mishearings are corrected automatically.</small></label>
               <label class="setting full" data-search="recognition vocabulary bias terms ollama docker moonraker raspberry pi"><span>JARVIS VOCABULARY</span><input id="voice-vocabulary" type="text" maxlength="900" placeholder="OpenJarvis, Ollama, Docker, Moonraker, Raspberry Pi"><small>Comma-separated names receive extra recognition weight when the browser supports contextual biasing.</small></label>
               <label class="setting" data-search="talkback voice speaker fish audio"><span>LOCAL FALLBACK VOICE</span><select id="tts-voice"><option value="">System default voice</option></select><small id="tts-provider-note">Used when the primary server voice is unavailable.</small></label>
               <label class="setting" data-search="wake response acknowledgement"><span>WAKE ACKNOWLEDGEMENT</span><input id="wake-response" type="text" maxlength="60" placeholder="Yes sir, how can I help you today?"><small>Spoken after either “Hey Jarvis” or a double clap. Leave blank for silent wake.</small></label>
+              <label class="setting" data-search="personality tone style warm technical focused jarvis"><span>OPERATOR STYLE</span><select id="response-style"><option value="jarvis">JARVIS PROFESSIONAL</option><option value="warm">WARM ASSISTANT</option><option value="technical">TECHNICAL OPERATOR</option><option value="focused">FOCUSED COMMAND</option></select><small>Changes how local model answers are phrased; it does not change safety boundaries or tool permissions.</small></label>
+              <label class="setting" data-search="response length detail short normal detailed verbosity"><span>RESPONSE DETAIL</span><select id="response-length"><option value="short">SHORT</option><option value="normal">NORMAL</option><option value="detailed">DETAILED</option></select><small>Controls answer length while preserving the same evidence and approval rules.</small></label>
             </div>
             <div class="toggle-grid voice-toggles">
               <label class="switch" data-search="voice automatic start permission"><span><b>AUTO-START WHEN ALLOWED</b><small>Starts only after microphone permission was already granted</small></span><input id="voice-auto-start" type="checkbox"><i></i></label>
@@ -166,6 +175,7 @@
               <label class="switch" data-search="noise suppression"><span><b>NOISE SUPPRESSION</b><small>Reduces fans and steady room noise</small></span><input id="noise-suppression" type="checkbox"><i></i></label>
               <label class="switch" data-search="automatic gain control"><span><b>AUTO GAIN CONTROL</b><small>Balances quiet and loud speech</small></span><input id="auto-gain-control" type="checkbox"><i></i></label>
               <label class="switch" data-search="barge interrupt talkback"><span><b>BARGE-IN</b><small>Allow speech while JARVIS is talking; may increase echo</small></span><input id="barge-in" type="checkbox"><i></i></label>
+              <label class="switch" data-search="conversation follow up multi turn dialogue"><span><b>CONVERSATION MODE</b><small>After a voice reply, listen once for a follow-up without the wake phrase</small></span><input id="conversation-mode" type="checkbox"><i></i></label>
             </div>
             <div class="calibration-grid voice-calibration">
               <label class="setting" data-search="recognition confidence accuracy"><span>MINIMUM SPEECH CONFIDENCE <output id="recognition-confidence-output"></output></span><input id="recognition-confidence" type="range" min="0.1" max="0.95" step="0.05"><small>Raise this if background speech becomes commands.</small></label>
@@ -177,8 +187,9 @@
             <div class="voice-actions">
               <button class="sensor-button primary" id="test-recognition" type="button">TEST RECOGNITION</button>
               <button class="sensor-button" id="test-talkback" type="button">TEST TALKBACK</button>
+              <button class="sensor-button" id="auto-tune-voice" type="button">AUTO-TUNE VOICE GATE</button>
               <button class="sensor-button" id="install-local-speech" type="button" hidden>INSTALL LOCAL SPEECH PACK</button>
-              <p>Recognition quality is tested in this browser. JARVIS passes the exact selected audio track to compatible browsers and safely falls back to the provider default when that experimental input mode is unavailable.</p>
+              <p>Recognition quality is tested in this browser. Start the sensors, let the room floor settle, then use <b>AUTO-TUNE VOICE GATE</b> to stage thresholds for the measured noise/SNR. JARVIS passes the exact selected audio track to compatible browsers and safely falls back to the provider default when that experimental input mode is unavailable. Press <b>Ctrl+Space</b> or Dexter-compatible <b>Ctrl+Alt+Space</b> for a focused push-to-talk command session when you do not want the always-on wake listener. Conversation mode opens one bounded follow-up window after a voice answer; it never creates an always-open microphone loop.</p>
             </div>
           </section>
 
@@ -196,21 +207,81 @@
             <div class="interface-note"><span>DISPLAY CONTRACT</span><h3>ONE SCREEN. ZERO PAGE SCROLL.</h3><p>The command dashboard remains a full-screen instrument panel. Use the preview viewport controls to inspect laptop and Pi display proportions.</p></div>
           </section>
 
-          <section class="settings-section" data-section="integrations" data-search="google integration drive gmail calendar tasks contacts oauth private web websites browse internet browser powerpoint word excel office apps workspace">
-            <div class="settings-section-head"><div><span>SECTION 06</span><h2>PRIVATE TOOL &amp; APP BRIDGE</h2><p>Dedicated browser automation, local Office artifacts, Google reads, approved Gmail sending, and sourced news.</p></div><button type="button" class="section-tool" id="test-google">VERIFY GOOGLE</button></div>
+          <section class="settings-section" data-section="integrations" data-search="google integration drive gmail calendar tasks contacts oauth private web websites browse internet browser powerpoint word excel office apps workspace desktop host applications launch music media playlist song track podcast audio queue stirling pdf ocr compress repair word document printer camera snapshot webcam">
+            <div class="settings-section-head"><div><span>SECTION 06</span><h2>PRIVATE TOOL &amp; APP BRIDGE</h2><p>Dedicated browser automation, local Office artifacts, Google reads, approved Gmail sending, and sourced news.</p></div><div class="section-tool-group"><button type="button" class="section-tool" id="test-google">VERIFY GOOGLE</button><button type="button" class="section-tool" id="reauthorize-google">REAUTHORIZE GOOGLE</button></div></div>
             <div class="integration-status-line"><span class="section-state" id="google-state">CHECKING</span><b>GOOGLE OAUTH STAYS ON THE HOST</b></div>
+            <div class="privacy-callout google google-reauth-callout"><b>GOOGLE CONSENT HANDOFF</b><p id="google-reauth-note">If the OAuth client was deleted or disabled, start a fresh Desktop OAuth consent flow here. JARVIS exposes only the Google consent URL; credentials and tokens stay on the host.</p><a id="google-reauth-link" class="sensor-button" href="#" target="_blank" rel="noreferrer" hidden>OPEN GOOGLE CONSENT</a></div>
             <div class="google-grid" id="google-grid"></div>
+            <div class="integration-status-line"><span class="section-state" id="stirling-state">CHECKING</span><b>STIRLING PDF // SERVER-SIDE PROCESSING</b><button type="button" class="section-tool compact" id="test-stirling">CHECK API</button><button type="button" class="section-tool compact" id="test-stirling-processing">TEST SYNTHETIC PROCESS</button></div>
+            <div class="google-grid" id="stirling-grid"></div>
+            <div class="privacy-callout"><b>PDF PROCESSING BOUNDARY</b><p id="stirling-note">PDFs are accepted only from configured private input roots. The Stirling API key stays in the JARVIS host environment and is never returned to this screen.</p></div>
             <div class="integration-status-line"><span class="section-state" id="workspace-state">CHECKING</span><b>PRIVATE CROSS-PLATFORM WORKSPACE</b></div>
             <div class="google-grid" id="workspace-grid"></div>
+            <div class="integration-status-line"><span class="section-state" id="obs-overlay-state">CHECKING</span><b>OBS READ-ONLY STATUS OVERLAY</b></div>
+            <div class="obs-overlay-builder">
+              <label class="setting full"><span>OBS BROWSER SOURCE URL</span><input id="obs-overlay-url" type="text" readonly placeholder="Overlay token loading…"><small>Paste this local URL into an OBS Browser Source. It shows scene, stream health, recording, replay, and recent JARVIS activity; it cannot control OBS.</small></label>
+              <div class="obs-overlay-actions"><button class="sensor-button primary" id="copy-obs-overlay-url" type="button" disabled>COPY OVERLAY URL</button><a class="sensor-button" id="open-obs-overlay" href="#" target="_blank" rel="noreferrer" hidden>PREVIEW OVERLAY</a></div>
+            </div>
+            <div class="integration-status-line"><span class="section-state" id="broadcast-kit-state">CHECKING</span><b>LOCAL BROADCAST KIT</b></div>
+            <div class="google-grid" id="broadcast-kit-grid"></div>
+            <div class="broadcast-builder" aria-label="Local Broadcast Kit controls">
+              <div class="broadcast-builder-head"><span>LOCAL STAGE CONTROLS</span><small id="broadcast-action-status">No external chat or OBS action is connected.</small></div>
+              <label class="setting"><span>TIMER NAME</span><input id="broadcast-timer-name" type="text" maxlength="100" placeholder="Focus break"><small>Starts a local countdown visible to JARVIS.</small></label>
+              <label class="setting"><span>SECONDS</span><input id="broadcast-timer-seconds" type="number" min="5" max="86400" value="300"><small>5 seconds to 24 hours.</small></label>
+              <button class="sensor-button primary" id="broadcast-start-timer" type="button">START LOCAL TIMER</button>
+              <label class="setting"><span>POLL QUESTION</span><input id="broadcast-poll-question" type="text" maxlength="240" placeholder="What should we build next?"><small>Keep options separated with <code>|</code>.</small></label>
+              <label class="setting"><span>POLL OPTIONS</span><input id="broadcast-poll-options" type="text" maxlength="600" placeholder="Voice | Browser | Printer"><small>Two to six distinct options.</small></label>
+              <button class="sensor-button primary" id="broadcast-create-poll" type="button">OPEN LOCAL POLL</button>
+              <label class="setting broadcast-wide"><span>READ-ALOUD QUEUE</span><textarea id="broadcast-read-aloud" maxlength="600" rows="2" placeholder="JARVIS will read this on the next local talkback cycle…"></textarea><small>Queues text locally; it does not send to a stream or chat.</small></label>
+              <button class="sensor-button broadcast-wide" id="broadcast-queue-read-aloud" type="button">QUEUE READ-ALOUD</button>
+            </div>
+            <div class="integration-status-line"><span class="section-state" id="media-deck-state">CHECKING</span><b>LOCAL MEDIA DECK // HOST ONLY</b></div>
+            <div class="google-grid" id="media-deck-grid"></div>
+            <div class="media-builder" aria-label="Local media deck controls">
+              <div class="broadcast-builder-head"><span>MEDIA STAGE CONTROLS</span><small id="media-action-status">No external music service is connected.</small></div>
+              <label class="setting"><span>TITLE / PROMPT</span><input id="media-title" type="text" maxlength="140" placeholder="Lo-fi focus mix"><small>Stages a title or ambient prompt locally; it does not download or publish audio.</small></label>
+              <label class="setting"><span>ARTIST / SOURCE LABEL</span><input id="media-artist" type="text" maxlength="100" placeholder="JARVIS local"></label>
+              <label class="setting"><span>DURATION (SECONDS)</span><input id="media-duration" type="number" min="0" max="86400" value="0"><small>Optional metadata used for automatic local queue advance.</small></label>
+              <div class="media-actions"><button class="sensor-button primary" id="media-play" type="button">PLAY / STAGE</button><button class="sensor-button" id="media-enqueue" type="button">QUEUE</button><button class="sensor-button" id="media-pause" type="button">PAUSE</button><button class="sensor-button" id="media-next" type="button">NEXT</button><button class="sensor-button" id="media-stop" type="button">STOP</button></div>
+              <div class="media-queue" id="media-queue"><p class="empty-state">No local media staged.</p></div>
+            </div>
+            <div class="integration-status-line"><span class="section-state" id="desktop-app-state">CHECKING</span><b>HOST APPLICATION CATALOG</b></div>
+            <div class="google-grid" id="desktop-apps-grid"></div>
+            <div class="integration-status-line"><span class="section-state" id="routines-state">CHECKING</span><b>LOCAL ROUTINES // READ-ONLY</b></div>
+            <div class="routine-builder">
+              <label class="setting"><span>ROUTINE TYPE</span><select id="routine-kind"><option value="health">Pi health snapshot</option><option value="docker">Docker monitor</option><option value="printer">3D printer watch</option><option value="weather">Default-location weather</option><option value="news">Google News brief</option><option value="calendar">Calendar agenda</option><option value="briefing">Morning briefing</option></select><small>Only read-only probes are available. No routine can send, delete, restart, purchase, or control devices.</small></label>
+              <label class="setting"><span>NAME</span><input id="routine-name" type="text" maxlength="80" placeholder="Morning system check"><small>Use a short name you will recognize in the activity stream.</small></label>
+              <label class="setting"><span>INTERVAL</span><select id="routine-interval"><option value="15">Every 15 minutes</option><option value="30">Every 30 minutes</option><option value="60" selected>Every hour</option><option value="360">Every 6 hours</option><option value="1440">Every day</option></select><small>Minimum interval is five minutes; schedules stay local to this host.</small></label>
+              <label class="setting routine-topic-field" id="routine-topic-wrap" hidden><span>NEWS TOPIC</span><input id="routine-topic" type="text" maxlength="120" placeholder="technology"><small>Headlines are read-only and sourced from Google News RSS.</small></label>
+              <label class="setting routine-location-field" id="routine-location-wrap" hidden><span>WEATHER LOCATION</span><input id="routine-location" type="text" maxlength="100" placeholder="Dubai"><small>Leave blank to use the default location above.</small></label>
+              <button class="sensor-button primary routine-create" id="create-routine" type="button">ADD ROUTINE</button>
+            </div>
+            <div class="routine-list" id="routine-list"><p class="empty-state">No local routines yet.</p></div>
+            <div class="integration-status-line memory-status-line"><span class="section-state" id="memory-state">CHECKING</span><b>HOST MEMORY // NOTES + REMINDERS</b></div>
+            <div class="memory-builder">
+              <label class="setting"><span>NOTE TITLE</span><input id="memory-note-title" type="text" maxlength="120" placeholder="Pi microphone setup"><small>Saved only in the local JARVIS data directory.</small></label>
+              <label class="setting"><span>NOTE BODY</span><textarea id="memory-note-body" maxlength="5000" rows="2" placeholder="Use the selected USB microphone…"></textarea><small>Use “remember …” in chat for a quick capture.</small></label>
+              <label class="setting"><span>TAGS</span><input id="memory-note-tags" type="text" maxlength="180" placeholder="pi, voice"><small>Comma-separated local search tags.</small></label>
+              <button class="sensor-button primary memory-note-create" id="save-memory-note" type="button">SAVE NOTE</button>
+              <label class="setting"><span>REMINDER</span><input id="memory-reminder-title" type="text" maxlength="120" placeholder="Test Hey Jarvis"><small>Or say “remind me in 20 minutes to test Hey Jarvis”.</small></label>
+              <label class="setting"><span>DUE DATE / TIME</span><input id="memory-reminder-due" type="datetime-local"><small>Stored as a local ISO timestamp; no external notification service is used.</small></label>
+              <button class="sensor-button primary memory-reminder-create" id="save-memory-reminder" type="button">ADD REMINDER</button>
+            </div>
+            <div class="memory-columns">
+              <div><div class="memory-list-head"><span>PRIVATE NOTES</span><b id="memory-note-count">0</b></div><div class="memory-list" id="memory-note-list"><p class="empty-state">No notes yet.</p></div></div>
+              <div><div class="memory-list-head"><span>UPCOMING REMINDERS</span><b id="memory-reminder-count">0</b></div><div class="memory-list" id="memory-reminder-list"><p class="empty-state">No reminders yet.</p></div></div>
+            </div>
             <div class="tool-capability-grid">
               <article><i>01</i><b>ASK GOOGLE</b><p>“Show my latest Gmail,” “What is on my calendar?”, or “Find budget in Google Drive.”</p></article>
               <article><i>02</i><b>SEARCH THE WEB</b><p>“Search the web for…” sends bounded public results and citations to the local model.</p></article>
               <article><i>03</i><b>OPEN A WEBSITE</b><p>“Open YouTube” launches a validated public URL on the JARVIS host. Private network URLs stay blocked.</p></article>
               <article><i>04</i><b>DRAFT + APPROVE EMAIL</b><p>JARVIS shows editable To, Subject, and Body fields. Sending needs the PIN plus SEND EMAIL and can be disabled in .env.</p></article>
-              <article><i>05</i><b>PRIVATE BROWSER</b><p>Its own Chromium profile on Pi, Windows, or Linux. Click/type tasks need a one-time PIN approval and stream protected progress frames.</p></article>
+              <article><i>05</i><b>PRIVATE CAMOUFOX BROWSER</b><p>Its own Camoufox profile on Pi, Windows, or Linux. Click/type tasks need a one-time PIN approval and stream protected progress frames.</p></article>
               <article><i>06</i><b>OFFICE ARTIFACTS</b><p>Ask JARVIS to create a PPTX, DOCX, or XLSX. It generates the real file locally and opens a download preview.</p></article>
               <article><i>07</i><b>GOOGLE NEWS</b><p>“Show Google News about…” pulls current RSS headlines with source links and no API key.</p></article>
               <article><i>08</i><b>BORROW AN APP VIEW</b><p>Select a screen, window, or browser tab in Live Screen. JARVIS can analyze approved snapshots locally; arbitrary desktop input stays off.</p></article>
+              <article><i>09</i><b>HOST APP BRIDGE</b><p>Say “open desktop app Calculator” to choose an app discovered by the host. Launches require the dashboard PIN plus LAUNCH APP; arbitrary paths and shell commands are rejected.</p></article>
+              <article><i>10</i><b>GITHUB RESEARCH</b><p>“Search GitHub for…” reads bounded public repository metadata with citations. It never writes, stars, clones, or uses a GitHub token.</p></article>
             </div>
             <div class="privacy-callout google"><b>CREDENTIAL ISOLATION</b><p id="google-note">OAuth files and refresh tokens stay in private files on the JARVIS host and are never sent to the browser, model, logs, or GitHub.</p></div>
           </section>
@@ -241,7 +312,7 @@
         </div>
 
         <footer class="settings-savebar">
-          <div class="save-state"><i id="dirty-dot"></i><span><b id="save-state-title">PROFILE SYNCHRONIZED</b><small id="settings-message">Changes appear in the preview immediately.</small></span></div>
+          <div class="save-state"><i id="dirty-dot"></i><span><b id="save-state-title" data-ready="false">PROFILE SYNCHRONIZED</b><small id="settings-message">Changes appear in the preview immediately.</small></span></div>
           <button type="button" class="save-secondary" id="recommended-settings">RECOMMENDED</button>
           <button type="button" class="save-secondary" id="revert-settings" disabled>REVERT</button>
           <button class="primary" id="save-settings" type="submit" disabled>SAVE TO PI</button>

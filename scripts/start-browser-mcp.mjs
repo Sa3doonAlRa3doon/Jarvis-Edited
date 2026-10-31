@@ -2,10 +2,11 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { browserRequestToUpstream, browserResponseToClient, MCP_TOOL_PREFIX } from './mcp-prefix.mjs';
+import { listInstalled } from 'camoufox';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(here, '..');
@@ -20,25 +21,12 @@ function enabled(value, fallback = true) {
   return /^(1|true|yes|on)$/i.test(String(value));
 }
 
-function executableCandidates() {
-  const configured = process.env.JARVIS_BROWSER_EXECUTABLE;
-  if (configured) return [configured];
-  if (process.platform === 'win32') {
-    return [
-      path.join(process.env.PROGRAMFILES || 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe'),
-      path.join(process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-      path.join(process.env.LOCALAPPDATA || '', 'Chromium', 'Application', 'chrome.exe')
-    ];
-  }
-  if (process.platform === 'darwin') return ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Chromium.app/Contents/MacOS/Chromium'];
-  const names = ['chromium', 'chromium-browser', 'google-chrome-stable', 'google-chrome', 'microsoft-edge'];
-  return names.map((name) => spawnSync('sh', ['-lc', `command -v ${name}`], { encoding: 'utf8' }).stdout.trim()).filter(Boolean);
-}
-
-const executablePath = executableCandidates().find((candidate) => candidate && fs.existsSync(candidate));
+const installed = listInstalled();
+const activeCamoufox = installed.find((item) => item.isActive) || installed[0];
+const executablePath = activeCamoufox?.path ? path.join(activeCamoufox.path, process.platform === 'win32' ? 'camoufox.exe' : 'camoufox') : '';
 if (!cli) throw new Error('Playwright MCP is not installed beside the launcher or in the project. Run npm install first.');
 if (!fs.existsSync(networkGuard)) throw new Error(`The browser network guard is missing at ${networkGuard}.`);
-if (!executablePath) throw new Error('No supported Chromium, Chrome, or Edge executable was found. Set JARVIS_BROWSER_EXECUTABLE.');
+if (!executablePath) throw new Error('Camoufox is not installed. Run npx camoufox fetch, then npm run browser:patch.');
 
 const workspace = path.resolve(process.env.OPENJARVIS_WORKSPACE || path.join(os.homedir(), '.jarvis-workspace'));
 const profile = path.resolve(process.env.JARVIS_BROWSER_PROFILE || path.join(workspace, '.jarvis-browser-profile'));
@@ -56,6 +44,7 @@ try { fs.rmSync(liveFrame, { force: true }); } catch {}
 
 const args = [
   cli,
+  '--browser=firefox',
   `--executable-path=${executablePath}`,
   `--user-data-dir=${profile}`,
   `--output-dir=${output}`,
@@ -73,6 +62,7 @@ if (process.argv.includes('--check')) {
   process.stdout.write(`${JSON.stringify({
     ok: true,
     platform: process.platform,
+    browser: 'camoufox',
     executable: path.basename(executablePath),
     profile,
     output,

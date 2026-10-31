@@ -6,8 +6,11 @@ export const DEFAULT_VOICE_VOCABULARY = [
 
 const WAKE_VARIANTS = new Map([
   ['jarves', 'jarvis'], ['jervis', 'jarvis'], ['jarviss', 'jarvis'], ['jarvises', 'jarvis'],
-  ['hey jarves', 'hey jarvis'], ['hey jervis', 'hey jarvis'], ['hay jarvis', 'hey jarvis']
+  ['jarvish', 'jarvis'], ['jarvys', 'jarvis'], ['jarvid', 'jarvis'], ['jarvice', 'jarvis'], ['jarvus', 'jarvis'], ['javis', 'jarvis'],
+  ['hey jarves', 'hey jarvis'], ['hey jervis', 'hey jarvis'], ['hey jarvish', 'hey jarvis'], ['hey jarvys', 'hey jarvis'], ['hey jarvid', 'hey jarvis'], ['hey jarvice', 'hey jarvis'], ['hay jarvis', 'hey jarvis']
 ]);
+
+const clamp = (value, min, max) => Math.min(max, Math.max(min, Number(value) || 0));
 
 export function normalizeTranscript(value) {
   return String(value ?? '')
@@ -18,6 +21,11 @@ export function normalizeTranscript(value) {
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim()
     .replace(/\s+/g, ' ');
+}
+
+export function shouldApplyTranscriptToInput(text, { focused = false, currentValue = '' } = {}) {
+  const transcript = String(text || '').trim();
+  return Boolean(transcript && !(focused && String(currentValue || '').trim()));
 }
 
 export function normalizeWakePhrases(value) {
@@ -43,6 +51,29 @@ export function normalizeVocabulary(value) {
     if (terms.length >= 24) break;
   }
   return terms;
+}
+
+/**
+ * Turn the measured local noise floor/SNR into a conservative staged profile.
+ * This is deliberately pure so the settings screen, tests, and future Pi
+ * calibration clients use the same bounded recommendation. It only changes
+ * thresholds; it never grants a microphone, starts recognition, or sends a
+ * command.
+ */
+export function recommendVoiceSettings({ noiseFloor = .008, signalToNoiseDb = 18 } = {}) {
+  const floor = clamp(noiseFloor, .002, .12);
+  const snr = Number.isFinite(Number(signalToNoiseDb)) ? Number(signalToNoiseDb) : 18;
+  const noisePressure = clamp((floor - .006) / .045, 0, 1);
+  const weakSignal = clamp((16 - snr) / 16, 0, 1);
+  return {
+    micSensitivity: Math.round(clamp(.24 + noisePressure * .2 + weakSignal * .08, .18, .56) * 100) / 100,
+    wakeSensitivity: Math.round(clamp(.68 + noisePressure * .14 + weakSignal * .08, .6, .9) * 100) / 100,
+    clapSensitivity: Math.round(clamp(.38 + noisePressure * .2, .34, .68) * 100) / 100,
+    recognitionConfidence: Math.round(clamp(.5 + noisePressure * .16 + weakSignal * .12, .45, .82) * 100) / 100,
+    commandSilenceMs: Math.round(clamp(720 + weakSignal * 280 + noisePressure * 160, 650, 1_200) / 50) * 50,
+    noiseFloor: Math.round(floor * 10_000) / 10_000,
+    signalToNoiseDb: Math.round(snr * 10) / 10
+  };
 }
 
 export function recognitionPhraseSpecs(wakePhrases = DEFAULT_WAKE_PHRASES, vocabulary = DEFAULT_VOICE_VOCABULARY) {

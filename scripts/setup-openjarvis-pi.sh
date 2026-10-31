@@ -33,15 +33,11 @@ fi
 for binary in git node npm python3 sudo; do
   command -v "$binary" >/dev/null 2>&1 || { echo "$binary is required." >&2; exit 1; }
 done
-
-if ! command -v chromium >/dev/null 2>&1 && ! command -v chromium-browser >/dev/null 2>&1; then
-  if command -v apt-get >/dev/null 2>&1; then
-    echo "Installing Chromium for the private JARVIS browser profile"
-    sudo apt-get update
-    sudo apt-get install -y chromium
-  else
-    echo "Install Chromium, then set JARVIS_BROWSER_EXECUTABLE to its absolute path." >&2
-  fi
+NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
+NODE_MINOR="$(node -p 'process.versions.node.split(".")[1]')"
+if [[ "$NODE_MAJOR" -lt 22 || ( "$NODE_MAJOR" -eq 22 && "$NODE_MINOR" -lt 15 ) ]]; then
+  echo "Node.js 22.15+ is required by the Camoufox runtime; found $(node --version)." >&2
+  exit 1
 fi
 
 if ! getent group "$AGENT_GROUP" >/dev/null; then
@@ -69,12 +65,8 @@ if [[ ! -x "$UV_ENV/bin/uv" ]]; then
   sudo "$UV_ENV/bin/python" -m pip install --upgrade pip uv
 fi
 
-echo "Installing the local API server and isolated Playwright browser tools"
+echo "Installing the local API server and isolated Camoufox browser tools"
 sudo env UV_CACHE_DIR=/var/cache/openjarvis-uv "$UV_ENV/bin/uv" sync --project "$SOURCE_DIR" --extra server --extra browser
-PLAYWRIGHT_BIN="$SOURCE_DIR/.venv/bin/playwright"
-if [[ -x "$PLAYWRIGHT_BIN" ]]; then
-  sudo env PLAYWRIGHT_BROWSERS_PATH="$SOURCE_DIR/.playwright" "$PLAYWRIGHT_BIN" install chromium
-fi
 sudo chown -R root:root "$SOURCE_DIR" "$UV_ENV"
 sudo chmod -R a+rX "$SOURCE_DIR" "$UV_ENV"
 
@@ -83,7 +75,8 @@ sudo install -d -o root -g root -m 0755 "$AGENT_TOOLS_DIR"
 sudo install -o root -g root -m 0755 "$SCRIPT_DIR/start-browser-mcp.mjs" "$AGENT_TOOLS_DIR/start-browser-mcp.mjs"
 sudo install -o root -g root -m 0644 "$SCRIPT_DIR/mcp-prefix.mjs" "$AGENT_TOOLS_DIR/mcp-prefix.mjs"
 sudo install -o root -g root -m 0644 "$SCRIPT_DIR/browser-network-guard.ts" "$AGENT_TOOLS_DIR/browser-network-guard.ts"
-sudo npm install --prefix "$AGENT_TOOLS_DIR" --omit=dev --ignore-scripts @playwright/mcp@0.0.83
+sudo npm install --prefix "$AGENT_TOOLS_DIR" --omit=dev --ignore-scripts @playwright/mcp@0.0.83 camoufox@0.5.8 playwright-core@1.62.1
+sudo -u "$AGENT_USER" env HOME="$AGENT_HOME" "$AGENT_TOOLS_DIR/node_modules/.bin/camoufox" fetch
 sudo chown -R root:root "$AGENT_TOOLS_DIR"
 sudo chmod -R a+rX "$AGENT_TOOLS_DIR"
 
@@ -116,7 +109,7 @@ chmod 600 "$ENV_FILE"
 echo
 echo "OpenJarvis is ready at $SOURCE_DIR/.venv/bin/jarvis."
 echo "It runs as $AGENT_USER, not $APP_USER, and can access only $WORKSPACE_DIR plus public system data."
-echo "Browser control uses an isolated Playwright profile."
+echo "Browser control uses an isolated Camoufox profile."
 if [[ "$HOST_CONTROL" == true ]]; then
   echo "Shell/write tools are restricted to the unprivileged agent account and shared workspace. The agent has no sudo, dashboard secrets, OAuth files, Docker socket, or private home access."
 elif [[ "$BROWSER_CONTROL" == true ]]; then

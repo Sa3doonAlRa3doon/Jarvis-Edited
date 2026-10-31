@@ -23,6 +23,11 @@ test('recognizes compose requests without confusing inbox reads', () => {
   assert.equal(outboundCommunicationKind('DM John hello'), 'unsupported');
   assert.equal(outboundCommunicationKind('say hello to John on Discord'), 'unsupported');
   assert.equal(outboundCommunicationKind('type hello into the contact form and press the button'), 'unsupported');
+  assert.equal(outboundCommunicationKind('answer the question in one short sentence'), null);
+  assert.equal(outboundCommunicationKind('respond with a concise summary'), null);
+  assert.equal(outboundCommunicationKind('reply to the question'), null);
+  assert.equal(outboundCommunicationKind('reply to my friend'), 'unsupported');
+  assert.equal(outboundCommunicationKind('reply to the chat on Discord'), 'unsupported');
   assert.equal(isEmailDraftPrompt('Show my latest Gmail emails'), false);
   assert.equal(outboundCommunicationKind('Tell me about my latest Gmail emails'), null);
 });

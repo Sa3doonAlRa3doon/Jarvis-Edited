@@ -18,6 +18,233 @@ const COMMAND_END_SILENCE_MS = 1_400;
 const VAD_ATTACK_MS = 320;
 const VAD_RELEASE_MS = 360;
 const VAD_TRANSCRIPT_HOLD_MS = 4_000;
+const MIC_STARTUP_CALIBRATION_MS = 750;
+const AUDIO_RESUME_TIMEOUT_MS = 3_000;
+const MIC_NOISE_FLOOR_MIN = .002;
+const MIC_NOISE_FLOOR_MAX = .12;
+const MIN_PHYSICAL_SPEECH_SCORE = .24;
+const VOICE_PROFILE_STORAGE_KEY = 'jarvis.voice-profiles.v1';
+const VOICE_PROFILE_MAX = 8;
+// Keep the speaker tail from becoming a fresh microphone epoch immediately
+// after JARVIS finishes talking. The guard is deliberately short and only
+// applies to activation; explicit barge-in can still opt out of it.
+const POST_SPEECH_GUARD_MS = 420;
+
+/**
+ * Track the room floor without letting long silence erase the last useful
+ * calibration. Downward movement is intentionally slow and bounded by a
+ * fraction of the saved baseline; upward movement follows a newly louder
+ * room more quickly. This is shared with Settings so diagnostics and the
+ * always-on listener use the same acoustic policy.
+ */
+export function stabilizeNoiseFloor(current = .008, baseline = .008, observed = 0, {
+  speaking = false, postSpeechGuard = false
+} = {}) {
+  const safeCurrent = clamp(current, MIC_NOISE_FLOOR_MIN, MIC_NOISE_FLOOR_MAX);
+  const safeBaseline = clamp(baseline, MIC_NOISE_FLOOR_MIN, MIC_NOISE_FLOOR_MAX);
+  const sample = Number(observed);
+  if (!Number.isFinite(sample) || speaking || postSpeechGuard) {
+    return { noiseFloor: safeCurrent, baseline: safeBaseline };
+  }
+  const safeSample = clamp(sample, MIC_NOISE_FLOOR_MIN, MIC_NOISE_FLOOR_MAX);
+  const rate = safeSample > safeCurrent ? .04 : .006;
+  const nextBaseline = safeSample > safeBaseline
+    ? clamp(safeBaseline * .995 + safeSample * .005, MIC_NOISE_FLOOR_MIN, MIC_NOISE_FLOOR_MAX)
+    : safeBaseline;
+  const nextFloor = clamp(Math.max(
+    safeCurrent * (1 - rate) + safeSample * rate,
+    nextBaseline * .72
+  ), MIC_NOISE_FLOOR_MIN, MIC_NOISE_FLOOR_MAX);
+  return { noiseFloor: nextFloor, baseline: nextBaseline };
+}
+
+function voiceProfileStorage() {
+  try { return globalThis.localStorage || null; } catch { return null; }
+}
+
+function voiceProfileDeviceKey(deviceId = '') {
+  // Device identifiers are browser-scoped values. Store only a short hash so
+  // calibration remains local without copying a raw identifier into storage.
+  const value = String(deviceId || 'default').trim() || 'default';
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `mic-${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+function readVoiceProfiles() {
+  const storage = voiceProfileStorage();
+  if (!storage) return {};
+  try {
+    const parsed = JSON.parse(storage.getItem(VOICE_PROFILE_STORAGE_KEY) || '{}');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return parsed;
+  } catch { return {}; }
+}
+
+function normalizedVoiceProfile(profile) {
+  if (!profile || typeof profile !== 'object') return null;
+  const noiseFloor = Number(profile.noiseFloor);
+  if (!Number.isFinite(noiseFloor)) return null;
+  const signalToNoiseDb = Number(profile.signalToNoiseDb);
+  const updatedAt = Number(profile.updatedAt);
+  return {
+    noiseFloor: clamp(noiseFloor, MIC_NOISE_FLOOR_MIN, MIC_NOISE_FLOOR_MAX),
+    signalToNoiseDb: Number.isFinite(signalToNoiseDb) ? clamp(signalToNoiseDb, -60, 60) : 18,
+    updatedAt: Number.isFinite(updatedAt) && updatedAt > 0 ? updatedAt : 0
+  };
+}
+
+/**
+ * Load one microphone's local acoustic calibration. Only bounded noise/SNR
+ * values are stored; audio and raw browser device identifiers never leave the
+ * page. A missing or malformed browser storage entry is treated as no profile.
+ */
+export function loadVoiceProfile(deviceId = '') {
+  const profile = normalizedVoiceProfile(readVoiceProfiles()[voiceProfileDeviceKey(deviceId)]);
+  return profile ? { ...profile } : null;
+}
+
+/**
+ * Save one microphone's bounded calibration and retain only the most recent
+ * eight devices. This deliberately fails closed when localStorage is blocked.
+ */
+export function saveVoiceProfile(deviceId = '', { noiseFloor, signalToNoiseDb } = {}) {
+  const storage = voiceProfileStorage();
+  const normalized = normalizedVoiceProfile({ noiseFloor, signalToNoiseDb, updatedAt: Date.now() });
+  if (!storage || !normalized) return false;
+  const profiles = readVoiceProfiles();
+  profiles[voiceProfileDeviceKey(deviceId)] = normalized;
+  const bounded = Object.fromEntries(Object.entries(profiles)
+    .map(([key, value]) => [key, normalizedVoiceProfile(value)])
+    .filter(([, value]) => value)
+    .sort(([, left], [, right]) => right.updatedAt - left.updatedAt)
+    .slice(0, VOICE_PROFILE_MAX));
+  try { storage.setItem(VOICE_PROFILE_STORAGE_KEY, JSON.stringify(bounded)); return true; }
+  catch { return false; }
+}
+
+/** Remove only one microphone's local calibration profile. */
+export function clearVoiceProfile(deviceId = '') {
+  const storage = voiceProfileStorage();
+  if (!storage) return false;
+  const profiles = readVoiceProfiles();
+  const key = voiceProfileDeviceKey(deviceId);
+  const existed = Object.prototype.hasOwnProperty.call(profiles, key);
+  if (!existed) return false;
+  delete profiles[key];
+  try { storage.setItem(VOICE_PROFILE_STORAGE_KEY, JSON.stringify(profiles)); return true; }
+  catch { return false; }
+}
+
+/**
+ * Analyse one time-domain analyser frame with the same gate used by the
+ * always-on listener. Keeping this pure makes the calibration screen and the
+ * live wake listener agree about what counts as speech-shaped input.
+ *
+ * A high-energy frame alone is not enough: steady hums and device noise can
+ * be loud without containing speech. The crest and zero-crossing checks are
+ * deliberately conservative, while the crest fallback preserves short,
+ * unvoiced consonants (for example "s" and "f").
+ */
+export function analyzeVoiceFrame(samples, { noiseFloor = .008, sensitivity = .28 } = {}) {
+  const frame = samples || [];
+  // Browser analyser frames can carry a small DC bias (especially on USB
+  // microphones and laptop audio drivers). If it is left in the signal, the
+  // bias raises RMS and can make a quiet room look like speech. Keep the
+  // tiny fixture frames used by the pure unit tests backwards-compatible,
+  // while centring real analyser frames before calculating the gate.
+  let rawSum = 0;
+  for (let index = 0; index < frame.length; index += 1) rawSum += (Number(frame[index]) - 128) / 128;
+  const dcOffset = frame.length >= 32 ? clamp(rawSum / frame.length, -.25, .25) : 0;
+  let sum = 0; let peak = 0; let zeroCrossings = 0; let previous = 0;
+  for (let index = 0; index < frame.length; index += 1) {
+    const value = (Number(frame[index]) - 128) / 128 - dcOffset;
+    sum += value * value;
+    peak = Math.max(peak, Math.abs(value));
+    if (index && ((value >= 0 && previous < 0) || (value < 0 && previous >= 0))) zeroCrossings += 1;
+    previous = value;
+  }
+  const rms = frame.length ? Math.sqrt(sum / frame.length) : 0;
+  const safeNoiseFloor = Math.max(.0005, Number(noiseFloor) || .008);
+  const safeSensitivity = clamp(Number(sensitivity) || .28, .01, .8);
+  // The old fixed .14 multiplier made the default .28 profile require an
+  // RMS level of .0392 even in a quiet room. That is enough to miss a quiet
+  // speaker on a Pi USB mic. Keep the learned room floor authoritative and
+  // lower only the fixed sensitivity floor; crest, crossing, and spectrum
+  // gates still have to agree before a frame becomes speech-shaped.
+  const threshold = Math.max(.008, safeNoiseFloor * 2.6, safeSensitivity * .11);
+  const crestFactor = peak / Math.max(rms, .0001);
+  const zeroCrossingRatio = zeroCrossings / Math.max(1, frame.length - 1);
+  const energyGate = rms > threshold && peak > Math.max(threshold * 1.2, rms * 1.18);
+  // Centered real analyser frames can have a higher zero-crossing ratio than
+  // the compact fixtures above. Keep a strong crest as the second speech
+  // shape signal, but only after the energy gate has already rejected quiet
+  // noise.
+  const speechCandidate = energyGate && (zeroCrossingRatio < .82 || crestFactor > 1.45);
+  const energyScore = clamp((rms / Math.max(threshold, .0001) - 1) / 1.5, 0, 1);
+  const shapeScore = clamp((crestFactor - 1.18) / .8, 0, 1);
+  const crossingScore = clamp(1 - Math.max(0, zeroCrossingRatio - .55) / .45, 0, 1);
+  const speechScore = energyGate
+    ? Math.round((energyScore * .55 + shapeScore * .3 + crossingScore * .15) * 100) / 100
+    : 0;
+  const signalToNoiseDb = Math.round(20 * Math.log10(Math.max(rms, .0001) / safeNoiseFloor) * 10) / 10;
+  return { rms, peak, threshold, crestFactor, zeroCrossings, zeroCrossingRatio, dcOffset, signalToNoiseDb, speechScore, speechCandidate };
+}
+
+/**
+ * Inspect an analyser frequency frame for the narrow low-frequency signature
+ * of a fan, HVAC, or motor hum. This is intentionally a conservative reject
+ * signal rather than a hard speech classifier: if a browser does not expose
+ * frequency data, the time-domain gate remains authoritative.
+ */
+export function analyzeVoiceSpectrum(bins, { sampleRate = 48_000, fftSize = 2_048 } = {}) {
+  const frame = bins || [];
+  const safeRate = Number(sampleRate);
+  const safeFft = Number(fftSize);
+  if (!frame.length || !Number.isFinite(safeRate) || safeRate <= 0 || !Number.isFinite(safeFft) || safeFft <= 0) {
+    return { available: false, totalPower: 0, lowBandRatio: 0, speechBandRatio: 0, highBandRatio: 0, lowHum: false };
+  }
+  let totalPower = 0; let lowPower = 0; let speechPower = 0; let highPower = 0;
+  for (let index = 1; index < frame.length; index += 1) {
+    const magnitude = clamp(Number(frame[index]) / 255, 0, 1);
+    const power = magnitude * magnitude;
+    if (!power) continue;
+    const frequency = index * safeRate / safeFft;
+    totalPower += power;
+    if (frequency < 180) lowPower += power;
+    else if (frequency <= 4_200) speechPower += power;
+    else highPower += power;
+  }
+  if (!totalPower) return { available: true, totalPower: 0, lowBandRatio: 0, speechBandRatio: 0, highBandRatio: 0, lowHum: false };
+  const lowBandRatio = lowPower / totalPower;
+  const speechBandRatio = speechPower / totalPower;
+  const highBandRatio = highPower / totalPower;
+  return {
+    available: true, totalPower,
+    lowBandRatio: Math.round(lowBandRatio * 100) / 100,
+    speechBandRatio: Math.round(speechBandRatio * 100) / 100,
+    highBandRatio: Math.round(highBandRatio * 100) / 100,
+    lowHum: lowBandRatio >= .82 && speechBandRatio <= .16
+  };
+}
+
+/**
+ * Decide whether a frequency frame contains enough speech-band energy to be
+ * eligible for the physical-voice gate.  This is intentionally conservative:
+ * when frequency data is unavailable we keep the time-domain gate as the
+ * source of truth, but when it is available we reject a near-pure high-band
+ * signal (for example a notification chirp, fan whine, or keyboard squeak).
+ */
+export function isSpeechBandEligible({ available = false, totalPower = 0, speechBandRatio = 0, highBandRatio = 0, lowHum = false } = {}) {
+  if (!available || !(Number(totalPower) > 0)) return true;
+  if (lowHum) return false;
+  const speech = clamp(Number(speechBandRatio), 0, 1);
+  const high = clamp(Number(highBandRatio), 0, 1);
+  return !(high > .70 && speech < .08);
+}
 
 export async function configureRecognitionCapabilities(recognition, RecognitionClass, {
   language = 'en-US', preferLocalRecognition = true, wakePhrases = DEFAULT_WAKE_PHRASES,
@@ -55,18 +282,48 @@ export function startRecognitionWithTrack(recognition, track) {
   recognition.start(); return false;
 }
 
+/**
+ * Browser autoplay/device policy can leave AudioContext.resume() pending
+ * forever instead of rejecting. Keep microphone startup and talkback bounded
+ * so a suspended audio device cannot make JARVIS look silently unresponsive.
+ */
+export async function resumeAudioContext(context, { timeoutMs = AUDIO_RESUME_TIMEOUT_MS } = {}) {
+  if (!context || typeof context.resume !== 'function') return false;
+  if (context.state === 'running') return true;
+  const timeout = Math.max(1, Math.min(15_000, Number(timeoutMs) || AUDIO_RESUME_TIMEOUT_MS));
+  let timer = 0;
+  try {
+    const resumed = await Promise.race([
+      Promise.resolve().then(() => context.resume()).then(() => true, () => false),
+      new Promise((resolve) => { timer = globalThis.setTimeout(() => resolve(false), timeout); })
+    ]);
+    return resumed === true;
+  } finally {
+    if (timer) globalThis.clearTimeout(timer);
+  }
+}
+
 export class VoiceController {
   constructor({ onState = () => {}, onLevel = () => {}, onWake = () => {}, onCommand = () => {}, onTranscript = () => {}, onCapture = () => {}, onError = () => {} } = {}) {
     this.onState = onState; this.onLevel = onLevel; this.onWake = onWake; this.onCommand = onCommand; this.onTranscript = onTranscript; this.onCapture = onCapture; this.onError = onError;
     this.settings = {}; this.stream = null; this.context = null; this.analyser = null; this.raf = 0; this.recognition = null;
     this.running = false; this.shouldRun = false; this.speaking = false; this.restartTimer = 0; this.restartDelay = 240;
     this.playbackSource = null;
-    this.noiseFloor = .008; this.firstClapAt = 0; this.clapAbove = false; this.clapCooldownUntil = 0;
+    this.noiseFloor = .008; this.noiseFloorBaseline = .008; this.lastSignalToNoiseDb = 18; this.profileDevice = ''; this.firstClapAt = 0; this.clapAbove = false; this.clapCooldownUntil = 0;
     this.armedUntil = 0; this.lastWakeAt = 0; this.lastCommand = ''; this.lastCommandAt = 0; this.pending = []; this.commandTimer = 0;
     this.commandCaptureActive = false; this.commandCaptureStarted = false; this.captureTimer = 0; this.captureFinalizeTimer = 0;
     this.captureInterim = ''; this.captureTimeoutMs = 15_000; this.captureHardDeadline = 0; this.captureVoiceActive = false;
     this.vadCandidateSince = 0; this.vadQuietSince = 0; this.lastSpeechSignalAt = 0; this.lastRawVoiceAt = 0;
-    this.lastLevel = 0; this.lastVoiceState = false; this.audioSamples = null; this.preparingRecognition = false;
+    this.rawVoiceCandidateSince = 0; this.rawVoiceQuietSince = 0; this.rawVoiceActive = false;
+    this.audioCalibrationUntil = 0; this.noiseFloorSamples = [];
+    // Each speech-shaped onset gets a monotonically increasing evidence epoch.
+    // A browser provider can replay buffered text after recognition restarts;
+    // tying command capture to a fresh epoch prevents that stale text from
+    // becoming a command just because an older audio timestamp is recent.
+    this.physicalVoiceEpoch = 0; this.lastPhysicalVoiceOnsetAt = 0; this.lastPhysicalSpeechScore = null;
+    this.captureStartedAt = 0; this.captureVoiceEpoch = 0;
+    this.postSpeechGuardUntil = 0;
+    this.lastLevel = 0; this.lastVoiceState = false; this.audioSamples = null; this.frequencySamples = null; this.preparingRecognition = false;
     this.recognitionMode = 'browser'; this.localRecognitionDisabled = false; this.phraseBiasDisabled = false;
     this.networkErrors = 0; this.recognitionUnavailable = false;
   }
@@ -89,6 +346,13 @@ export class VoiceController {
     this.configure(settings);
     if (this.running) return;
     this.networkErrors = 0; this.recognitionUnavailable = false;
+    // A different microphone can have a very different idle level. Never
+    // carry a learned floor from a previous device or browser session.
+    this.noiseFloor = .008; this.noiseFloorBaseline = .008; this.lastSignalToNoiseDb = 18; this.profileDevice = ''; this.lastVoiceState = false; this.lastLevel = 0;
+    this.rawVoiceCandidateSince = 0; this.rawVoiceQuietSince = 0; this.rawVoiceActive = false; this.lastRawVoiceAt = 0;
+    this.audioCalibrationUntil = 0; this.noiseFloorSamples = []; this.frequencySamples = null;
+    this.physicalVoiceEpoch = 0; this.lastPhysicalVoiceOnsetAt = 0; this.lastPhysicalSpeechScore = null;
+    this.postSpeechGuardUntil = 0;
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('Microphone access is not available in this browser.');
     const audio = {
       deviceId: deviceIdConstraint(this.settings.browserMicrophone),
@@ -99,16 +363,31 @@ export class VoiceController {
     };
     const opened = await getUserMediaWithFallback(navigator.mediaDevices, { audio, video: false });
     this.stream = opened.stream;
+    let activeDeviceId = this.settings.browserMicrophone;
+    try { activeDeviceId = normalizeDeviceId(this.stream.getAudioTracks()[0]?.getSettings?.().deviceId) || activeDeviceId; } catch {}
+    this.profileDevice = activeDeviceId;
+    const profile = loadVoiceProfile(this.profileDevice);
+    if (profile) { this.noiseFloor = profile.noiseFloor; this.noiseFloorBaseline = profile.noiseFloor; this.lastSignalToNoiseDb = profile.signalToNoiseDb; }
     if (opened.fallbackUsed) {
       this.settings.browserMicrophone = '';
       this.onState('microphone-default');
     }
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (AudioContextClass) {
+    if (!AudioContextClass) {
+      this.stream.getTracks().forEach((track) => track.stop()); this.stream = null;
+      throw new Error('This browser cannot expose a physical audio analyser. Use a supported desktop browser for accurate JARVIS wake detection.');
+    }
+    try {
       if (!this.context || this.context.state === 'closed') this.context = new AudioContextClass({ latencyHint: 'interactive' });
-      await this.context.resume();
+      if (!await resumeAudioContext(this.context)) throw new Error('Browser audio is suspended. Click the JARVIS screen once, then start the microphone again.');
       this.analyser = this.context.createAnalyser(); this.analyser.fftSize = 2048; this.analyser.smoothingTimeConstant = .28;
-      this.context.createMediaStreamSource(this.stream).connect(this.analyser); this.monitorAudio();
+      this.context.createMediaStreamSource(this.stream).connect(this.analyser);
+      this.audioCalibrationUntil = performance.now() + MIC_STARTUP_CALIBRATION_MS;
+      this.noiseFloorSamples = [];
+      this.monitorAudio();
+    } catch (error) {
+      this.stream.getTracks().forEach((track) => track.stop()); this.stream = null; this.analyser = null;
+      throw error;
     }
     this.shouldRun = true; this.running = true; this.restartDelay = 240; void this.startRecognition(); this.onState('listening');
   }
@@ -136,7 +415,7 @@ export class VoiceController {
     const RecognitionClass = Recognition();
     if (!RecognitionClass) {
       this.onState('audio-only');
-      this.onError(new Error('Speech recognition is unavailable in this browser. Use Chrome or Edge on the dashboard, or install the on-device language pack in /settings.'));
+    this.onError(new Error('Speech recognition is unavailable in this browser. Use a supported dashboard browser, or install the on-device language pack in /settings.'));
       return;
     }
     this.preparingRecognition = true;
@@ -152,8 +431,13 @@ export class VoiceController {
       if (recentPhysicalVoice) {
         this.markCommandSpeech();
         if (this.commandCaptureActive) this.updateCommandVoiceActivity(true);
+        this.onState('hearing');
+      } else {
+        // Browser recognition can announce speech-shaped input from a stale
+        // provider buffer or another tab. Do not make the HUD claim that the
+        // user is speaking unless this controller also saw physical mic energy.
+        this.onState(this.commandCaptureActive ? 'armed' : 'listening');
       }
-      this.onState('hearing');
     };
     recognition.onspeechend = () => {
       if (this.commandCaptureActive) this.updateCommandVoiceActivity(false);
@@ -232,7 +516,8 @@ export class VoiceController {
         recognitionConfidence: this.settings.recognitionConfidence, preferWake: this.settings.wakeWord && !armed
       });
       const recentPhysicalVoice = this.hasRecentPhysicalVoice();
-      const physicallyAccepted = selected.accepted && recentPhysicalVoice;
+      const freshCaptureVoice = !this.commandCaptureActive || this.hasFreshCaptureVoice();
+      const physicallyAccepted = selected.accepted && recentPhysicalVoice && freshCaptureVoice;
       this.onTranscript({ text: selected.transcript, final: result.isFinal, confidence: selected.confidence, accepted: physicallyAccepted });
       if (this.commandCaptureActive && physicallyAccepted && selected.transcript) {
         this.captureInterim = normalizeTranscript(selected.transcript);
@@ -257,13 +542,29 @@ export class VoiceController {
   }
 
   hasRecentPhysicalVoice(now = performance.now(), graceMs = WAKE_PHYSICAL_VOICE_GRACE_MS) {
-    return !this.analyser || this.lastRawVoiceAt > 0 && now - this.lastRawVoiceAt <= graceMs;
+    // Provider speech recognition is not evidence that this microphone heard
+    // anything. If the analyser could not be created (for example, an audio
+    // context was blocked), fail closed instead of allowing a stale/provider
+    // transcript to wake JARVIS or become a command.
+    const speechScore = this.lastPhysicalSpeechScore;
+    const speechShapeAccepted = speechScore == null || Number(speechScore) >= MIN_PHYSICAL_SPEECH_SCORE;
+    return Boolean(this.analyser && this.lastRawVoiceAt > 0 && now - this.lastRawVoiceAt <= graceMs && speechShapeAccepted);
+  }
+
+  hasFreshCaptureVoice(now = performance.now()) {
+    if (!this.commandCaptureActive || !this.analyser) return true;
+    if (!this.hasRecentPhysicalVoice(now)) return false;
+    return this.physicalVoiceEpoch > this.captureVoiceEpoch
+      || this.captureVoiceActive
+      || this.lastPhysicalVoiceOnsetAt >= this.captureStartedAt;
   }
 
   beginCommandCapture(timeoutMs = 15_000) {
     clearTimeout(this.captureTimer); clearTimeout(this.captureFinalizeTimer); clearTimeout(this.commandTimer);
     this.pending = []; this.captureInterim = ''; this.commandCaptureStarted = false; this.commandCaptureActive = true; this.captureVoiceActive = false;
+    this.captureStartedAt = performance.now(); this.captureVoiceEpoch = this.physicalVoiceEpoch;
     this.vadCandidateSince = 0; this.vadQuietSince = 0; this.lastSpeechSignalAt = 0; this.lastRawVoiceAt = 0;
+    this.rawVoiceCandidateSince = 0; this.rawVoiceQuietSince = 0; this.rawVoiceActive = false;
     this.captureTimeoutMs = clamp(Number(timeoutMs) || 15_000, 5_000, 30_000);
     this.captureHardDeadline = 0; this.armedUntil = Date.now() + this.captureTimeoutMs;
     this.captureTimer = window.setTimeout(() => this.finishCommandCapture('timeout'), this.captureTimeoutMs);
@@ -346,8 +647,10 @@ export class VoiceController {
     if (!this.commandCaptureActive && reason !== 'complete') return;
     this.commandCaptureActive = false; this.commandCaptureStarted = false; this.captureVoiceActive = false; this.armedUntil = 0;
     this.vadCandidateSince = 0; this.vadQuietSince = 0; this.lastSpeechSignalAt = 0;
+    this.rawVoiceCandidateSince = 0; this.rawVoiceQuietSince = 0; this.rawVoiceActive = false;
     clearTimeout(this.captureTimer); clearTimeout(this.captureFinalizeTimer); clearTimeout(this.commandTimer);
     this.captureTimer = 0; this.captureFinalizeTimer = 0; this.commandTimer = 0; this.captureHardDeadline = 0; this.captureInterim = '';
+    this.captureStartedAt = 0; this.captureVoiceEpoch = this.physicalVoiceEpoch;
     if (reason !== 'complete') this.pending = [];
     this.onCapture({ state: reason, text });
     this.onState(this.shouldRun ? 'listening' : 'standby');
@@ -382,20 +685,88 @@ export class VoiceController {
     if (!this.analyser) return;
     if (!this.audioSamples || this.audioSamples.length !== this.analyser.fftSize) this.audioSamples = new Uint8Array(this.analyser.fftSize);
     const samples = this.audioSamples; this.analyser.getByteTimeDomainData(samples);
-    let sum = 0; let peak = 0;
-    for (const sample of samples) { const value = Math.abs((sample - 128) / 128); sum += value * value; peak = Math.max(peak, value); }
-    const rms = Math.sqrt(sum / samples.length); const now = performance.now();
-    const vadThreshold = Math.max(.008, this.noiseFloor * 2.4, Number(this.settings.micSensitivity || .18) * .14);
-    const voiceActive = rms > vadThreshold;
-    if (voiceActive && peak > vadThreshold * 1.25) this.lastRawVoiceAt = now;
-    if (!voiceActive) this.noiseFloor = this.noiseFloor * .985 + rms * .015;
-    else if (this.noiseFloor < .004) this.noiseFloor = .004;
-    const shown = Math.min(1, rms / Math.max(.035, vadThreshold * 2.4)); this.onLevel({ level: shown, rms, peak, noiseFloor: this.noiseFloor, voiceActive });
+    const now = performance.now();
+    const analysis = analyzeVoiceFrame(samples, { noiseFloor: this.noiseFloor, sensitivity: this.settings.micSensitivity });
+    if (Number.isFinite(analysis.signalToNoiseDb)) this.lastSignalToNoiseDb = analysis.signalToNoiseDb;
+    const { rms, peak, threshold: vadThreshold } = analysis;
+    const calibrating = this.audioCalibrationUntil > 0 && now < this.audioCalibrationUntil;
+    if (calibrating) {
+      // Learn the room/device floor from non-speech frames. Use a high
+      // percentile rather than a single peak so a short click does not raise
+      // the gate permanently, while a fan or USB gain floor is still covered.
+      if (!analysis.speechCandidate && Number.isFinite(rms)) {
+        this.noiseFloorSamples.push(rms);
+        if (this.noiseFloorSamples.length > 24) this.noiseFloorSamples.shift();
+        const ordered = [...this.noiseFloorSamples].sort((left, right) => left - right);
+        const percentile = ordered[Math.min(ordered.length - 1, Math.floor(ordered.length * .75))] || rms;
+        this.noiseFloor = clamp(this.noiseFloor * .8 + percentile * .2, MIC_NOISE_FLOOR_MIN, MIC_NOISE_FLOOR_MAX);
+      }
+      const shown = Math.min(1, rms / Math.max(.035, vadThreshold * 2.4));
+      this.onLevel({ level: shown, rms, peak, noiseFloor: this.noiseFloor, voiceActive: false, speechCandidate: false,
+        speechScore: 0, signalToNoiseDb: analysis.signalToNoiseDb, crestFactor: analysis.crestFactor,
+        zeroCrossingRatio: analysis.zeroCrossingRatio, dcOffset: analysis.dcOffset, physicalVoiceEpoch: this.physicalVoiceEpoch,
+        lastPhysicalVoiceOnsetAt: this.lastPhysicalVoiceOnsetAt, captureFresh: false, calibrating: true });
+      this.lastVoiceState = false; this.lastLevel = rms; this.raf = requestAnimationFrame(this.monitorAudio); return;
+    }
+    if (this.audioCalibrationUntil) {
+      this.audioCalibrationUntil = 0;
+      if (this.noiseFloorSamples.length >= 4) {
+        const ordered = [...this.noiseFloorSamples].sort((left, right) => left - right);
+        const percentile = ordered[Math.min(ordered.length - 1, Math.floor(ordered.length * .75))];
+        // Keep headroom for speech above a loud but steady room floor. The
+        // normal gate already multiplies this estimate by 2.6, so adding a
+        // further safety multiplier here would suppress quiet speakers.
+        this.noiseFloor = clamp(Math.max(this.noiseFloor, percentile * .8), MIC_NOISE_FLOOR_MIN, MIC_NOISE_FLOOR_MAX);
+        this.noiseFloorBaseline = this.noiseFloor;
+      }
+      this.noiseFloorSamples = [];
+    }
+    // Require a speech-shaped transient to stay above the adaptive floor for
+    // several analyser frames. This rejects fans, keyboard rumble, and a
+    // single loud sample while retaining normal speech and the clap detector.
+    let spectrum = { available: false, totalPower: 0, lowBandRatio: 0, speechBandRatio: 0, highBandRatio: 0, lowHum: false };
+    if (typeof this.analyser.getByteFrequencyData === 'function') {
+      const frequencyLength = Number(this.analyser.frequencyBinCount) || Math.floor(Number(this.analyser.fftSize || 0) / 2);
+      if (frequencyLength > 0) {
+        if (!this.frequencySamples || this.frequencySamples.length !== frequencyLength) this.frequencySamples = new Uint8Array(frequencyLength);
+        try {
+          this.analyser.getByteFrequencyData(this.frequencySamples);
+          spectrum = analyzeVoiceSpectrum(this.frequencySamples, { sampleRate: this.context?.sampleRate || 48_000, fftSize: this.analyser.fftSize || frequencyLength * 2 });
+        } catch {}
+      }
+    }
+    const postSpeechGuard = now < this.postSpeechGuardUntil || (this.speaking && !this.settings.bargeIn);
+    const spectrumSpeechEligible = isSpeechBandEligible(spectrum);
+    const speechCandidate = !postSpeechGuard && analysis.speechCandidate && spectrumSpeechEligible;
+    const speechScore = spectrumSpeechEligible ? analysis.speechScore : Math.min(analysis.speechScore, .1);
+    if (speechCandidate) {
+      this.rawVoiceQuietSince = 0;
+      if (!this.rawVoiceCandidateSince) this.rawVoiceCandidateSince = now;
+      if (!this.rawVoiceActive && now - this.rawVoiceCandidateSince >= VAD_ATTACK_MS) {
+        this.rawVoiceActive = true;
+        this.physicalVoiceEpoch += 1;
+        this.lastPhysicalVoiceOnsetAt = now;
+      }
+    } else {
+      this.rawVoiceCandidateSince = 0;
+      if (this.rawVoiceActive) {
+        if (!this.rawVoiceQuietSince) this.rawVoiceQuietSince = now;
+        if (now - this.rawVoiceQuietSince >= VAD_RELEASE_MS) { this.rawVoiceActive = false; this.rawVoiceQuietSince = 0; }
+      }
+    }
+    const voiceActive = this.rawVoiceActive;
+    if (voiceActive) {
+      this.lastRawVoiceAt = now;
+      this.lastPhysicalSpeechScore = speechScore;
+    }
+    const floorUpdate = stabilizeNoiseFloor(this.noiseFloor, this.noiseFloorBaseline, rms, { speaking: speechCandidate, postSpeechGuard });
+    this.noiseFloor = floorUpdate.noiseFloor; this.noiseFloorBaseline = floorUpdate.baseline;
+    const shown = Math.min(1, rms / Math.max(.035, vadThreshold * 2.4)); this.onLevel({ level: shown, rms, peak, noiseFloor: this.noiseFloor, noiseFloorBaseline: this.noiseFloorBaseline, voiceActive, speechCandidate, speechScore, signalToNoiseDb: analysis.signalToNoiseDb, crestFactor: analysis.crestFactor, zeroCrossingRatio: analysis.zeroCrossingRatio, dcOffset: analysis.dcOffset, lowBandRatio: spectrum.lowBandRatio, speechBandRatio: spectrum.speechBandRatio, lowHum: spectrum.lowHum, postSpeechGuard, physicalVoiceEpoch: this.physicalVoiceEpoch, lastPhysicalVoiceOnsetAt: this.lastPhysicalVoiceOnsetAt, captureFresh: this.hasFreshCaptureVoice() });
     if (this.commandCaptureActive) this.updateRawCommandVoiceActivity(voiceActive, now);
     if (voiceActive !== this.lastVoiceState) { this.lastVoiceState = voiceActive; this.onState(voiceActive ? 'hearing' : Date.now() < this.armedUntil ? 'armed' : 'listening'); }
 
     const clapThreshold = Math.max(Number(this.settings.clapSensitivity || .34), this.noiseFloor * 7.5);
-    const impulse = rms > clapThreshold && peak > Math.min(1, clapThreshold * 1.55) && rms > this.lastLevel * 1.32;
+    const impulse = !postSpeechGuard && rms > clapThreshold && peak > Math.min(1, clapThreshold * 1.55) && rms > this.lastLevel * 1.32;
     if (this.settings.doubleClap && impulse && !this.clapAbove && now >= this.clapCooldownUntil) {
       this.clapAbove = true;
       if (this.firstClapAt && now - this.firstClapAt <= Number(this.settings.doubleClapWindow || 700)) {
@@ -409,6 +780,9 @@ export class VoiceController {
 
   setSpeaking(active) {
     this.speaking = Boolean(active);
+    const now = performance.now();
+    if (this.speaking && this.settings.bargeIn) this.postSpeechGuardUntil = now;
+    else this.postSpeechGuardUntil = Math.max(this.postSpeechGuardUntil, now + (this.speaking ? 240 : POST_SPEECH_GUARD_MS));
     if (this.speaking) {
       this.onState('speaking');
       if (!this.settings.bargeIn) { clearTimeout(this.restartTimer); try { this.recognition?.abort(); } catch {} }
@@ -421,7 +795,7 @@ export class VoiceController {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     if (!AudioContextClass) return false;
     if (!this.context || this.context.state === 'closed') this.context = new AudioContextClass({ latencyHint: 'interactive' });
-    if (this.context.state !== 'running') await this.context.resume();
+    if (this.context.state !== 'running' && !await resumeAudioContext(this.context)) return false;
     if (this.context.state !== 'running') return false;
     const source = this.context.createBufferSource();
     source.buffer = this.context.createBuffer(1, 1, this.context.sampleRate);
@@ -448,6 +822,7 @@ export class VoiceController {
   }
 
   async stop() {
+    if (this.running && this.profileDevice) saveVoiceProfile(this.profileDevice, { noiseFloor: this.noiseFloor, signalToNoiseDb: this.lastSignalToNoiseDb });
     this.shouldRun = false; this.running = false; this.speaking = false;
     if (this.commandCaptureActive) this.finishCommandCapture('cancelled');
     clearTimeout(this.restartTimer); clearTimeout(this.commandTimer); clearTimeout(this.captureTimer); clearTimeout(this.captureFinalizeTimer); cancelAnimationFrame(this.raf);
@@ -456,10 +831,13 @@ export class VoiceController {
     this.playbackSource = null;
     this.recognition = null; this.preparingRecognition = false; this.pending = []; this.commandCaptureActive = false; this.captureVoiceActive = false; this.captureInterim = '';
     this.vadCandidateSince = 0; this.vadQuietSince = 0; this.lastSpeechSignalAt = 0;
-    this.stream?.getTracks().forEach((track) => track.stop()); this.stream = null; this.analyser = null; this.audioSamples = null;
-    this.networkErrors = 0; this.recognitionUnavailable = false;
+    this.rawVoiceCandidateSince = 0; this.rawVoiceQuietSince = 0; this.rawVoiceActive = false; this.lastRawVoiceAt = 0;
+    this.captureStartedAt = 0; this.captureVoiceEpoch = this.physicalVoiceEpoch;
+    this.stream?.getTracks().forEach((track) => track.stop()); this.stream = null; this.analyser = null; this.audioSamples = null; this.frequencySamples = null;
+    this.audioCalibrationUntil = 0; this.noiseFloorSamples = []; this.postSpeechGuardUntil = 0; this.profileDevice = '';
+    this.networkErrors = 0; this.recognitionUnavailable = false; this.lastPhysicalSpeechScore = null;
     if (this.context) await this.context.close().catch(() => {});
-    this.context = null; this.onLevel({ level: 0, rms: 0, peak: 0, noiseFloor: this.noiseFloor, voiceActive: false }); this.onState('standby');
+    this.context = null; this.onLevel({ level: 0, rms: 0, peak: 0, noiseFloor: this.noiseFloor, noiseFloorBaseline: this.noiseFloorBaseline, signalToNoiseDb: this.lastSignalToNoiseDb, voiceActive: false, dcOffset: 0, physicalVoiceEpoch: this.physicalVoiceEpoch, lastPhysicalVoiceOnsetAt: this.lastPhysicalVoiceOnsetAt, captureFresh: false }); this.onState('standby');
   }
 
   async toggle(settings = this.settings) { if (this.running) await this.stop(); else await this.start(settings); }

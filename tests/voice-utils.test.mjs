@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   findWakePhrase, isDuplicateCommand, normalizeTranscript, normalizeVocabulary,
-  normalizeWakePhrases, recognitionPhraseSpecs, selectRecognitionAlternative, similarity
+  normalizeWakePhrases, recognitionPhraseSpecs, recommendVoiceSettings, selectRecognitionAlternative, shouldApplyTranscriptToInput, similarity
 } from '../public/voice-utils.js';
 
 test('normalizes transcripts and wake phrase settings', () => {
@@ -24,10 +24,23 @@ test('deduplicates domain vocabulary and builds bounded recognition biases', () 
   ]);
 });
 
+test('recommends conservative voice thresholds from measured room noise', () => {
+  const quiet = recommendVoiceSettings({ noiseFloor: .004, signalToNoiseDb: 24 });
+  const noisy = recommendVoiceSettings({ noiseFloor: .09, signalToNoiseDb: 5 });
+  assert.ok(noisy.micSensitivity > quiet.micSensitivity);
+  assert.ok(noisy.wakeSensitivity > quiet.wakeSensitivity);
+  assert.ok(noisy.clapSensitivity > quiet.clapSensitivity);
+  assert.ok(noisy.recognitionConfidence > quiet.recognitionConfidence);
+  assert.ok(noisy.commandSilenceMs >= quiet.commandSilenceMs);
+  assert.equal(recommendVoiceSettings({ noiseFloor: 9, signalToNoiseDb: -99 }).noiseFloor, .12);
+});
+
 test('detects exact and common Jarvis mishearings without matching Travis', () => {
   const exact = findWakePhrase('Hey Jarvis check docker', ['hey jarvis', 'jarvis'], .55);
   assert.equal(exact.detected, true); assert.equal(exact.command, 'check docker');
   assert.equal(findWakePhrase('Jervis system report', ['jarvis'], .55).detected, true);
+  assert.equal(findWakePhrase('Hey Jarvish show printer status', ['hey jarvis', 'jarvis'], .55).detected, true);
+  assert.equal(findWakePhrase('Jarvid show memory', ['jarvis'], .55).detected, true);
   assert.equal(findWakePhrase('Travis system report', ['jarvis'], .55).detected, false);
 });
 
@@ -43,4 +56,12 @@ test('suppresses repeated command echoes while allowing new commands', () => {
   assert.equal(isDuplicateCommand('show docker status', 'show docker status', 900), true);
   assert.equal(isDuplicateCommand('show printer status', 'show docker status', 900), false);
   assert.ok(similarity('restart services', 'restart service') > .9);
+});
+
+test('does not let delayed empty or live recognition overwrite typed text', () => {
+  assert.equal(shouldApplyTranscriptToInput('', { focused: false, currentValue: 'typed command' }), false);
+  assert.equal(shouldApplyTranscriptToInput('   ', { focused: false, currentValue: '' }), false);
+  assert.equal(shouldApplyTranscriptToInput('voice command', { focused: true, currentValue: 'typed command' }), false);
+  assert.equal(shouldApplyTranscriptToInput('voice command', { focused: true, currentValue: '' }), true);
+  assert.equal(shouldApplyTranscriptToInput('voice command', { focused: false, currentValue: 'old result' }), true);
 });

@@ -14,9 +14,39 @@ test('routes only explicit public-information requests', () => {
   assert.equal(detectService('Show me a map of Berlin'), 'map');
   assert.equal(detectService('Convert 20 USD to EUR'), 'exchange');
   assert.equal(detectService('map of Dubai'), 'map');
+  assert.equal(detectService('Search GitHub for local voice assistant projects'), 'github');
+  assert.equal(detectService('Tell me about the GitHub repo open-jarvis/OpenJarvis'), 'github');
   assert.equal(detectService('Write a poem about dragons'), '');
   assert.equal(detectService('What is my CPU temperature?'), '');
   assert.equal(publicServiceCatalog().every((item) => item.keyRequired === false), true);
+});
+
+test('returns bounded keyless GitHub repository research with citations', async () => {
+  const result = await runPublicService('Search GitHub for local voice assistant projects', { lookup, fetchImpl: async (url, options) => {
+    assert.match(String(url), /api\.github\.com\/search\/repositories\?q=local%20voice%20assistant/);
+    assert.equal(options.headers.Accept, 'application/vnd.github+json');
+    assert.equal(options.headers['User-Agent'], 'jarvis-local-read-only');
+    return response({ items: [
+      { name: 'example-assistant', full_name: 'example/example-assistant', description: 'Local assistant', stargazers_count: 42, forks_count: 3, language: 'Python', html_url: 'https://github.com/example/example-assistant', updated_at: '2026-10-30T00:00:00Z' },
+      { name: 'unsafe', full_name: 'unsafe/repository', description: 'No URL', stargazers_count: 1, html_url: 'javascript:alert(1)' }
+    ] });
+  } });
+  assert.equal(result.service, 'github');
+  assert.equal(result.result.repositories.length, 1);
+  assert.equal(result.result.repositories[0].fullName, 'example/example-assistant');
+  assert.equal(result.result.repositories[0].stars, 42);
+  assert.ok(result.citations.includes('https://github.com/example/example-assistant'));
+  assert.match(result.context, /UNTRUSTED PUBLIC API EVIDENCE/);
+});
+
+test('looks up one explicit public GitHub repository without accepting a write operation', async () => {
+  const result = await runPublicService('Tell me about the GitHub repo open-jarvis/OpenJarvis', { lookup, fetchImpl: async (url, options) => {
+    assert.equal(String(url), 'https://api.github.com/repos/open-jarvis/OpenJarvis');
+    assert.equal(options.method, 'GET');
+    return response({ name: 'OpenJarvis', full_name: 'open-jarvis/OpenJarvis', description: 'Local assistant', stargazers_count: 100, forks_count: 10, language: 'Python', html_url: 'https://github.com/open-jarvis/OpenJarvis', license: { spdx_id: 'Apache-2.0' } });
+  } });
+  assert.equal(result.result.repositories[0].fullName, 'open-jarvis/OpenJarvis');
+  assert.equal(result.result.repositories[0].license, 'Apache-2.0');
 });
 
 test('normalizes a keyless weather lookup and preserves source citations', async () => {
@@ -69,9 +99,39 @@ test('normalizes currency conversion without accepting an API key', async () => 
   assert.equal(result.result.converted, 18.4); assert.equal(result.result.to, 'EUR'); assert.equal(result.citations.length, 1);
 });
 
+test('falls back to a keyless dictionary source when the primary provider is unavailable', async () => {
+  const result = await runPublicService('define resilient', { lookup, fetchImpl: async (url) => {
+    const value = String(url);
+    if (value.includes('api.dictionaryapi.dev')) return response({ message: 'temporary outage' }, 503);
+    assert.match(value, /api\.datamuse\.com\/words\?sp=resilient/);
+    return response([{ word: 'resilient', defs: ['adj\table to recover quickly from difficulty'] }]);
+  } });
+  assert.equal(result.service, 'dictionary'); assert.equal(result.result.word, 'resilient');
+  assert.equal(result.result.meanings[0].partOfSpeech, 'adj'); assert.match(result.result.meanings[0].definitions[0], /recover quickly/);
+  assert.equal(result.provider, 'Datamuse'); assert.equal(result.citations.length, 2);
+});
+
 test('handles an empty public-holiday dataset as a normal unavailable result', async () => {
   const result = await runPublicService('public holidays in AE 2026', { lookup, fetchImpl: async (url) => { assert.match(String(url), /date\.nager\.at\/api\/v3\/PublicHolidays\/2026\/AE/); return response('', 204); } });
   assert.equal(result.used, true); assert.equal(result.service, 'holiday'); assert.equal(result.result.available, false); assert.deepEqual(result.result.holidays, []);
+});
+
+test('falls back to the keyless worldwide holiday feed after a transient Nager outage', async () => {
+  const result = await runPublicService('public holidays in AE 2026', { lookup, fetchImpl: async (url) => {
+    const value = String(url);
+    if (value.includes('/PublicHolidays/2026/AE')) return response({ message: 'temporary outage' }, 502);
+    assert.match(value, /date\.nager\.at\/api\/v3\/NextPublicHolidaysWorldwide/);
+    return response([{ countryCode: 'AE', date: '2026-12-02', name: 'National Day', localName: 'National Day', global: true, counties: null }, { countryCode: 'US', date: '2026-11-26', name: 'Thanksgiving' }]);
+  } });
+  assert.equal(result.used, true); assert.equal(result.service, 'holiday'); assert.equal(result.result.available, true);
+  assert.equal(result.result.holidays.length, 1); assert.equal(result.result.holidays[0].name, 'National Day');
+  assert.equal(result.provider, 'Nager.Date fallback'); assert.equal(result.citations.length, 2);
+});
+
+test('keeps holiday queries useful when both keyless feeds are temporarily down', async () => {
+  const result = await runPublicService('public holidays in AE 2026', { lookup, fetchImpl: async () => response({ error: 'temporary outage' }, 503) });
+  assert.equal(result.used, true); assert.equal(result.service, 'holiday'); assert.equal(result.result.available, false);
+  assert.deepEqual(result.result.holidays, []); assert.equal(result.provider, 'Nager.Date unavailable');
 });
 
 test('returns OpenStreetMap geocoding with an OpenFreeMap MapLibre style', async () => {

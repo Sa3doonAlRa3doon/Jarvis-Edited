@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#02070b">
+  <title>JARVIS // Private Workspace</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/workspace-screen.css">
+</head>
+<body class="workspace-page">
+  <div class="workspace-backdrop" aria-hidden="true"><i></i><i></i><i></i></div>
+  <main class="workspace-shell">
+    <header class="workspace-topbar hud-panel">
+      <a class="workspace-back" href="/">← COMMAND SCREEN</a>
+      <div class="workspace-brand"><span class="workspace-glyph"><i></i></span><div><small>PRIVATE LOCAL WORKSPACE</small><h1>J.A.R.V.I.S. <b>SCREEN LINK</b></h1></div></div>
+      <div class="workspace-top-status"><span><i id="workspace-health-dot"></i><b id="workspace-health">CONNECTING</b></span><span>NODE <b id="workspace-node">127.0.0.1</b></span><strong id="workspace-clock">--:--:--</strong></div>
+    </header>
+
+    <section class="workspace-grid">
+      <aside class="workspace-rail workspace-left">
+        <section class="workspace-card workspace-state-card">
+          <div class="workspace-card-head"><span>01 / JARVIS STATE</span><b id="workspace-phase">STANDBY</b></div>
+          <div class="workspace-state-orb" id="workspace-state-orb"><i></i><i></i><i></i><span></span></div>
+          <h2 id="workspace-state-title">READY</h2>
+          <p id="workspace-state-copy">The private screen is armed. A protected browser or agent task will appear here while it is active.</p>
+          <div class="workspace-readouts"><span><small>TOOL</small><b id="workspace-tool">—</b></span><span><small>ELAPSED</small><b id="workspace-elapsed">—</b></span></div>
+        </section>
+        <section class="workspace-card">
+          <div class="workspace-card-head"><span>02 / SERVICE BUS</span><b id="workspace-service-count">0/0</b></div>
+          <div class="workspace-service-list" id="workspace-service-list"><p>Checking local services…</p></div>
+        </section>
+        <section class="workspace-card workspace-printer-card">
+          <div class="workspace-card-head"><span>03 / FABRICATOR</span><b id="workspace-printer-state">CHECKING</b></div>
+          <strong class="workspace-printer-file" id="workspace-printer-file">NO ACTIVE FILE</strong>
+          <div class="workspace-progress"><i id="workspace-printer-progress"></i></div>
+          <div class="workspace-printer-meta"><span id="workspace-printer-percent">0%</span><span id="workspace-printer-remaining">ETA --</span></div>
+          <div class="workspace-temp-row"><span>NOZZLE <b id="workspace-nozzle">--</b></span><span>BED <b id="workspace-bed">--</b></span></div>
+        </section>
+        <section class="workspace-card workspace-camera-card">
+          <div class="workspace-card-head"><span>03A / PRINTER CAMERA</span><b id="workspace-printer-camera-state">NOT CONFIGURED</b></div>
+          <div class="workspace-camera-preview">
+            <img id="workspace-printer-camera-frame" alt="Configured printer camera snapshot" hidden>
+            <div class="workspace-camera-placeholder" id="workspace-printer-camera-placeholder"><strong>PRINTER OPTICAL FEED STANDBY</strong><small>JARVIS will try the printer host's standard webcam snapshot paths first; set PRINTER_CAMERA_URL for a custom endpoint.</small></div>
+            <span class="workspace-camera-source" id="workspace-printer-camera-source">PRINTER CAMERA // PRIVATE</span>
+          </div>
+          <div class="workspace-camera-meta"><span id="workspace-printer-camera-host">NO ENDPOINT</span><span id="workspace-printer-camera-time">NO FRAME</span></div>
+        </section>
+        <section class="workspace-card workspace-camera-card">
+          <div class="workspace-card-head"><span>03B / PI CAMERA</span><b id="workspace-camera-state">NOT SELECTED</b></div>
+          <div class="workspace-camera-preview">
+            <img id="workspace-camera-frame" alt="Selected Raspberry Pi camera frame" hidden>
+            <div class="workspace-camera-placeholder" id="workspace-camera-placeholder"><strong>CAMERA LINK STANDBY</strong><small>Select a Pi camera in Settings to see one local frame at a time.</small></div>
+            <span class="workspace-camera-source" id="workspace-camera-source">PI CAMERA // PRIVATE</span>
+          </div>
+          <div class="workspace-camera-meta"><span id="workspace-camera-device">NO DEVICE</span><span id="workspace-camera-time">NO FRAME</span></div>
+        </section>
+      </aside>
+
+      <section class="workspace-screen hud-panel">
+        <header class="workspace-screen-head"><div><span>04 / JARVIS OWN SCREEN</span><h2 id="workspace-screen-title">PRIVATE AGENT VIEW</h2></div><div class="workspace-screen-actions"><button id="workspace-screen-explain" class="workspace-screen-tool" type="button" disabled>EXPLAIN VIEW</button><button id="workspace-screen-compact" class="workspace-screen-tool" type="button" aria-pressed="false">COMPACT VIEW</button><button id="workspace-screen-focus" class="workspace-screen-tool" type="button" aria-pressed="false" title="Zoom the visible frame locally without changing the webpage">FOCUS VIEW</button><button id="workspace-screen-fullscreen" class="workspace-screen-tool" type="button" aria-pressed="false" title="Make the JARVIS screen fill the display">FULLSCREEN</button><button id="workspace-screen-share-toggle" class="workspace-screen-share" type="button">SHARE YOUR SCREEN</button><div class="workspace-screen-badge"><i></i><b id="workspace-screen-state">ARMED</b></div></div></header>
+        <form class="workspace-website-launcher" id="workspace-website-form" autocomplete="off"><label for="workspace-website-input">PRIVATE BROWSER</label><input id="workspace-website-input" type="text" inputmode="url" maxlength="300" placeholder="https://example.com or YouTube"><button type="submit" id="workspace-website-open">OPEN WEBSITE</button><button type="button" id="workspace-website-refresh" disabled>REFRESH PREVIEW</button><small id="workspace-website-status">Public read-only navigation // isolated browser profile</small></form>
+        <nav class="workspace-website-quick" aria-label="Public website shortcuts"><span>QUICK SOURCES</span><button type="button" data-website-alias="Twitch">TWITCH</button><button type="button" data-website-alias="Discord">DISCORD</button><button type="button" data-website-alias="GitHub">GITHUB</button><button type="button" data-website-alias="Reddit">REDDIT</button><button type="button" data-website-alias="Instagram">INSTAGRAM</button><button type="button" data-website-alias="Google News">NEWS</button></nav>
+        <div class="workspace-screen-stage" id="workspace-screen-stage">
+          <img id="workspace-frame" alt="Live private JARVIS browser screen" hidden>
+          <video id="workspace-screen-share-video" aria-label="Your selected local screen" autoplay muted playsinline hidden></video>
+          <div class="workspace-screen-placeholder" id="workspace-screen-placeholder"><div class="workspace-placeholder-orb"><i></i><i></i><i></i><span></span></div><strong id="workspace-placeholder-title">JARVIS SCREEN READY</strong><small id="workspace-placeholder-copy">Open a website with JARVIS, then share the display here to watch it. EXPLAIN VIEW reads one approved snapshot locally.</small></div>
+          <div class="workspace-screen-explanation" id="workspace-screen-explanation" hidden><span>VIEW INTELLIGENCE // ONE APPROVED SNAPSHOT</span><p id="workspace-screen-explanation-copy">Press EXPLAIN VIEW after sharing a display or when a protected agent frame is visible.</p></div>
+          <canvas id="workspace-screen-canvas" hidden></canvas>
+          <div class="workspace-scan" aria-hidden="true"></div>
+          <div class="workspace-corner corner-tl"></div><div class="workspace-corner corner-tr"></div><div class="workspace-corner corner-bl"></div><div class="workspace-corner corner-br"></div>
+        </div>
+        <footer class="workspace-screen-foot"><span><i id="workspace-frame-dot"></i><b id="workspace-frame-state">NO FRAME</b></span><span id="workspace-frame-time">LOCAL ONLY // PROTECTED</span><span id="workspace-screen-share-state">LOCAL SCREEN OFF // NO UPLOAD</span><span id="workspace-screen-safety">VIEW ONLY // NO AD OR PAYWALL BYPASS</span></footer>
+      </section>
+
+      <aside class="workspace-rail workspace-right">
+        <section class="workspace-card workspace-task-card">
+          <div class="workspace-card-head"><span>05 / CURRENT RUN</span><b id="workspace-run-status">IDLE</b></div>
+          <p class="workspace-task-copy" id="workspace-task-copy">No active agent task. Ask JARVIS to browse, research, create an artifact, or inspect the printer.</p>
+          <div class="workspace-task-lines"><span>ROUTE <b id="workspace-route">GENERAL</b></span><span>MODEL <b id="workspace-model">LOCAL</b></span></div>
+          <form class="workspace-directive" id="workspace-directive-form" autocomplete="off">
+            <label for="workspace-directive-input">DIRECTIVE CHANNEL</label>
+            <div class="workspace-directive-row"><input id="workspace-directive-input" type="text" maxlength="1200" placeholder="Ask JARVIS about the Pi, printer, Google, files, or web…"><span class="workspace-directive-actions"><button id="workspace-directive-plan" type="button" title="Preview the route, tools, approvals, and warnings without executing anything">PLAN</button><button id="workspace-directive-run" type="submit">ASK JARVIS</button><button id="workspace-directive-talk" type="button" disabled title="Play the latest response through the configured JARVIS voice">TALK</button></span></div>
+            <small id="workspace-directive-status" aria-live="polite">LOCAL MODEL ROUTER // RESPONSE APPEARS ABOVE</small>
+          </form>
+          <section class="workspace-mission-plan" id="workspace-mission-plan" hidden aria-live="polite">
+            <div class="workspace-mission-plan-head"><span>MISSION PREVIEW</span><b id="workspace-mission-plan-mode">—</b></div>
+            <p id="workspace-mission-plan-summary">Enter a directive and press PLAN. This preview never executes tools.</p>
+            <div class="workspace-mission-plan-grid"><span><small>ROUTE</small><b id="workspace-mission-plan-route">—</b></span><span><small>SPECIALISTS</small><b id="workspace-mission-plan-specialists">—</b></span><span><small>APPROVALS</small><b id="workspace-mission-plan-approvals">—</b></span></div>
+            <div class="workspace-mission-plan-columns"><div><small>LANES / STEPS</small><ul id="workspace-mission-plan-steps"></ul></div><div><small>WARNINGS</small><ul id="workspace-mission-plan-warnings"></ul></div></div>
+          </section>
+          <nav class="workspace-directive-quick" aria-label="Workspace directive shortcuts"><span>FOCUS</span><button type="button" data-workspace-prompt="Give me a concise health report for this Pi and its services.">HEALTH</button><button type="button" data-workspace-prompt="Explain the current Docker containers, resource use, and anything unhealthy.">DOCKER</button><button type="button" data-workspace-prompt="How much time is left on my 3D print and what are the current printer temperatures?">PRINT ETA</button><button type="button" data-workspace-prompt="Is my microphone and wake gate ready?">VOICE</button><button type="button" data-workspace-prompt="Run the Architect Critic Debugger unit checks.">PIPELINE</button><button type="button" data-workspace-prompt="Give me a morning briefing with local system health, default-location weather, current technology news, printer status, Docker status, and Google Calendar if connected.">BRIEFING</button></nav>
+        </section>
+        <section class="workspace-card workspace-events-card">
+          <div class="workspace-card-head"><span>06 / ACTIVITY STREAM</span><b id="workspace-event-count">0</b></div>
+          <div class="workspace-events" id="workspace-events"><p>Waiting for local activity…</p></div>
+        </section>
+        <section class="workspace-card workspace-boundary-card">
+          <div class="workspace-card-head"><span>07 / CONTROL BOUNDARY</span><b>LOCAL</b></div>
+          <p>Frames are shown only during an active protected task or your explicit screen share. JARVIS uses a separate browser profile and cannot silently type, send, upload, purchase, or delete.</p>
+          <div class="workspace-boundary-tags"><span>PIN GRANT</span><span>NO COOKIES</span><span>NO SECRET LEAK</span></div>
+        </section>
+        <section class="workspace-card workspace-capability-card">
+          <div class="workspace-card-head"><span>08 / CAPABILITY MATRIX</span><b id="workspace-capability-count">0/0</b></div>
+          <div class="workspace-capability-list" id="workspace-capability-list"><p>Mapping JARVIS capabilities…</p></div>
+        </section>
+        <section class="workspace-card workspace-analytics-card" id="workspace-analytics">
+          <div class="workspace-card-head"><span>09 / LOCAL ANALYTICS</span><b id="workspace-analytics-window">24H</b></div>
+          <div class="workspace-analytics-grid">
+            <span><small>EVENTS</small><b id="workspace-analytics-events">--</b></span>
+            <span><small>WAKE</small><b id="workspace-analytics-wake">--</b></span>
+            <span><small>CPU</small><b id="workspace-analytics-cpu">--</b></span>
+            <span><small>RAM</small><b id="workspace-analytics-ram">--</b></span>
+            <span><small>SERVICES</small><b id="workspace-analytics-services">--</b></span>
+            <span><small>BROADCAST</small><b id="workspace-analytics-broadcast">--</b></span>
+          </div>
+          <p class="workspace-analytics-note" id="workspace-analytics-note">Host-local counts only // no telemetry upload.</p>
+        </section>
+        <section class="workspace-card workspace-media-card" id="workspace-media">
+          <div class="workspace-card-head"><span>10 / MEDIA DECK</span><b id="workspace-media-state">LOCAL</b></div>
+          <strong class="workspace-media-title" id="workspace-media-title">NO MEDIA STAGED</strong>
+          <div class="workspace-media-meta"><span>QUEUE <b id="workspace-media-queue">0</b></span><span>HISTORY <b id="workspace-media-history">0</b></span></div>
+          <p class="workspace-analytics-note" id="workspace-media-note">Host-local staging only // no external service writes.</p>
+        </section>
+        <section class="workspace-card workspace-live-deck-card" id="workspace-live-deck">
+          <div class="workspace-card-head"><span>11 / LIVE DECK</span><b id="workspace-live-deck-state">STANDBY</b></div>
+          <div class="workspace-live-deck-grid">
+            <span><small>OBS</small><b id="workspace-live-deck-obs">--</b></span>
+            <span><small>SCENE</small><b id="workspace-live-deck-scene">--</b></span>
+            <span><small>STREAM</small><b id="workspace-live-deck-stream">--</b></span>
+            <span><small>RECORD</small><b id="workspace-live-deck-record">--</b></span>
+            <span><small>MEDIA</small><b id="workspace-live-deck-media">--</b></span>
+            <span><small>AUTOMATION</small><b id="workspace-live-deck-automation">--</b></span>
+            <span><small>HEALTH</small><b id="workspace-live-deck-health">--</b></span>
+            <span><small>DROPPED</small><b id="workspace-live-deck-dropped">--</b></span>
+            <span><small>REPLAY</small><b id="workspace-live-deck-replay">--</b></span>
+            <span><small>V-CAM</small><b id="workspace-live-deck-vcam">--</b></span>
+          </div>
+          <p class="workspace-analytics-note" id="workspace-live-deck-note">OBS, local media, and read-only routines are summarized here.</p>
+        </section>
+        <section class="workspace-card workspace-multi-deck-card" id="workspace-multi-purpose-deck">
+          <div class="workspace-card-head"><span>12 / JARVIS STATS DECK</span><b id="workspace-multi-deck-state">LOCAL FIRST</b></div>
+          <div class="workspace-live-deck-grid workspace-multi-deck-grid">
+            <span><small>OBS</small><b id="workspace-multi-deck-obs">--</b></span>
+            <span><small>VOICE</small><b id="workspace-multi-deck-voice">--</b></span>
+            <span><small>TWITCH</small><b id="workspace-multi-deck-twitch">--</b></span>
+            <span><small>JARVIS</small><b id="workspace-multi-deck-jarvis">--</b></span>
+            <span><small>MUSIC</small><b id="workspace-multi-deck-music">--</b></span>
+            <span><small>SOCIALS</small><b id="workspace-multi-deck-socials">--</b></span>
+            <span><small>DESKTOP</small><b id="workspace-multi-deck-desktop">--</b></span>
+            <span><small>VIEWERS</small><b id="workspace-multi-deck-viewers">--</b></span>
+            <span><small>CHAT</small><b id="workspace-multi-deck-chat">--</b></span>
+            <span><small>BITRATE</small><b id="workspace-multi-deck-bitrate">--</b></span>
+            <span><small>NOW PLAYING</small><b id="workspace-multi-deck-now-playing">--</b></span>
+            <span><small>AUTOMATIONS</small><b id="workspace-multi-deck-automations">--</b></span>
+            <span><small>AGENTS</small><b id="workspace-multi-deck-agents">--</b></span>
+          </div>
+          <p class="workspace-analytics-note" id="workspace-multi-deck-note">Independent local stats surface // external socials never claim a connection without one.</p>
+        </section>
+      </aside>
+    </section>
+
+    <footer class="workspace-footer"><span>JARVIS WORKSPACE // SCREEN, PRINTER, SERVICES, AND AGENT ACTIVITY IN ONE VIEW</span><div><a href="/settings">SETTINGS</a><a href="/">COMMAND SCREEN</a></div></footer>
+  </main>
+  <script src="/auth.js"></script>
+  <script src="/workspace.js" type="module"></script>
+</body>
+</html>
