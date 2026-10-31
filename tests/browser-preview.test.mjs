@@ -6,6 +6,7 @@ test('browser preview stays bounded and is pinned to Camoufox', () => {
   assert.equal(browserPreviewDefaults.engine, 'camoufox');
   assert.equal(browserPreviewDefaults.maxFrameBytes, 6 * 1024 * 1024);
   assert.equal(browserPreviewDefaults.timeoutMs, 12_000);
+  assert.equal(browserPreviewDefaults.headless, true);
 });
 
 test('browser preview passes the selected headless mode to Camoufox', async () => {
