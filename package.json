@@ -42,7 +42,7 @@
     "express": "^5.1.0",
     "playwright-core": "^1.62.1",
     "pptxgenjs": "^4.0.1",
-    "three": "^0.180.0",
+    "three": "^0.186.1",
     "ws": "^8.22.0"
   },
   "overrides": {
