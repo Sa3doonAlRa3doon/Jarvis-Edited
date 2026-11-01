@@ -60,3 +60,22 @@ test('doctor reports configured Stirling and printer readiness without leaking c
   assert.equal(report.checks.find((item) => item.id === 'printer-camera')?.detail, 'printer camera snapshot found');
   assert.ok(report.checks.every((item) => !String(item.detail).includes('apiKey')));
 });
+
+test('doctor does not treat a healthy Stirling status endpoint as verified PDF processing', () => {
+  const base = {
+    dashboard: { ok: true }, auth: { ok: true }, config: { browserEngine: 'camoufox' },
+    services: { openJarvis: { online: true }, ollama: { online: true } },
+    vision: { runtime: 'ready', capabilityVerified: true },
+    integrations: { stirling: { configured: true, online: true, processing: { state: 'unverified' } } }
+  };
+  const unverified = evaluateDoctorSnapshot(base, { stirling: true });
+  assert.equal(unverified.checks.find((item) => item.id === 'stirling')?.ok, false);
+  assert.equal(unverified.checks.find((item) => item.id === 'stirling')?.detail, 'Stirling health online // PDF processing not verified');
+
+  const rejected = evaluateDoctorSnapshot({
+    ...base,
+    integrations: { stirling: { configured: true, online: true, processing: { state: 'rejected', providerStatus: 401 } } }
+  }, { stirling: true });
+  assert.equal(rejected.checks.find((item) => item.id === 'stirling')?.ok, false);
+  assert.equal(rejected.checks.find((item) => item.id === 'stirling')?.detail, 'Stirling online // processing rejected (HTTP 401)');
+});

@@ -82,9 +82,14 @@ export function evaluateDoctorSnapshot(snapshot, options = {}) {
   const googleReady = Boolean(googleCapability?.status?.available);
   add('google', googleReady, googleReady ? 'Google OAuth live' : 'Google OAuth unavailable; create/authorize a replacement Desktop client', needs.google);
   const stirling = snapshot.integrations?.stirling || {};
-  const stirlingReady = Boolean(stirling.online);
+  const processingState = String(stirling.processing?.state || 'not-verified');
+  const stirlingReady = Boolean(stirling.online && processingState === 'verified');
   const stirlingDetail = stirling.online
-    ? `Stirling online${stirling.processing?.state === 'verified' ? ' // processing verified' : ''}`
+    ? processingState === 'verified'
+      ? 'Stirling online // processing verified'
+      : processingState === 'rejected'
+        ? `Stirling online // processing rejected${stirling.processing?.providerStatus ? ` (HTTP ${Number(stirling.processing.providerStatus)})` : ''}`
+        : 'Stirling health online // PDF processing not verified'
     : stirling.configured
       ? `Stirling unavailable${stirling.error ? ` (${stirling.error})` : ''}`
       : 'Stirling not configured';
