@@ -61,6 +61,27 @@ test('doctor reports configured Stirling and printer readiness without leaking c
   assert.ok(report.checks.every((item) => !String(item.detail).includes('apiKey')));
 });
 
+test('doctor accepts a verified Pi printer-camera frame when Moonraker discovery has no webcam', () => {
+  const report = evaluateDoctorSnapshot({
+    platform: 'linux', dashboard: { ok: true }, auth: { ok: true }, config: { browserEngine: 'camoufox', printerCameraConfigured: true },
+    services: { openJarvis: { online: true }, ollama: { online: true } },
+    vision: { runtime: 'ready', capabilityVerified: true },
+    integrations: { printerCamera: { configured: false, discovery: 'not-found', configError: 'Moonraker has no webcams configured.' } },
+    printerCameraFrame: { ok: true, status: 200, bytes: 13471, contentType: 'image/jpeg' },
+    printer: { configured: true, online: true, ready: true }, media: { cameras: [], microphones: [] }
+  }, { printerCamera: true });
+  assert.equal(report.checks.find((item) => item.id === 'printer-camera')?.ok, true);
+  assert.equal(report.checks.find((item) => item.id === 'printer-camera')?.detail, 'printer camera frame captured (13471 bytes)');
+
+  const failedFrame = evaluateDoctorSnapshot({
+    platform: 'linux', dashboard: { ok: true }, auth: { ok: true }, config: { browserEngine: 'camoufox', printerCameraConfigured: true },
+    integrations: { printerCamera: { configured: false } },
+    printerCameraFrame: { ok: false, status: 503, bytes: 0 }
+  }, { printerCamera: true });
+  assert.equal(failedFrame.checks.find((item) => item.id === 'printer-camera')?.ok, false);
+  assert.equal(failedFrame.checks.find((item) => item.id === 'printer-camera')?.detail, 'printer camera frame unavailable (HTTP 503)');
+});
+
 test('doctor does not treat a healthy Stirling status endpoint as verified PDF processing', () => {
   const base = {
     dashboard: { ok: true }, auth: { ok: true }, config: { browserEngine: 'camoufox' },

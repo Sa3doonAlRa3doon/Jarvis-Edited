@@ -53,8 +53,12 @@ async function request(url, path, options = {}) {
     signal: AbortSignal.timeout(options.timeoutMs || 8_000)
   });
   const type = response.headers.get('content-type') || '';
-  const body = type.includes('json') ? await response.json().catch(() => ({})) : await response.text().catch(() => '');
-  return { status: response.status, body, headers: response.headers };
+  const body = type.includes('json')
+    ? await response.json().catch(() => ({}))
+    : /^(?:image\/|application\/octet-stream)/i.test(type)
+      ? { bytes: (await response.arrayBuffer().catch(() => new ArrayBuffer(0))).byteLength }
+      : await response.text().catch(() => '');
+  return { status: response.status, body, headers: response.headers, contentType: type };
 }
 
 function cookieFrom(response) {
@@ -103,11 +107,18 @@ export function evaluateDoctorSnapshot(snapshot, options = {}) {
       : 'printer not configured';
   add('printer', printerReady, printerDetail, needs.printer);
   const printerCamera = snapshot.integrations?.printerCamera || {};
-  const printerCameraReady = Boolean(printerCamera.configured && printerCamera.discovery !== 'not-found' && !printerCamera.configError);
-  const printerCameraDetail = printerCameraReady
-    ? `printer camera ${printerCamera.discovery === 'found' ? 'snapshot found' : 'configured'}`
+  const printerCameraFrame = snapshot.printerCameraFrame || {};
+  const localFrameReady = Boolean(printerCameraFrame.ok && Number(printerCameraFrame.bytes) > 100);
+  const discoveredCameraReady = Boolean(printerCamera.configured && printerCamera.discovery !== 'not-found' && !printerCamera.configError);
+  const printerCameraReady = localFrameReady || discoveredCameraReady;
+  const printerCameraDetail = localFrameReady
+    ? `printer camera frame captured (${Number(printerCameraFrame.bytes)} bytes)`
+    : discoveredCameraReady
+      ? `printer camera ${printerCamera.discovery === 'found' ? 'snapshot found' : 'configured'}`
     : printerCamera.configError
       ? `printer camera config error (${printerCamera.configError})`
+      : printerCameraFrame.status
+        ? `printer camera frame unavailable (HTTP ${printerCameraFrame.status})`
       : printerCamera.autoDiscovery
         ? `printer camera ${printerCamera.discovery === 'pending' ? 'discovery pending' : 'snapshot not found'}`
         : 'printer camera not configured';
@@ -157,9 +168,10 @@ async function run() {
   const headers = cookie ? { cookie } : {};
   const protectedProbe = async (path) => request(url, path, { headers });
   try {
-    const [status, config, vision, capabilities, stirling, printer, printerCamera, media] = await Promise.all([
+    const [status, config, vision, capabilities, stirling, printer, printerCamera, media, printerFrame] = await Promise.all([
       protectedProbe('/api/status'), protectedProbe('/api/config'), protectedProbe('/api/vision/status'),
-      protectedProbe('/api/capabilities'), protectedProbe('/api/stirling/status'), protectedProbe('/api/printer/status'), protectedProbe('/api/media/printer-camera/discover'), protectedProbe('/api/media/devices')
+      protectedProbe('/api/capabilities'), protectedProbe('/api/stirling/status'), protectedProbe('/api/printer/status'), protectedProbe('/api/media/printer-camera/discover'), protectedProbe('/api/media/devices'),
+      process.platform === 'linux' ? protectedProbe('/api/media/printer-camera/frame.jpg') : Promise.resolve({ status: 0, body: { bytes: 0 }, contentType: '' })
     ]);
     snapshot.services = status.body?.services || {};
     snapshot.config = config.body || {};
@@ -168,6 +180,12 @@ async function run() {
     snapshot.integrations = { stirling: stirling.body || {}, printerCamera: printerCamera.body || {} };
     snapshot.printer = printer.body || {};
     snapshot.media = media.body || {};
+    snapshot.printerCameraFrame = {
+      ok: printerFrame.status === 200 && Number(printerFrame.body?.bytes) > 100,
+      status: printerFrame.status,
+      bytes: Number(printerFrame.body?.bytes) || 0,
+      contentType: clean(printerFrame.contentType, 80)
+    };
     if (status.status !== 200) snapshot.services = {};
   } catch (error) {
     snapshot.config = { browserEngine: '' };
