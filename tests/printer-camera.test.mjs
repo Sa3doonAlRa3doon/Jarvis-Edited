@@ -107,3 +107,16 @@ test('retries bounded auto-discovery after a printer was offline', async () => {
   assert.equal(client.snapshot().discovery, 'found');
   assert.equal(calls.length, 5);
 });
+
+test('explains a reachable printer whose webcam proxy returns HTTP 502', async () => {
+  const client = new PrinterCameraClient({
+    printerBaseUrl: 'http://192.168.4.74:4408',
+    discoveryTimeoutMs: 500,
+    fetchImpl: async () => response({ status: 502, type: 'text/html', bytes: Buffer.from('upstream unavailable') })
+  });
+  const result = await client.discover();
+  assert.equal(result.configured, false);
+  assert.match(result.error, /webcam proxy returned HTTP 502/);
+  assert.match(result.error, /camera is connected/);
+  assert.equal(client.snapshot().configError, result.error);
+});

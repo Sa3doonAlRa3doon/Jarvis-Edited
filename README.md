@@ -1,4 +1,8 @@
-# OpenJarvis Pi Command Center 3.32.0
+# OpenJarvis Pi Command Center 3.33.0
+
+### 3.33.0 printer-camera diagnostics
+
+- **Actionable discovery errors** — when the printer web interface responds but its known webcam paths return HTTP 502, JARVIS now calls out the failed webcam proxy and suggests checking the connected camera and printer webcam service. HTTP 404 and timeout failures receive separate guidance. The endpoint remains a read-only, bounded snapshot fetch.
 
 ### 3.32.0 clean Camoufox website preview
 

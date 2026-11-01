@@ -45,7 +45,7 @@ for (const shard of shards) { const stats = await fs.stat(path.join(modelDirecto
 const handModel = await fs.readFile(path.join(project, 'public', 'models', 'hand-landmarker', 'hand_landmarker.task'));
 assert.equal(handModel.length, 7819105, 'Unexpected hand landmark model size.');
 
-assert.equal(packageJson.version, '3.32.0');
+assert.equal(packageJson.version, '3.33.0');
 assert.match(server, /buildMorningBriefing/);
 assert.match(server, /isMorningBriefingPrompt/);
 assert.match(server, /responseStyleInstruction/);
@@ -210,7 +210,7 @@ assert.match(css, /v2\.4 restrained reactor command center/);
 assert.doesNotMatch(html, /href=["']\/settings/);
 assert.match(settingsHtml, /id="live-preview"/);
 assert.match(settingsHtml, /<title>JARVIS \/\/ Configuration Core<\/title>/);
-assert.match(settingsHtml, /id="settings-version">3\.32\.0<\/b>/);
+assert.match(settingsHtml, /id="settings-version">3\.33\.0<\/b>/);
 assert.match(settingsHtml, /id="settings-search"/);
 assert.match(settingsHtml, /id="revert-settings"/);
 assert.match(settingsClient, /UNSAVED PROFILE CHANGES/);
@@ -325,7 +325,7 @@ assert.match(await read('install-pi.sh'), /STT_ROOT_REAL=.*realpath -m/);
 assert.match(await read('install-pi.sh'), /Refusing to install the Vosk model outside/);
 assert.doesNotMatch(await read('install-pi.sh'), /rm -rf \"\$STT_MODEL_DIR\"/);
 assert.match(settingsHtml, /placeholder="Yes sir, how can I help you today\?"/);
-assert.match(server, /const appVersion = '3\.32\.0'/);
+assert.match(server, /const appVersion = '3\.33\.0'/);
 assert.match(server, /app\.get\('\/api\/routines'/);
 assert.match(server, /app\.get\('\/api\/memory'/);
 assert.match(server, /parseReminderPrompt/);

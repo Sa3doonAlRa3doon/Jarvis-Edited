@@ -23,7 +23,7 @@ if ($connection) {
   $commandMatchesProject = $normalizedCommand.Contains($normalizedRoot) -and $normalizedCommand.Contains('server.mjs')
   $healthMatchesProject = $false
   if (-not $commandMatchesProject -and $normalizedCommand -match '(?:^|\s)server\.mjs(?:\s|$)') {
-    try { $healthMatchesProject = (Invoke-RestMethod "http://127.0.0.1:$dashboardPort/api/health" -TimeoutSec 3).version -eq '3.32.0' } catch {}
+    try { $healthMatchesProject = (Invoke-RestMethod "http://127.0.0.1:$dashboardPort/api/health" -TimeoutSec 3).version -eq '3.33.0' } catch {}
   }
   if (-not $commandMatchesProject -and -not $healthMatchesProject) {
     throw "Port $dashboardPort is owned by a process outside this JARVIS project; refusing to stop it."
