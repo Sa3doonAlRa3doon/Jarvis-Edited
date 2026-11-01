@@ -1021,13 +1021,12 @@ try {
     await page.waitForFunction(() => document.querySelector('#refresh-devices')?.disabled === false, null, { timeout: 10_000 });
     const cameras = await page.locator('#browser-camera option').count();
     const microphones = await page.locator('#browser-microphone option').count();
-    // A synthetic Camoufox context may expose one unnamed media option rather
-    // than the placeholder-plus-device pair used by a physical browser.
-    const minimumOptions = fakeMedia ? 1 : 2;
-    assert(cameras >= minimumOptions && microphones >= minimumOptions, `camera options=${cameras}, microphone options=${microphones}`);
+    const availability = (await page.locator('#browser-device-count').textContent()).trim();
+    const match = availability.match(/(\d+)\s+CAM\s*\/\s*(\d+)\s+MIC/i);
+    assert(cameras >= 1 && microphones >= 1 && match && Number(match[1]) >= 1 && Number(match[2]) >= 1, `camera options=${cameras}, microphone options=${microphones}, available=${availability}`);
     const profile = (await page.locator('#microphone-profile').textContent()).trim();
     assert(/PROFILE|CALIBRATE/.test(profile), `microphone profile indicator missing: ${profile}`);
-    return { cameras: Math.max(0, cameras - 1), microphones: Math.max(0, microphones - 1), profile, media: captureLabel };
+    return { cameras: Number(match[1]), microphones: Number(match[2]), options: { cameras, microphones }, profile, media: captureLabel };
   });
 
   await check('Settings refreshes browser devices after a hot-plug event', async () => {
@@ -1098,10 +1097,18 @@ try {
   });
 
   await check(`Settings sensor calibration opens ${captureLabel.toLowerCase()} camera and mic`, async () => {
+    await page.locator('#source-browser').check({ force: true });
     await openSettingsSection(page, 'sensors');
     await page.locator('#start-sensors').waitFor({ state: 'visible' });
     if (fakeMedia) return { skipped: true, media: 'Synthetic', reason: 'physical sensor acceptance runs in the real Camoufox profile' };
     await releaseDashboardMedia(page);
+    await page.evaluate(() => {
+      // A prior screen-share acceptance check may leave a local preview or a
+      // scheduled retry. Tear it down before opening the camera/microphone.
+      const stopScreen = document.querySelector('#stop-screen-share');
+      if (stopScreen && !stopScreen.disabled) stopScreen.click();
+      document.querySelector('#settings-message')?.replaceChildren();
+    });
     await page.locator('#start-sensors').click({ force: true });
     let started = await page.waitForFunction(() => document.querySelector('#sensor-state')?.textContent?.trim() === 'CALIBRATING', null, { timeout: 15_000 }).then(() => true).catch(() => false);
     if (!started) {
@@ -1112,7 +1119,15 @@ try {
       await page.locator('#start-sensors').click({ force: true });
       started = await page.waitForFunction(() => document.querySelector('#sensor-state')?.textContent?.trim() === 'CALIBRATING', null, { timeout: 15_000 }).then(() => true).catch(() => false);
     }
-    assert(started, `sensor calibration did not start: ${await page.locator('#settings-message').textContent()}`);
+    const startup = await page.evaluate(() => ({
+      source: document.querySelector('#source')?.value,
+      state: document.querySelector('#sensor-state')?.textContent?.trim(),
+      message: document.querySelector('#settings-message')?.textContent?.trim(),
+      startDisabled: document.querySelector('#start-sensors')?.disabled,
+      cameraReady: document.querySelector('#camera-video')?.readyState,
+      cameraWidth: document.querySelector('#camera-video')?.videoWidth || 0
+    }));
+    assert(started, `sensor calibration did not start: ${JSON.stringify(startup)}`);
     const sensor = await page.evaluate(() => ({ state: document.querySelector('#sensor-state')?.textContent?.trim(), videoWidth: document.querySelector('#camera-video')?.videoWidth || 0, mic: document.querySelector('#mic-readout')?.textContent?.trim() || '', evidence: document.querySelector('#voice-evidence')?.textContent?.trim() || '', snr: document.querySelector('#voice-snr')?.textContent?.trim() || '', spectrum: document.querySelector('#voice-spectrum')?.textContent?.trim() || '', epoch: document.querySelector('#voice-epoch')?.textContent?.trim() || '' }));
     assert(sensor.state === 'CALIBRATING' && sensor.videoWidth > 0, JSON.stringify(sensor));
     assert(sensor.evidence && sensor.snr && sensor.epoch !== '', `voice diagnostics missing ${JSON.stringify(sensor)}`);
