@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import path from 'node:path';
 import {
-  ENGINEERING_PROFILES, architectPlan, classifyFailure, createPipelineRun, critiqueCommand,
+  ENGINEERING_PROFILES, architectPlan, boundPipelineOutput, classifyFailure, createPipelineRun, critiqueCommand,
   finishPipelineRun, normalizePipelineRequest, profileCommands, redactSecrets, safeWorkspacePath,
   validatePatch
 } from '../lib/engineering-pipeline.mjs';
@@ -66,6 +66,19 @@ test('timeouts are classified without opening a retry loop', () => {
   const critic = critiqueCommand({ exitCode: 1, timedOut: true, output: 'timeout' });
   assert.equal(critic.status, 'reject');
   assert.match(critic.findings.join(' '), /timeout/i);
+});
+
+test('keeps TAP failure excerpts and exact locations in bounded pipeline evidence', () => {
+  const raw = `${'prefix output '.repeat(1_400)}\nnot ok 66 - the focused test failed\n  location: '/home/pi/project/tests/example.test.mjs:42:7'\n  error: 'AssertionError: expected true'\n${'tail output '.repeat(1_400)}`;
+  const bounded = boundPipelineOutput(raw);
+  assert.ok(bounded.length <= 12_000);
+  assert.match(bounded, /not ok 66 - the focused test failed/);
+  assert.match(bounded, /example\.test\.mjs:42:7/);
+  const failure = classifyFailure(bounded);
+  assert.equal(failure.kind, 'test-failure');
+  assert.equal(failure.location.file, '/home/pi/project/tests/example.test.mjs');
+  assert.equal(failure.location.line, 42);
+  assert.match(failure.message, /AssertionError/);
 });
 
 test('engineering pipeline retries the same bounded recipe and records the debugger handoff', async () => {

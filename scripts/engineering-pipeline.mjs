@@ -3,12 +3,13 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  PIPELINE_MAX_OUTPUT_LENGTH, architectPlan, createPipelineRun, finishPipelineRun,
+  PIPELINE_MAX_OUTPUT_LENGTH, architectPlan, boundPipelineOutput, createPipelineRun, finishPipelineRun,
   normalizePipelineRequest, redactRun, redactSecrets, profileCommands
 } from '../lib/engineering-pipeline.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_TIMEOUT_MS = 300_000;
+const MAX_COMMAND_CAPTURE_LENGTH = PIPELINE_MAX_OUTPUT_LENGTH * 32;
 
 function parseArgs(argv) {
   const args = { profile: 'check', json: false, task: '' };
@@ -33,17 +34,17 @@ export function runFixedCommand(spec, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
       : null;
     const executable = process.platform === 'win32' && spec.command === 'npm' ? process.execPath : spec.command;
     const args = process.platform === 'win32' && spec.command === 'npm' ? [npmCli, ...spec.args] : spec.args;
-    // Tests must exercise their explicit fixtures, not credentials inherited
-    // from the running dashboard's dotenv environment. In particular, the
-    // Stirling no-key test relies on the constructor's safe empty default.
-    // Keep the child local and deterministic without ever printing or passing
-    // provider credentials into a test recipe.
-    const childEnv = { ...process.env, CI: '1', STIRLING_API_KEY: '' };
+    // Tests must use their explicit fixtures, not credentials discovered from
+    // a user's Pi/Desktop environment. Keep child checks local and repeatable.
+    const childEnv = {
+      ...process.env, CI: '1', STIRLING_API_KEY: '', GOOGLE_CREDENTIALS_PATH: '',
+      GOOGLE_TOKEN_PATH: '', GOOGLE_AUTH_DIRECTORY: '', FISH_AUDIO_API_KEY: ''
+    };
     const child = spawn(executable, args, {
       cwd: projectRoot, env: childEnv, shell: false, windowsHide: true
     });
     let output = ''; let timedOut = false; let settled = false;
-    const append = (chunk) => { output = `${output}${String(chunk || '')}`.slice(-PIPELINE_MAX_OUTPUT_LENGTH); };
+    const append = (chunk) => { output = `${output}${String(chunk || '')}`.slice(-MAX_COMMAND_CAPTURE_LENGTH); };
     child.stdout?.on('data', append); child.stderr?.on('data', append);
     let timeoutKiller = null;
     const timer = setTimeout(() => {
@@ -64,7 +65,7 @@ export function runFixedCommand(spec, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
     }, timeoutMs);
     const finish = (exitCode, signal = null) => {
       if (settled) return; settled = true; clearTimeout(timer);
-      resolve({ name: spec.name, command: [spec.command, ...spec.args].join(' '), exitCode: Number.isInteger(exitCode) ? exitCode : 1, signal, timedOut, output: redactSecrets(output) });
+      resolve({ name: spec.name, command: [spec.command, ...spec.args].join(' '), exitCode: Number.isInteger(exitCode) ? exitCode : 1, signal, timedOut, output: boundPipelineOutput(output) });
     };
     child.on('error', (error) => { append(`\n${error.name}: ${error.message}`); finish(1); });
     child.on('close', finish);
