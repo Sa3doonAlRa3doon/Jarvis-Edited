@@ -241,17 +241,21 @@ try {
   await check('Camoufox dashboard authentication dialog', async () => {
     const dialog = page.locator('#auth-dialog');
     const visible = await dialog.isVisible().catch(() => false);
-    if (visible) {
+    const authStatus = await page.evaluate(async () => {
+      const response = await fetch('/api/auth/status', { cache: 'no-store' });
+      return response.ok ? response.json() : null;
+    });
+    assert(authStatus && typeof authStatus.required === 'boolean', 'dashboard authentication status is unavailable');
+    assert(visible === authStatus.required, `authentication dialog visibility does not match server policy (required=${authStatus.required}, visible=${visible})`);
+    if (authStatus.required) {
       const pin = String(process.env.DASHBOARD_ACCESS_PIN || '');
       assert(pin, 'dashboard PIN is configured but DASHBOARD_ACCESS_PIN is unavailable to this smoke process');
       await dialog.locator('input').fill(pin);
       await dialog.locator('button[type="submit"]').click({ force: true });
       await dialog.waitFor({ state: 'detached' });
-    } else {
-      assert(!process.env.DASHBOARD_ACCESS_PIN, 'dashboard PIN is configured, but the expected authentication dialog did not appear');
     }
     authCookies = await context.cookies().catch(() => []);
-    return visible ? 'authenticated through the visible Camoufox dialog' : 'local dashboard has no PIN gate configured';
+    return authStatus.required ? 'authenticated through the visible Camoufox dialog' : 'dashboard policy reports that a PIN gate is not configured';
   });
 
   // Fresh browser processes are intentional for fake-device isolation, but
