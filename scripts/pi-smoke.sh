@@ -132,6 +132,19 @@ else
   log_warn "arecord unavailable; microphone enumeration not verified"
 fi
 
+if command -v wpctl >/dev/null 2>&1; then
+  DEFAULT_AUDIO_SINK="$(wpctl status 2>/dev/null | awk '/Sinks:/{in_sinks=1;next} /Sources:/{in_sinks=0} in_sinks && /\*/{print;exit}')"
+  if [[ -n "$DEFAULT_AUDIO_SINK" ]]; then
+    if printf '%s' "$DEFAULT_AUDIO_SINK" | grep -Eqi 'HDMI'; then log_pass "Default HDMI monitor audio sink selected"; else log_pass "Default audio output sink selected"; fi
+  else
+    log_warn "No default PipeWire audio output sink selected"
+  fi
+elif command -v aplay >/dev/null 2>&1; then
+  if aplay -l 2>/dev/null | grep -q '^card '; then log_pass "ALSA playback device visible"; else log_warn "No ALSA playback device detected"; fi
+else
+  log_warn "wpctl/aplay unavailable; speaker output route not verified"
+fi
+
 if [[ -n "$PRINTER_URL" ]]; then
   if http_ok "$PRINTER_URL"; then log_pass "Printer endpoint reachable"; else log_warn "Printer endpoint not reachable (printer may be off)"; fi
 else

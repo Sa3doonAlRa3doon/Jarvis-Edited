@@ -181,6 +181,8 @@ assert.match(piSmokeEntry, /separate printer camera frame received/);
 assert.match(piSmokeEntry, /dashboard PIN login/);
 assert.match(piSmoke, /OLLAMA_MAX_LOADED_MODELS/);
 assert.match(piSmoke, /qwen2\.5vl:3b/);
+assert.match(piSmoke, /Default HDMI monitor audio sink selected/);
+assert.match(piSmoke, /No default PipeWire audio output sink selected/);
 assert.match(piSmokeEntry, /must run on the Raspberry Pi/);
 assert.match(packageRaw, /"restart:local"/);
 assert.match(packageRaw, /node --check lib\/live-smoke-utils\.mjs/);
