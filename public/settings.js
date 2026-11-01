@@ -428,7 +428,7 @@ async function testRecognition() {
         echoCancellation: settings.echoCancellation, noiseSuppression: settings.noiseSuppression, autoGainControl: settings.autoGainControl
       },
       video: false
-    });
+    }, { allowSelectedDeviceFallback: false });
     state.testRecognitionStream = opened.stream;
     if (opened.fallbackUsed) {
       ui.browserMicrophone.value = '';
@@ -1238,7 +1238,7 @@ async function startBrowserSensors() {
     channelCount: { ideal: 1 }, sampleRate: { ideal: 16000 }, echoCancellation: settings.echoCancellation,
     noiseSuppression: settings.noiseSuppression, autoGainControl: settings.autoGainControl
   } : false;
-  const opened = await getUserMediaWithFallback(navigator.mediaDevices, { video, audio });
+  const opened = await getUserMediaWithFallback(navigator.mediaDevices, { video, audio }, { allowSelectedDeviceFallback: false });
   state.stream = opened.stream;
   if (opened.fallbackUsed) {
     if (needsVideo) ui.browserCamera.value = '';

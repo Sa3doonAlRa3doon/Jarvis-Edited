@@ -361,7 +361,7 @@ export class VoiceController {
       noiseSuppression: this.settings.noiseSuppression !== false,
       autoGainControl: this.settings.autoGainControl !== false
     };
-    const opened = await getUserMediaWithFallback(navigator.mediaDevices, { audio, video: false });
+    const opened = await getUserMediaWithFallback(navigator.mediaDevices, { audio, video: false }, { allowSelectedDeviceFallback: false });
     this.stream = opened.stream;
     let activeDeviceId = this.settings.browserMicrophone;
     try { activeDeviceId = normalizeDeviceId(this.stream.getAudioTracks()[0]?.getSettings?.().deviceId) || activeDeviceId; } catch {}

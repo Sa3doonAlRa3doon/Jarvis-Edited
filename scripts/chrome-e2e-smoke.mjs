@@ -4,7 +4,10 @@ import { Camoufox } from 'camoufox';
 dotenv.config({ override: true, quiet: true });
 
 const baseUrl = String(process.env.JARVIS_BASE_URL || `http://127.0.0.1:${process.env.PORT || 8788}`).replace(/\/$/, '');
-const headless = process.argv.includes('--headless');
+// Headless is the reliable default on Windows: hidden headful browser windows
+// can accept DOM reads but fail to deliver pointer input to modal controls.
+// Pass --headed only when a visible window is useful for debugging.
+const headless = process.argv.includes('--headless') || !process.argv.includes('--headed');
 const checkVisionUi = process.argv.includes('--vision-ui');
 const fakeMedia = process.argv.includes('--fake-media');
 const captureLabel = fakeMedia ? 'Synthetic' : 'Real';
@@ -14,7 +17,7 @@ const pageErrors = [];
 const browserOptions = {
   headless,
   os: process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux',
-  windowsHide: !headless,
+  windowsHide: headless,
   // Camoufox keeps Playwright's page agent isolated by default. Enable the
   // documented main-world bridge only for this smoke harness so assertions
   // can inspect JARVIS-owned globals without mistaking isolation for failure.
@@ -41,6 +44,22 @@ async function evaluateWithRetry(page, expression, arg, { attempts = 3, delayMs 
     catch (error) { lastError = error; if (attempt + 1 < attempts) await page.waitForTimeout(delayMs).catch(() => {}); }
   }
   throw lastError || new Error('page evaluation failed');
+}
+
+async function evaluateWithDeadline(page, expression, arg, timeoutMs = 12_000) {
+  let timer;
+  try {
+    return await Promise.race([
+      evaluateWithRetry(page, expression, arg),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          const error = new Error(`Browser media operation exceeded ${timeoutMs}ms.`);
+          error.name = 'MediaRequestTimeoutError';
+          reject(error);
+        }, timeoutMs);
+      })
+    ]);
+  } finally { clearTimeout(timer); }
 }
 
 async function closeBounded(resource, timeoutMs = 3_000) {
@@ -124,7 +143,7 @@ async function probeBrowserMedia(browser, baseUrl, authCookies = []) {
       // does not exist can invalidate Firefox's media remote object just before
       // getUserMedia resolves. The context is closed in finally, which releases
       // every synthetic track deterministically.
-      const media = await evaluateWithRetry(mediaPage, async () => {
+      const media = await evaluateWithDeadline(mediaPage, async () => {
         const listed = await navigator.mediaDevices.enumerateDevices();
         let stream;
         try {

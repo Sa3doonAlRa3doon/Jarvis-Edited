@@ -1,4 +1,5 @@
 const INVALID_DEVICE_IDS = new Set(['undefined', 'null', 'false', 'nan', '[object object]']);
+const DEFAULT_MEDIA_OPEN_TIMEOUT_MS = 12_000;
 
 export function normalizeDeviceId(value) {
   if (typeof value !== 'string') return '';
@@ -40,11 +41,34 @@ export function isRecoverableDeviceError(error) {
     .includes(error?.name);
 }
 
-async function retryDeviceOpen(mediaDevices, constraints, attempts = 3) {
+function stopStream(stream) {
+  try { stream?.getTracks?.().forEach((track) => track.stop()); } catch {}
+}
+
+async function boundedGetUserMedia(mediaDevices, constraints, timeoutMs) {
+  let timedOut = false;
+  let timer;
+  const request = Promise.resolve().then(() => mediaDevices.getUserMedia(constraints));
+  // getUserMedia has no AbortSignal. If the browser eventually resolves after
+  // the caller has timed out, immediately release those otherwise orphaned tracks.
+  request.then((stream) => { if (timedOut) stopStream(stream); }, () => {});
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      const error = new Error('The browser did not finish opening the selected camera or microphone in time. Check device access and close other apps using it, then retry.');
+      error.name = 'MediaRequestTimeoutError';
+      reject(error);
+    }, timeoutMs);
+  });
+  try { return await Promise.race([request, timeout]); }
+  finally { clearTimeout(timer); }
+}
+
+async function retryDeviceOpen(mediaDevices, constraints, attempts = 3, timeoutMs = DEFAULT_MEDIA_OPEN_TIMEOUT_MS) {
   let lastError;
   const totalAttempts = Math.max(1, Math.min(3, Number(attempts) || 3));
   for (let attempt = 0; attempt < totalAttempts; attempt += 1) {
-    try { return await mediaDevices.getUserMedia(constraints); }
+    try { return await boundedGetUserMedia(mediaDevices, constraints, timeoutMs); }
     catch (error) {
       lastError = error;
       if (!isRecoverableDeviceError(error) || attempt + 1 >= totalAttempts) throw error;
@@ -56,7 +80,9 @@ async function retryDeviceOpen(mediaDevices, constraints, attempts = 3) {
   throw lastError || new Error('The browser could not open the selected media devices.');
 }
 
-export async function getUserMediaWithFallback(mediaDevices, constraints) {
+export async function getUserMediaWithFallback(mediaDevices, constraints, {
+  allowSelectedDeviceFallback = true, timeoutMs = DEFAULT_MEDIA_OPEN_TIMEOUT_MS
+} = {}) {
   if (!mediaDevices?.getUserMedia) throw new Error('Camera and microphone access is unavailable in this browser.');
   const hasSelectedDevice = Boolean(
     constraints?.audio && typeof constraints.audio === 'object' && constraints.audio.deviceId
@@ -67,7 +93,7 @@ export async function getUserMediaWithFallback(mediaDevices, constraints) {
     // default (for example after switching the Settings preview). Give the
     // selected device the same bounded retry window before treating it as
     // genuinely stale and falling back without its exact id.
-    return { stream: await retryDeviceOpen(mediaDevices, constraints), fallbackUsed: false, originalError: null };
+    return { stream: await retryDeviceOpen(mediaDevices, constraints, 3, timeoutMs), fallbackUsed: false, originalError: null };
   } catch (error) {
     if (!isRecoverableDeviceError(error)) throw error;
     if (!hasSelectedDevice) {
@@ -75,6 +101,9 @@ export async function getUserMediaWithFallback(mediaDevices, constraints) {
       // real missing device still returns the final actionable error.
       throw error;
     }
+    // Keep an explicit device choice strict when requested. Falling back to
+    // the OS default can capture a different mic/camera than the user chose.
+    if (!allowSelectedDeviceFallback) throw error;
     const fallback = {
       audio: withoutExactDevice(constraints.audio),
       video: withoutExactDevice(constraints.video)
@@ -85,6 +114,7 @@ export async function getUserMediaWithFallback(mediaDevices, constraints) {
 
 export function friendlyMediaError(error) {
   const name = error?.name || '';
+  if (name === 'MediaRequestTimeoutError') return error.message;
   if (name === 'NotAllowedError' || name === 'PermissionDeniedError') return 'Camera or microphone permission is blocked. Allow both for this site, then retry.';
   if (name === 'NotFoundError' || name === 'DevicesNotFoundError') return 'No matching camera or microphone is connected.';
   if (name === 'NotReadableError' || name === 'TrackStartError') return 'The camera or microphone is busy in another app. Close that app, then retry.';

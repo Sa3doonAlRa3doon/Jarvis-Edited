@@ -69,6 +69,37 @@ test('recovers a selected device during a short release race without falling bac
   assert.deepEqual(calls[1].video.deviceId, { exact: 'selected-camera' });
 });
 
+test('keeps a selected device strict after bounded retries instead of opening another device', async () => {
+  const calls = [];
+  const error = Object.assign(new Error('selected microphone is busy'), { name: 'NotReadableError' });
+  const mediaDevices = {
+    async getUserMedia(constraints) { calls.push(constraints); throw error; }
+  };
+  await assert.rejects(
+    () => getUserMediaWithFallback(mediaDevices, {
+      audio: { deviceId: { exact: 'selected-microphone' } }, video: false
+    }, { allowSelectedDeviceFallback: false }),
+    error
+  );
+  assert.equal(calls.length, 3);
+  assert.ok(calls.every((constraints) => constraints.audio.deviceId.exact === 'selected-microphone'));
+});
+
+test('bounds a microphone request that never resolves and releases any late stream', async () => {
+  let resolveRequest;
+  let stopped = 0;
+  const mediaDevices = {
+    getUserMedia() { return new Promise((resolve) => { resolveRequest = resolve; }); }
+  };
+  await assert.rejects(
+    () => getUserMediaWithFallback(mediaDevices, { audio: true, video: false }, { timeoutMs: 15 }),
+    (error) => error.name === 'MediaRequestTimeoutError' && /did not finish opening/i.test(error.message)
+  );
+  resolveRequest({ getTracks: () => [{ stop() { stopped += 1; } }] });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(stopped, 1);
+});
+
 test('retries a transient default-device race once', async () => {
   const calls = [];
   const mediaDevices = {

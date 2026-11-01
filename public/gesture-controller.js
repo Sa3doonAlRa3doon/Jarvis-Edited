@@ -33,7 +33,7 @@ export class GestureController {
     const opened = await getUserMediaWithFallback(navigator.mediaDevices, {
       video: { deviceId: deviceIdConstraint(selectedDevice), width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24, max: 30 } },
       audio: false
-    });
+    }, { allowSelectedDeviceFallback: false });
     this.stream = opened.stream;
     this.video.srcObject = this.stream; await this.video.play(); this.video.hidden = false; this.canvas.hidden = false;
     this.onStatus(opened.fallbackUsed ? 'DEFAULT CAMERA // TRACKING' : 'GESTURE TRACKING'); this.loop();
