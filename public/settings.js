@@ -3,6 +3,7 @@ import {
 } from './voice-utils.js';
 import { analyzeVoiceFrame, analyzeVoiceSpectrum, clearVoiceProfile, configureRecognitionCapabilities, isSpeechBandEligible, loadVoiceProfile, saveVoiceProfile, stabilizeNoiseFloor, startRecognitionWithTrack } from './voice-controller.js';
 import { deviceIdConstraint, deviceSelectionAvailability, friendlyMediaError, getUserMediaWithFallback, normalizeDeviceId, reconcileDeviceSelection } from './media-utils.js';
+import { SCREEN_RETRY_DELAY_MS, canScheduleScreenRetry, screenRetryStatus, secondsUntilScreenRetry } from './screen-retry-policy.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -46,8 +47,6 @@ const state = {
   screenStream: null, screenRequest: 0, screenBusy: false, screenRetryTimer: 0, screenRetryCountdownTimer: 0, screenRetryDueAt: 0, screenRetryable: false, screenRetryRequested: false, screenRetryAttempts: 0, routines: [], notes: [], reminders: [],
   config: { ttsMode: 'local', fishVoiceId: '', fishConfigured: false, fishRetryPolicy: { maxAttempts: 2, retryableStatusCodes: [500, 502, 503, 504], backoffMs: 350 }, fishReplyTimeoutMs: 30_000, fishWakeTimeoutMs: 12_000, allowBrowserTtsFallback: false, visionModel: '', visionConfigured: false }
 };
-const SCREEN_RETRY_DELAY_MS = 20_000;
-
 const valueBindings = [
   ['personThreshold', 'person-threshold-output', (value) => `${Math.round(value * 100)}%`],
   ['micSensitivity', 'mic-sensitivity-output', (value) => `${Math.round(value * 100)}%`],
@@ -1048,13 +1047,13 @@ function clearScreenRetry() {
   state.screenRetryRequested = false;
 }
 function renderScreenRetryCountdown() {
-  const seconds = Math.max(0, Math.ceil((state.screenRetryDueAt - Date.now()) / 1000));
-  ui.screenState.textContent = seconds ? `RETRY IN ${seconds}s` : 'RETRYING';
+  const seconds = secondsUntilScreenRetry(state.screenRetryDueAt);
+  ui.screenState.textContent = screenRetryStatus(seconds, 'settings');
   return seconds;
 }
 
 function scheduleScreenRetry() {
-  if (!state.screenRetryable || !state.screenRetryRequested || state.screenRetryTimer || state.screenRetryAttempts >= 1) return;
+  if (!canScheduleScreenRetry({ retryable: state.screenRetryable, requested: state.screenRetryRequested, timerActive: Boolean(state.screenRetryTimer), attempts: state.screenRetryAttempts })) return;
   state.screenRetryDueAt = Date.now() + SCREEN_RETRY_DELAY_MS;
   renderScreenRetryCountdown();
   state.screenRetryCountdownTimer = window.setInterval(() => {

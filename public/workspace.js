@@ -1,3 +1,5 @@
+import { SCREEN_RETRY_DELAY_MS, canScheduleScreenRetry, screenRetryStatus, secondsUntilScreenRetry } from './screen-retry-policy.js';
+
 const $ = (selector) => document.querySelector(selector);
 const ui = {
   healthDot: $('#workspace-health-dot'), health: $('#workspace-health'), node: $('#workspace-node'), clock: $('#workspace-clock'),
@@ -12,7 +14,6 @@ const ui = {
   runStatus: $('#workspace-run-status'), taskCopy: $('#workspace-task-copy'), route: $('#workspace-route'), model: $('#workspace-model'), directiveForm: $('#workspace-directive-form'), directiveInput: $('#workspace-directive-input'), directivePlan: $('#workspace-directive-plan'), directiveRun: $('#workspace-directive-run'), directiveTalk: $('#workspace-directive-talk'), directiveStatus: $('#workspace-directive-status'), missionPlan: $('#workspace-mission-plan'), missionPlanMode: $('#workspace-mission-plan-mode'), missionPlanSummary: $('#workspace-mission-plan-summary'), missionPlanRoute: $('#workspace-mission-plan-route'), missionPlanSpecialists: $('#workspace-mission-plan-specialists'), missionPlanApprovals: $('#workspace-mission-plan-approvals'), missionPlanSteps: $('#workspace-mission-plan-steps'), missionPlanWarnings: $('#workspace-mission-plan-warnings'), eventCount: $('#workspace-event-count'), events: $('#workspace-events'), capabilityCount: $('#workspace-capability-count'), capabilityList: $('#workspace-capability-list'), analyticsWindow: $('#workspace-analytics-window'), analyticsEvents: $('#workspace-analytics-events'), analyticsWake: $('#workspace-analytics-wake'), analyticsCpu: $('#workspace-analytics-cpu'), analyticsRam: $('#workspace-analytics-ram'), analyticsServices: $('#workspace-analytics-services'), analyticsBroadcast: $('#workspace-analytics-broadcast'), analyticsNote: $('#workspace-analytics-note'), mediaState: $('#workspace-media-state'), mediaTitle: $('#workspace-media-title'), mediaQueue: $('#workspace-media-queue'), mediaHistory: $('#workspace-media-history'), mediaNote: $('#workspace-media-note'), liveDeckState: $('#workspace-live-deck-state'), liveDeckObs: $('#workspace-live-deck-obs'), liveDeckScene: $('#workspace-live-deck-scene'), liveDeckStream: $('#workspace-live-deck-stream'), liveDeckRecord: $('#workspace-live-deck-record'), liveDeckMedia: $('#workspace-live-deck-media'), liveDeckAutomation: $('#workspace-live-deck-automation'), liveDeckHealth: $('#workspace-live-deck-health'), liveDeckDropped: $('#workspace-live-deck-dropped'), liveDeckReplay: $('#workspace-live-deck-replay'), liveDeckVcam: $('#workspace-live-deck-vcam'), liveDeckNote: $('#workspace-live-deck-note'), multiDeckState: $('#workspace-multi-deck-state'), multiDeckObs: $('#workspace-multi-deck-obs'), multiDeckVoice: $('#workspace-multi-deck-voice'), multiDeckTwitch: $('#workspace-multi-deck-twitch'), multiDeckJarvis: $('#workspace-multi-deck-jarvis'), multiDeckMusic: $('#workspace-multi-deck-music'), multiDeckSocials: $('#workspace-multi-deck-socials'), multiDeckDesktop: $('#workspace-multi-deck-desktop'), multiDeckViewers: $('#workspace-multi-deck-viewers'), multiDeckChat: $('#workspace-multi-deck-chat'), multiDeckBitrate: $('#workspace-multi-deck-bitrate'), multiDeckNowPlaying: $('#workspace-multi-deck-now-playing'), multiDeckAutomations: $('#workspace-multi-deck-automations'), multiDeckAgents: $('#workspace-multi-deck-agents'), multiDeckNote: $('#workspace-multi-deck-note')
 };
 const state = { frameVersion: 0, live: null, printer: null, startedAt: 0, screenStream: null, screenRequest: 0, screenBusy: false, previewBusy: false, previewAutoBusy: false, previewRefreshQueued: false, previewRequest: 0, previewRefreshTimer: 0, hostBrowserRequestId: 0, hostBrowserStatusRenderedAt: '', directiveBusy: false, planBusy: false, talkBusy: false, lastDirectiveText: '', compactView: false, focusView: false, screenRetryTimer: 0, screenRetryCountdownTimer: 0, screenRetryDueAt: 0, screenRetryable: false, screenRetryRequested: false, screenRetryAttempts: 0, cameraTimer: 0, printerCameraAt: 0, printerCameraDiscoveryStarted: false, printerCameraDiscoveryTimer: 0, printerCameraDiscoveryBusy: false, camera: { settings: null, devices: [], available: false }, printerCamera: { configured: false } };
-const SCREEN_RETRY_DELAY_MS = 20_000;
 const PREVIEW_REFRESH_INTERVAL_MS = 45_000;
 const PRINTER_CAMERA_DISCOVERY_RETRY_MS = 30_000;
 
@@ -87,12 +88,12 @@ function clearScreenRetry() {
   state.screenRetryRequested = false;
 }
 function renderScreenRetryCountdown() {
-  const seconds = Math.max(0, Math.ceil((state.screenRetryDueAt - Date.now()) / 1000));
-  text(ui.screenShareState, seconds ? `SCREEN RELEASED // RETRY IN ${seconds}s` : 'RETRYING SCREEN SHARE');
+  const seconds = secondsUntilScreenRetry(state.screenRetryDueAt);
+  text(ui.screenShareState, screenRetryStatus(seconds));
   return seconds;
 }
 function scheduleScreenRetry() {
-  if (!state.screenRetryable || !state.screenRetryRequested || state.screenRetryTimer || state.screenRetryAttempts >= 1) return;
+  if (!canScheduleScreenRetry({ retryable: state.screenRetryable, requested: state.screenRetryRequested, timerActive: Boolean(state.screenRetryTimer), attempts: state.screenRetryAttempts })) return;
   state.screenRetryDueAt = Date.now() + SCREEN_RETRY_DELAY_MS;
   renderScreenRetryCountdown();
   state.screenRetryCountdownTimer = window.setInterval(() => {
