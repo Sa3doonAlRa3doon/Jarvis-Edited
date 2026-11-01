@@ -22,6 +22,7 @@ import { buildKnowledgeIndex } from './lib/knowledge-index.mjs';
 import { LocalMemoryStore, parseNotePrompt, parseReminderPrompt } from './lib/local-memory.mjs';
 import { buildMorningBriefing, isMorningBriefingPrompt } from './lib/morning-briefing.mjs';
 import { OpenJarvisLiveBridge } from './lib/openjarvis-live.mjs';
+import { appendWakeStderr, wakeListenerExitError } from './lib/wake-stderr.mjs';
 import { ObsClient } from './lib/obs-client.mjs';
 import { buildObsOverlaySnapshot, normalizeOverlayTheme } from './lib/obs-overlay.mjs';
 import { BroadcastHub, parseBroadcastPrompt } from './lib/broadcast-hub.mjs';
@@ -774,9 +775,9 @@ async function startWakeListener() {
   // and UserWarnings to stderr while the listener remains healthy. Keep a
   // bounded tail for crash diagnosis, but only surface it if the child exits
   // abnormally; structured listener errors arrive on stdout above.
-  child.stderr.setEncoding('utf8'); child.stderr.on('data', (chunk) => { stderrTail = `${stderrTail}${chunk}`.slice(-1_200); });
+  child.stderr.setEncoding('utf8'); child.stderr.on('data', (chunk) => { stderrTail = appendWakeStderr(stderrTail, chunk); });
   child.on('exit', (code) => {
-    if (wakeState.process === child) { wakeState.process = null; wakeState.running = false; wakeState.ready = false; wakeState.model = false; wakeState.sttModel = false; wakeState.commandCapture = normalizeWakeCapture({ state: 'idle' }); if (code && !wakeState.error) wakeState.error = cleanText(stderrTail, 220) || `Wake listener exited with code ${code}.`; }
+    if (wakeState.process === child) { wakeState.process = null; wakeState.running = false; wakeState.ready = false; wakeState.model = false; wakeState.sttModel = false; wakeState.commandCapture = normalizeWakeCapture({ state: 'idle' }); const exitError = wakeListenerExitError(code, wakeState.error, stderrTail); if (exitError) wakeState.error = cleanText(exitError, 220); }
   });
 }
 
