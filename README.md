@@ -553,6 +553,10 @@ sudo systemctl restart openjarvis-dashboard
 ```
 
 Your local `.env`, OAuth files, logs, and wake environment remain untracked during updates.
+The Pi installer stores the dashboard's dedicated Camoufox profile under
+`data/camoufox-profile`, inside the systemd service's writable sandbox. If you
+set `JARVIS_BROWSER_PROFILE` manually on the Pi, keep it inside this repository's
+`data/` directory or systemd will correctly block browser profile writes.
 
 Alternatively, copy this working folder from Windows PowerShell:
 

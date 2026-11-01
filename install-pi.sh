@@ -217,6 +217,20 @@ set_env_value WAKE_PYTHON "$APP_DIR/.wake-venv/bin/python"
 set_env_value JARVIS_STT_COMMAND_TIMEOUT_MS 15000
 set_env_value JARVIS_STT_COMMAND_SILENCE_MS 900
 set_env_value JARVIS_STT_COMMAND_WARMUP_MS 1200
+CURRENT_BROWSER_PROFILE="$(sed -n 's/^JARVIS_BROWSER_PROFILE=//p' .env | tail -n 1)"
+if [[ -z "$CURRENT_BROWSER_PROFILE" ]]; then
+  CURRENT_BROWSER_PROFILE="$APP_DIR/data/camoufox-profile"
+fi
+CURRENT_BROWSER_PROFILE="$(realpath -m "$CURRENT_BROWSER_PROFILE")"
+case "$CURRENT_BROWSER_PROFILE" in
+  "$APP_DIR/data/"*) ;;
+  *)
+    echo "JARVIS_BROWSER_PROFILE must be inside $APP_DIR/data because the dashboard service is sandboxed to that writable directory." >&2
+    exit 1
+    ;;
+esac
+set_env_value JARVIS_BROWSER_PROFILE "$CURRENT_BROWSER_PROFILE"
+install -d -m 0700 "$CURRENT_BROWSER_PROFILE"
 set_env_value OLLAMA_HOST 127.0.0.1:11434
 set_env_value OLLAMA_NO_CLOUD 1
 set_env_value OLLAMA_MAX_LOADED_MODELS 1
