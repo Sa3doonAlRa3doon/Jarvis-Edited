@@ -257,9 +257,21 @@ def main() -> int:
     wake_model = None
     if args.wake_enabled:
         try:
+            import inspect
+            from pathlib import Path
+            import openwakeword
             from openwakeword.model import Model
 
-            wake_model = Model(wakeword_models=["hey jarvis"], inference_framework="onnx")
+            parameters = inspect.signature(Model).parameters
+            if "wakeword_models" in parameters:
+                wake_model = Model(wakeword_models=["hey jarvis"], inference_framework="onnx")
+            elif "wakeword_model_paths" in parameters:
+                model_path = Path(openwakeword.__file__).resolve().parent / "resources" / "models" / "hey_jarvis_v0.1.onnx"
+                if not model_path.is_file():
+                    raise FileNotFoundError(f"Hey Jarvis ONNX model is missing: {model_path}")
+                wake_model = Model(wakeword_model_paths=[str(model_path)])
+            else:
+                raise RuntimeError("Installed openWakeWord has no supported ONNX model loader")
         except Exception as error:
             emit({"type": "model_error", "message": str(error)[:240]})
 

@@ -85,6 +85,44 @@ if (( ${#MISSING_MEDIA_PACKAGES[@]} > 0 )); then
   fi
 fi
 
+install_openwakeword_models() {
+  local wake_venv="$1"
+  local python="$wake_venv/bin/python"
+  local model_dir base name expected temp actual
+  model_dir="$("$python" -c 'import openwakeword, pathlib; print(pathlib.Path(openwakeword.__file__).resolve().parent / "resources" / "models")')" || return 1
+  base="https://github.com/dscripka/openWakeWord/releases/download/v0.5.1"
+  mkdir -p "$model_dir" || return 1
+  for model in 'hey_jarvis_v0.1.onnx:1271370' 'embedding_model.onnx:1326578' 'melspectrogram.onnx:1087958'; do
+    name="${model%%:*}"
+    expected="${model##*:}"
+    temp="$(mktemp "$model_dir/.${name}.XXXXXX")" || return 1
+    if ! curl --fail --location --silent --show-error --connect-timeout 10 --max-time 120 "$base/$name" -o "$temp"; then
+      rm -f "$temp"
+      return 1
+    fi
+    actual="$(wc -c < "$temp" | tr -d '[:space:]')"
+    if [[ "$actual" != "$expected" ]]; then
+      echo "Unexpected byte size for official openWakeWord asset $name ($actual; expected $expected)." >&2
+      rm -f "$temp"
+      return 1
+    fi
+    chmod 0644 "$temp" && mv -f "$temp" "$model_dir/$name" || { rm -f "$temp"; return 1; }
+  done
+  "$python" - "$model_dir" <<'PY'
+import sys
+from pathlib import Path
+import numpy as np
+from openwakeword.model import Model
+
+folder = Path(sys.argv[1])
+model_path = folder / "hey_jarvis_v0.1.onnx"
+model = Model(wakeword_model_paths=[str(model_path)])
+scores = model.predict(np.zeros(1280, dtype=np.int16))
+if not scores or not any("hey_jarvis" in key for key in scores):
+    raise SystemExit("Hey Jarvis ONNX model did not return its expected score.")
+PY
+}
+
 for MEDIA_GROUP in video audio; do
   if getent group "$MEDIA_GROUP" >/dev/null && ! id -nG "$APP_USER" | tr ' ' '\n' | grep -qx "$MEDIA_GROUP"; then
     sudo usermod -aG "$MEDIA_GROUP" "$APP_USER"
@@ -97,10 +135,13 @@ npm install --omit=dev
 WAKE_READY=false
 if python3 -m venv "$APP_DIR/.wake-venv"; then
   if "$APP_DIR/.wake-venv/bin/python" -m pip install --upgrade pip && \
-     "$APP_DIR/.wake-venv/bin/python" -m pip install openwakeword onnxruntime numpy && \
-     "$APP_DIR/.wake-venv/bin/python" -c 'import openwakeword; openwakeword.utils.download_models()'; then
-    WAKE_READY=true
-    echo "Installed the fully local openWakeWord Hey Jarvis listener."
+     "$APP_DIR/.wake-venv/bin/python" -m pip install openwakeword onnxruntime numpy; then
+    if install_openwakeword_models "$APP_DIR/.wake-venv"; then
+      WAKE_READY=true
+      echo "Installed and verified the local ONNX Hey Jarvis listener."
+    else
+      echo "Local openWakeWord model preparation failed. The dashboard and browser double-clap mode still work."
+    fi
   else
     echo "Wake-word packages could not be installed. The dashboard and browser double-clap mode still work."
   fi
@@ -225,8 +266,8 @@ if [[ "$INSTALL_STT" == true ]]; then
     echo "Could not install Vosk into the existing wake environment at $STT_VENV." >&2
     exit 1
   fi
-  if ! "$STT_VENV/bin/python" -c 'import openwakeword; openwakeword.utils.download_models()'; then
-    echo "Could not prepare the local Hey Jarvis wake model in $STT_VENV." >&2
+  if ! install_openwakeword_models "$STT_VENV"; then
+    echo "Could not download and verify the official local Hey Jarvis ONNX assets in $STT_VENV." >&2
     exit 1
   fi
   if [[ -z "$STT_MODEL_DIR" ]]; then
