@@ -55,7 +55,7 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const appVersion = '3.33.0';
+const appVersion = '3.34.0';
 const host = process.env.HOST || '127.0.0.1';
 const port = Number(process.env.PORT || 8787);
 const openJarvisUrl = (process.env.OPENJARVIS_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');

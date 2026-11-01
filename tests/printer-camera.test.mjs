@@ -7,7 +7,8 @@ function response({ status = 200, type = 'image/jpeg', bytes = Buffer.from([0xff
     ok: status >= 200 && status < 300,
     status,
     headers: new Headers({ 'content-type': type, 'content-length': String(bytes.length) }),
-    arrayBuffer: async () => bytes
+    arrayBuffer: async () => bytes,
+    text: async () => bytes.toString('utf8')
   };
 }
 
@@ -119,4 +120,24 @@ test('explains a reachable printer whose webcam proxy returns HTTP 502', async (
   assert.match(result.error, /webcam proxy returned HTTP 502/);
   assert.match(result.error, /camera is connected/);
   assert.equal(client.snapshot().configError, result.error);
+});
+
+test('explains when Moonraker confirms that no printer webcams are configured', async () => {
+  const calls = [];
+  const client = new PrinterCameraClient({
+    printerBaseUrl: 'http://192.168.4.74:4408',
+    discoveryTimeoutMs: 500,
+    fetchImpl: async (url) => {
+      calls.push(url);
+      if (url.endsWith('/server/webcams/list')) {
+        return response({ type: 'application/json', bytes: Buffer.from('{"result":{"webcams":[]}}') });
+      }
+      return response({ status: 502, type: 'text/html', bytes: Buffer.from('upstream unavailable') });
+    }
+  });
+  const result = await client.discover();
+  assert.equal(result.configured, false);
+  assert.match(result.error, /Moonraker reports no webcams configured/);
+  assert.match(result.error, /Fluidd Settings > Cameras/);
+  assert.equal(calls.at(-1), 'http://192.168.4.74:4408/server/webcams/list');
 });

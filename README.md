@@ -1,4 +1,8 @@
-# OpenJarvis Pi Command Center 3.33.0
+# OpenJarvis Pi Command Center 3.34.0
+
+### 3.34.0 Moonraker webcam configuration diagnosis
+
+- If the known snapshot proxies return HTTP 502, JARVIS checks Moonraker's bounded `/server/webcams/list` response. An empty camera list now points directly to Fluidd's Cameras settings; a non-empty list distinguishes a configured camera with a broken proxy. The check uses the configured printer host only and never returns camera credentials or arbitrary URLs.
 
 ### 3.33.0 printer-camera diagnostics
 
