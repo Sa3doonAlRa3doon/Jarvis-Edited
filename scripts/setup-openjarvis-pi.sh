@@ -10,6 +10,8 @@ WORKSPACE_DIR="/srv/jarvis-workspace"
 SOURCE_DIR="${OPENJARVIS_SOURCE_DIR:-/opt/openjarvis}"
 UV_ENV="/opt/openjarvis-uv"
 AGENT_TOOLS_DIR="/opt/jarvis-agent-tools"
+AGENT_TOOLS_SCRIPT_DIR="$AGENT_TOOLS_DIR/scripts"
+AGENT_TOOLS_LIB_DIR="$AGENT_TOOLS_DIR/lib"
 HOST_CONTROL=false
 BROWSER_CONTROL=true
 
@@ -71,10 +73,11 @@ sudo chown -R root:root "$SOURCE_DIR" "$UV_ENV"
 sudo chmod -R a+rX "$SOURCE_DIR" "$UV_ENV"
 
 echo "Installing the root-owned Playwright MCP bridge used by the isolated agent"
-sudo install -d -o root -g root -m 0755 "$AGENT_TOOLS_DIR"
-sudo install -o root -g root -m 0755 "$SCRIPT_DIR/start-browser-mcp.mjs" "$AGENT_TOOLS_DIR/start-browser-mcp.mjs"
-sudo install -o root -g root -m 0644 "$SCRIPT_DIR/mcp-prefix.mjs" "$AGENT_TOOLS_DIR/mcp-prefix.mjs"
-sudo install -o root -g root -m 0644 "$SCRIPT_DIR/browser-network-guard.ts" "$AGENT_TOOLS_DIR/browser-network-guard.ts"
+sudo install -d -o root -g root -m 0755 "$AGENT_TOOLS_DIR" "$AGENT_TOOLS_SCRIPT_DIR" "$AGENT_TOOLS_LIB_DIR"
+sudo install -o root -g root -m 0755 "$SCRIPT_DIR/start-browser-mcp.mjs" "$AGENT_TOOLS_SCRIPT_DIR/start-browser-mcp.mjs"
+sudo install -o root -g root -m 0644 "$SCRIPT_DIR/mcp-prefix.mjs" "$AGENT_TOOLS_SCRIPT_DIR/mcp-prefix.mjs"
+sudo install -o root -g root -m 0644 "$SCRIPT_DIR/browser-network-guard.ts" "$AGENT_TOOLS_SCRIPT_DIR/browser-network-guard.ts"
+sudo install -o root -g root -m 0644 "$SCRIPT_DIR/../lib/public-network-proxy.mjs" "$AGENT_TOOLS_LIB_DIR/public-network-proxy.mjs"
 # /home/$APP_USER is private (0700), so the unprivileged agent cannot read
 # configuration code from this checkout. Install a root-owned readable copy
 # alongside the agent tools instead of widening access to the user's home.
@@ -84,7 +87,7 @@ sudo -u "$AGENT_USER" env HOME="$AGENT_HOME" "$AGENT_TOOLS_DIR/node_modules/.bin
 sudo chown -R root:root "$AGENT_TOOLS_DIR"
 sudo chmod -R a+rX "$AGENT_TOOLS_DIR"
 
-CONFIG_ARGS=(--config "$AGENT_HOME/.openjarvis/config.toml" --model "${JARVIS_MODEL:-llama3.2:1b}" --allowed-dir "$WORKSPACE_DIR" --browser-launcher "$AGENT_TOOLS_DIR/start-browser-mcp.mjs")
+CONFIG_ARGS=(--config "$AGENT_HOME/.openjarvis/config.toml" --model "${JARVIS_MODEL:-llama3.2:1b}" --allowed-dir "$WORKSPACE_DIR" --browser-launcher "$AGENT_TOOLS_SCRIPT_DIR/start-browser-mcp.mjs")
 if [[ "$HOST_CONTROL" == true ]]; then
   CONFIG_ARGS+=(--host-control)
 elif [[ "$BROWSER_CONTROL" == true ]]; then

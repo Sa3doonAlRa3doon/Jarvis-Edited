@@ -45,6 +45,10 @@ test('Pi services separate OpenJarvis from the dashboard sudo principal', async 
   assert.match(installer, /AGENT_TOOLS_DIR="\/opt\/jarvis-agent-tools"/);
   assert.match(setup, /install -o root -g root -m 0644 "\$SCRIPT_DIR\/configure-openjarvis\.py" "\$AGENT_TOOLS_DIR\/configure-openjarvis\.py"/);
   assert.match(setup, /"\$SOURCE_DIR\/\.venv\/bin\/python" "\$AGENT_TOOLS_DIR\/configure-openjarvis\.py"/);
+  assert.match(setup, /AGENT_TOOLS_SCRIPT_DIR="\$AGENT_TOOLS_DIR\/scripts"/);
+  assert.match(setup, /install -o root -g root -m 0755 "\$SCRIPT_DIR\/start-browser-mcp\.mjs" "\$AGENT_TOOLS_SCRIPT_DIR\/start-browser-mcp\.mjs"/);
+  assert.match(setup, /install -o root -g root -m 0644 "\$SCRIPT_DIR\/\.\.\/lib\/public-network-proxy\.mjs" "\$AGENT_TOOLS_LIB_DIR\/public-network-proxy\.mjs"/);
+  assert.match(setup, /--browser-launcher "\$AGENT_TOOLS_SCRIPT_DIR\/start-browser-mcp\.mjs"/);
   assert.doesNotMatch(setup, /chmod[^\n]*\/home\/\$APP_USER/);
   assert.match(setup, /mcp-prefix\.mjs/);
   assert.match(setup, /browser-network-guard\.ts/);
