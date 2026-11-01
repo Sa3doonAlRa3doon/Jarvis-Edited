@@ -13,6 +13,13 @@ const headless = process.argv.includes('--headless') || !process.argv.includes('
 const checkVisionUi = process.argv.includes('--vision-ui');
 const fakeMedia = process.argv.includes('--fake-media');
 const noDisplay = process.argv.includes('--no-display');
+const screenPickerOnly = process.argv.includes('--screen-picker-only');
+const screenPickerChecks = new Set([
+  'Camoufox dashboard authentication dialog',
+  'Settings screen loads in Camoufox',
+  'Settings retries once after the initial screen picker is dismissed',
+  'Workspace retries once after the initial screen picker is dismissed'
+]);
 const captureLabel = fakeMedia ? 'Synthetic' : 'Real';
 const checks = [];
 const observations = {};
@@ -207,6 +214,10 @@ async function openSettingsSection(page, name) {
 }
 
 async function check(name, operation) {
+  if (screenPickerOnly && !screenPickerChecks.has(name)) {
+    checks.push({ name, ok: null, skipped: true, detail: { reason: 'screen-picker-only mode' } });
+    return;
+  }
   if (process.env.JARVIS_SMOKE_PROGRESS === '1') console.error(`SMOKE START // ${name}`);
   try {
     const detail = await operation();
@@ -1051,6 +1062,42 @@ try {
       }
     })()`);
     assert(result.calls === 2 && result.state === 'CLICK TO RETRY', JSON.stringify(result));
+    return result;
+  });
+
+  await check('Workspace retries once after the initial screen picker is dismissed', async () => {
+    await page.goto(`${baseUrl}/workspace`, { waitUntil: 'domcontentloaded' });
+    await page.locator('#workspace-screen-share-toggle').waitFor({ state: 'visible' });
+    const result = await page.evaluate(`mw:(async () => {
+      const mediaDevices = navigator.mediaDevices;
+      const originalMediaDescriptor = Object.getOwnPropertyDescriptor(mediaDevices, 'getDisplayMedia');
+      const originalSetTimeout = window.setTimeout;
+      let calls = 0;
+      Object.defineProperty(mediaDevices, 'getDisplayMedia', {
+        configurable: true,
+        writable: true,
+        value: async () => {
+          calls += 1;
+          throw new DOMException('Display picker dismissed', 'AbortError');
+        }
+      });
+      window.setTimeout = (callback, delay, ...args) => originalSetTimeout(callback, delay === 20_000 ? 0 : delay, ...args);
+      try {
+        await document.querySelector('#workspace-screen-share-toggle')?.click();
+        const deadline = Date.now() + 2500;
+        while (calls < 2 && Date.now() < deadline) await new Promise((resolve) => originalSetTimeout(resolve, 20));
+        return {
+          calls,
+          state: document.querySelector('#workspace-screen-share-state')?.textContent?.trim() || '',
+          title: document.querySelector('#workspace-screen-title')?.textContent?.trim() || ''
+        };
+      } finally {
+        window.setTimeout = originalSetTimeout;
+        if (originalMediaDescriptor) Object.defineProperty(mediaDevices, 'getDisplayMedia', originalMediaDescriptor);
+        else delete mediaDevices.getDisplayMedia;
+      }
+    })()`);
+    assert(result.calls === 2 && result.state === 'SCREEN RETRY NEEDS CLICK', JSON.stringify(result));
     return result;
   });
 
