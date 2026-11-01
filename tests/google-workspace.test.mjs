@@ -1,18 +1,32 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import { GoogleWorkspaceBridge } from '../lib/google-workspace.mjs';
+
+const FIXTURE_ROOT = path.join(path.parse(process.cwd()).root, 'jarvis-google-fixtures');
+const CREDENTIALS_PATH = path.join(FIXTURE_ROOT, 'credentials.json');
+const TOKEN_PATH = path.join(FIXTURE_ROOT, 'token.json');
+const TEST_HOME = path.join(path.parse(process.cwd()).root, 'jarvis-test-home');
+
+function credentialFiles() {
+  return new Map([
+    [CREDENTIALS_PATH, JSON.stringify({ installed: { client_id: 'client', client_secret: 'secret' } })],
+    [TOKEN_PATH, JSON.stringify({ refresh_token: 'refresh' })]
+  ]);
+}
+
+function credentialEnvironment() {
+  return { GOOGLE_CREDENTIALS_PATH: CREDENTIALS_PATH, GOOGLE_TOKEN_PATH: TOKEN_PATH };
+}
 
 function response(payload, status = 200) {
   return { ok: status >= 200 && status < 300, status, async json() { return payload; } };
 }
 
 test('keeps OAuth secrets server-side while reporting a configured read-only bridge', async () => {
-  const files = new Map([
-    ['C:\\private\\credentials.json', JSON.stringify({ installed: { client_id: 'client', client_secret: 'secret' } })],
-    ['C:\\private\\token.json', JSON.stringify({ refresh_token: 'refresh' })]
-  ]);
+  const files = credentialFiles();
   const bridge = new GoogleWorkspaceBridge({
-    environment: { GOOGLE_CREDENTIALS_PATH: 'C:\\private\\credentials.json', GOOGLE_TOKEN_PATH: 'C:\\private\\token.json' }, home: 'C:\\home',
+    environment: credentialEnvironment(), home: TEST_HOME,
     reader: async (file) => { if (!files.has(file)) throw new Error('missing'); return files.get(file); }, fetchImpl: async () => response({ access_token: 'access', expires_in: 3600 })
   });
   const status = await bridge.status();
@@ -24,13 +38,10 @@ test('keeps OAuth secrets server-side while reporting a configured read-only bri
 });
 
 test('runs a Gmail intent with refreshed OAuth and bounded message metadata', async () => {
-  const files = new Map([
-    ['C:\\private\\credentials.json', JSON.stringify({ installed: { client_id: 'client', client_secret: 'secret' } })],
-    ['C:\\private\\token.json', JSON.stringify({ refresh_token: 'refresh' })]
-  ]);
+  const files = credentialFiles();
   const seen = [];
   const bridge = new GoogleWorkspaceBridge({
-    environment: { GOOGLE_CREDENTIALS_PATH: 'C:\\private\\credentials.json', GOOGLE_TOKEN_PATH: 'C:\\private\\token.json' }, home: 'C:\\home\\jarvis',
+    environment: credentialEnvironment(), home: TEST_HOME,
     reader: async (file) => { if (!files.has(file)) throw new Error('missing'); return files.get(file); },
     fetchImpl: async (url, options = {}) => {
       seen.push({ url: String(url), authorization: options.headers?.Authorization || '' });
@@ -49,13 +60,10 @@ test('runs a Gmail intent with refreshed OAuth and bounded message metadata', as
 });
 
 test('sends a Gmail raw message with OAuth POST and never exposes the token in the result', async () => {
-  const files = new Map([
-    ['C:\\private\\credentials.json', JSON.stringify({ installed: { client_id: 'client', client_secret: 'secret' } })],
-    ['C:\\private\\token.json', JSON.stringify({ refresh_token: 'refresh' })]
-  ]);
+  const files = credentialFiles();
   const seen = [];
   const bridge = new GoogleWorkspaceBridge({
-    environment: { GOOGLE_CREDENTIALS_PATH: 'C:\\private\\credentials.json', GOOGLE_TOKEN_PATH: 'C:\\private\\token.json' }, home: 'C:\\home',
+    environment: credentialEnvironment(), home: TEST_HOME,
     reader: async (file) => { if (!files.has(file)) throw new Error('missing'); return files.get(file); },
     fetchImpl: async (url, options = {}) => {
       seen.push({ url: String(url), options });
@@ -72,13 +80,10 @@ test('sends a Gmail raw message with OAuth POST and never exposes the token in t
 });
 
 test('coalesces concurrent OAuth refreshes and names rejected Google probes', async () => {
-  const files = new Map([
-    ['C:\\private\\credentials.json', JSON.stringify({ installed: { client_id: 'client', client_secret: 'secret' } })],
-    ['C:\\private\\token.json', JSON.stringify({ refresh_token: 'refresh' })]
-  ]);
+  const files = credentialFiles();
   let refreshCalls = 0;
   const bridge = new GoogleWorkspaceBridge({
-    environment: { GOOGLE_CREDENTIALS_PATH: 'C:\\private\\credentials.json', GOOGLE_TOKEN_PATH: 'C:\\private\\token.json' }, home: 'C:\\home',
+    environment: credentialEnvironment(), home: TEST_HOME,
     reader: async (file) => { if (!files.has(file)) throw new Error('missing'); return files.get(file); },
     fetchImpl: async (url) => {
       if (String(url).includes('oauth2.googleapis.com')) { refreshCalls += 1; return response({ error: 'invalid_grant', error_description: 'Bad Request' }, 401); }
