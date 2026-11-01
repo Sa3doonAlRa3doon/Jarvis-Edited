@@ -1053,6 +1053,7 @@ try {
   });
 
   await check('Settings sees the selected browser devices', async () => {
+    if (noDisplay) return { skipped: true, reason: 'Pi Camoufox has no laptop browser media devices; Pi V4L2 and ALSA hardware are verified in the native sensor check.' };
     await releaseDashboardMedia(page);
     await openSettingsSection(page, 'devices');
     await page.locator('#refresh-devices').click({ force: true });
@@ -1184,6 +1185,14 @@ try {
       cameraWidth: document.querySelector('#camera-video')?.videoWidth || 0
     }));
     assert(started, `sensor calibration did not start: ${JSON.stringify(startup)}`);
+    if (piSource) {
+      await page.waitForFunction(() => {
+        const width = document.querySelector('#pi-camera-image')?.naturalWidth || 0;
+        const mic = document.querySelector('#mic-readout')?.textContent?.trim() || '';
+        const evidence = document.querySelector('#voice-evidence')?.textContent?.trim() || '';
+        return width > 0 && /\d+%/.test(mic) && /PI (LEVEL|GATE OPEN|GATE HOLD)/.test(evidence);
+      }, null, { timeout: 25_000, polling: 250 });
+    }
     const sensor = await page.evaluate(() => ({ state: document.querySelector('#sensor-state')?.textContent?.trim(), videoWidth: document.querySelector('#camera-video')?.videoWidth || 0, mic: document.querySelector('#mic-readout')?.textContent?.trim() || '', evidence: document.querySelector('#voice-evidence')?.textContent?.trim() || '', snr: document.querySelector('#voice-snr')?.textContent?.trim() || '', spectrum: document.querySelector('#voice-spectrum')?.textContent?.trim() || '', epoch: document.querySelector('#voice-epoch')?.textContent?.trim() || '' }));
     if (piSource) {
       const piSensor = await page.evaluate(() => ({
