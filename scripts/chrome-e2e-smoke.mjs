@@ -1102,6 +1102,10 @@ try {
   });
 
   await check('Settings reports local vision readiness', async () => {
+    // The preceding screen-picker integration check visits /workspace; return
+    // to Settings before inspecting its vision capability note.
+    await page.goto(`${baseUrl}/settings`, { waitUntil: 'domcontentloaded' });
+    await page.locator('#settings-status').waitFor({ state: 'visible' });
     const vision = await page.evaluate(async () => {
       const response = await fetch('/api/vision/status', { cache: 'no-store' });
       return { http: response.status, body: await response.json(), note: document.querySelector('#screen-vision-note')?.textContent?.trim() || '' };
