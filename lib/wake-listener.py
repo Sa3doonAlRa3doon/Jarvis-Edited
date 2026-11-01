@@ -6,12 +6,14 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import select
 import subprocess
 import sys
 import time
 import urllib.request
 
 import numpy as np
+from wake_capture import resolve_capture_command
 
 
 def emit(payload: dict) -> None:
@@ -294,12 +296,42 @@ def main() -> int:
         except Exception as error:
             emit({"type": "stt_model_error", "message": str(error)[:240]})
 
-    command = [
-        "arecord", "-D", args.device, "-q", "-t", "raw", "-f", "S16_LE",
-        "-r", "16000", "-c", "1",
-    ]
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    emit({"type": "ready", "device": args.device, "wake_model": wake_model is not None, "stt_model": stt_model is not None})
+    try:
+        command, capture_backend, capture_target = resolve_capture_command(args.device)
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except Exception as error:
+        emit({"type": "capture_error", "message": str(error)[:240]})
+        return 2
+
+    # Do not announce a healthy listener until the selected input actually
+    # produces a complete audio frame. This catches busy/missing devices at
+    # startup instead of showing a false-ready state in the dashboard.
+    startup_error = ""
+    first_frame = b""
+    try:
+        readable, _, _ = select.select([process.stdout], [], [], 5.0)
+        if readable and process.stdout:
+            first_frame = process.stdout.read(1280 * 2)
+        if not first_frame:
+            process.poll()
+            startup_error = f"{capture_backend} capture opened but produced no microphone audio within 5 seconds."
+    except Exception as error:
+        startup_error = f"Could not start {capture_backend} microphone capture: {error}"
+    if startup_error:
+        if process.poll() is None:
+            process.terminate()
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+        stderr = process.stderr.read().decode("utf-8", errors="replace") if process.stderr else ""
+        detail = stderr.strip()[-240:]
+        emit({"type": "capture_error", "message": (detail or startup_error)[:240]})
+        return 2
+
+    emit({"type": "ready", "device": args.device, "capture_backend": capture_backend,
+          "capture_target": capture_target, "wake_model": wake_model is not None,
+          "stt_model": stt_model is not None})
 
     frame_bytes = 1280 * 2  # 80 ms of 16 kHz mono int16 audio
     first_clap = 0.0
@@ -325,6 +357,8 @@ def main() -> int:
     command_text = ""
     command_partial_text = ""
     command_recognizer = None
+    capture_stream_ended = False
+    interrupted = False
 
     def start_command_capture(now: float) -> None:
         nonlocal command_active, command_deadline, command_last_voice, command_warmup_until
@@ -378,9 +412,12 @@ def main() -> int:
         command_recognizer = None
 
     try:
+        raw = first_frame
         while process.poll() is None:
-            raw = process.stdout.read(frame_bytes) if process.stdout else b""
+            if not raw:
+                raw = process.stdout.read(frame_bytes) if process.stdout else b""
             if len(raw) != frame_bytes:
+                capture_stream_ended = True
                 break
             samples = np.frombuffer(raw, dtype=np.int16)
             now = time.monotonic()
@@ -539,8 +576,9 @@ def main() -> int:
                     command_last_voice = now
                 elif command_should_finish(now, command_deadline, command_last_voice, silence_ms=args.command_silence_ms):
                     finish_command_capture()
+            raw = b""
     except KeyboardInterrupt:
-        pass
+        interrupted = True
     finally:
         # If arecord exits during a sentence, flush the bounded local text
         # before tearing down the process so a device hiccup does not discard
@@ -553,9 +591,16 @@ def main() -> int:
         except subprocess.TimeoutExpired:
             process.kill()
 
+    capture_exit_code = process.poll()
     stderr = process.stderr.read().decode("utf-8", errors="replace") if process.stderr else ""
     if stderr.strip():
         emit({"type": "capture_error", "message": stderr.strip()[-240:]})
+    if capture_stream_ended and not interrupted:
+        emit({"type": "capture_error", "message": f"{capture_backend} microphone stream ended unexpectedly."})
+        return 2
+    if capture_exit_code not in (0, None):
+        emit({"type": "capture_error", "message": f"{capture_backend} stopped unexpectedly (exit {capture_exit_code})."})
+        return 2
     return 0
 
 

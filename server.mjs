@@ -711,10 +711,10 @@ function requireDashboardAuth(request, response, next) {
   response.status(401).json({ error: 'Enter the JARVIS dashboard PIN.', authenticationRequired: true });
 }
 
-const wakeState = { process: null, running: false, ready: false, model: false, sttModel: false, lastEvent: null, diagnostics: null, commandCapture: normalizeWakeCapture({ state: 'idle' }), error: null };
+const wakeState = { process: null, running: false, ready: false, model: false, sttModel: false, captureBackend: null, captureTarget: null, lastEvent: null, diagnostics: null, commandCapture: normalizeWakeCapture({ state: 'idle' }), error: null };
 async function stopWakeListener() {
   if (wakeState.process && !wakeState.process.killed) wakeState.process.kill('SIGTERM');
-  wakeState.process = null; wakeState.running = false; wakeState.ready = false; wakeState.model = false; wakeState.sttModel = false; wakeState.diagnostics = null; wakeState.commandCapture = normalizeWakeCapture({ state: 'idle' });
+  wakeState.process = null; wakeState.running = false; wakeState.ready = false; wakeState.model = false; wakeState.sttModel = false; wakeState.captureBackend = null; wakeState.captureTarget = null; wakeState.diagnostics = null; wakeState.commandCapture = normalizeWakeCapture({ state: 'idle' });
 }
 async function startWakeListener() {
   await stopWakeListener(); wakeState.error = null;
@@ -742,7 +742,12 @@ async function startWakeListener() {
   }
   if (settings.wakeWord) args.push('--wake-enabled');
   if (settings.doubleClap) args.push('--clap-enabled');
-  const child = spawn(python, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PYTHONUNBUFFERED: '1' } });
+  const wakeEnv = { ...process.env, PYTHONUNBUFFERED: '1' };
+  if (!wakeEnv.XDG_RUNTIME_DIR && typeof process.getuid === 'function') {
+    const runtimeDir = `/run/user/${process.getuid()}`;
+    try { await fs.access(runtimeDir); wakeEnv.XDG_RUNTIME_DIR = runtimeDir; } catch {}
+  }
+  const child = spawn(python, args, { stdio: ['ignore', 'pipe', 'pipe'], env: wakeEnv });
   wakeState.process = child; wakeState.running = true;
   let stderrTail = '';
   let buffer = '';
@@ -752,7 +757,7 @@ async function startWakeListener() {
     for (const line of lines) {
       try {
         const message = JSON.parse(line);
-        if (message.type === 'ready') { wakeState.ready = true; wakeState.model = Boolean(message.wake_model); wakeState.sttModel = Boolean(message.stt_model); wakeState.commandCapture = normalizeWakeCapture({ state: 'idle' }); }
+        if (message.type === 'ready') { wakeState.ready = true; wakeState.model = Boolean(message.wake_model); wakeState.sttModel = Boolean(message.stt_model); wakeState.captureBackend = cleanText(message.capture_backend, 24) || null; wakeState.captureTarget = cleanText(message.capture_target, 48) || null; wakeState.commandCapture = normalizeWakeCapture({ state: 'idle' }); }
         else if (message.type === 'diagnostic') wakeState.diagnostics = {
           micLevel: safeNumber(message.mic_level, 0, 0, 1),
           micPeak: safeNumber(message.mic_peak, 0, 0, 1),
@@ -778,7 +783,7 @@ async function startWakeListener() {
   // abnormally; structured listener errors arrive on stdout above.
   child.stderr.setEncoding('utf8'); child.stderr.on('data', (chunk) => { stderrTail = appendWakeStderr(stderrTail, chunk); });
   child.on('exit', (code) => {
-    if (wakeState.process === child) { wakeState.process = null; wakeState.running = false; wakeState.ready = false; wakeState.model = false; wakeState.sttModel = false; wakeState.commandCapture = normalizeWakeCapture({ state: 'idle' }); const exitError = wakeListenerExitError(code, wakeState.error, stderrTail); if (exitError) wakeState.error = cleanText(exitError, 220); }
+    if (wakeState.process === child) { wakeState.process = null; wakeState.running = false; wakeState.ready = false; wakeState.model = false; wakeState.sttModel = false; wakeState.captureBackend = null; wakeState.captureTarget = null; wakeState.commandCapture = normalizeWakeCapture({ state: 'idle' }); const exitError = wakeListenerExitError(code, wakeState.error, stderrTail); if (exitError) wakeState.error = cleanText(exitError, 220); }
   });
 }
 
