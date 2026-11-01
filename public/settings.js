@@ -1481,7 +1481,7 @@ async function init() {
   try {
     await window.ensureDashboardAuthentication?.();
     const [settings, status, config, workspace, desktopApps, routines, memory, media] = await Promise.all([json('/api/settings'), json('/api/status'), json('/api/config'), json('/api/workspace/status'), json('/api/desktop/apps').catch(() => ({ apps: [], platform: 'host' })), json('/api/routines'), json('/api/memory'), json('/api/media/state').catch(() => ({}))]);
-    ui.version.textContent = config.version || '3.31.0';
+    ui.version.textContent = config.version || '3.32.0';
     ui.node.textContent = config.piOnly ? 'PI-5' : 'LOCAL';
     state.config = config;
     ui.screenVisionNote.textContent = config.visionRuntime === 'ready'

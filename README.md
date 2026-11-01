@@ -1,4 +1,9 @@
-# OpenJarvis Pi Command Center 3.31.0
+# OpenJarvis Pi Command Center 3.32.0
+
+### 3.32.0 clean Camoufox website preview
+
+- **Ad reduction toggle** — the private website preview starts with **CLEAN VIEW ON**. It hides common ad containers and blocks requests to a short list of known third-party ad networks; the toggle can disable this for a site that needs those resources. The page preview stays read-only and does not bypass logins, subscriptions, or paywalls. This filtering applies to JARVIS's screenshot preview only; the separate Camoufox browser tab remains an ordinary website view.
+- **Visible filtering result** — preview refresh status reports how many known ad-network requests were blocked and whether the page allowed the cosmetic filter to be applied. A strict page Content Security Policy can prevent cosmetic hiding while leaving the site usable.
 
 ### 3.31.0 private browser preview
 
@@ -14,7 +19,7 @@
   requires the visible **SHARE YOUR SCREEN** action.
 - **No control implied** — preview status is labeled `BROWSER PREVIEW`, never
   `AGENT CONTROL`; it cannot click, type, submit, upload, send, purchase,
-  delete, log in, remove ads, or bypass a paywall. The existing one-task
+  delete, log in, or bypass a paywall. The existing one-task
   approval and transient frame rules remain unchanged for interactive browser
   work.
 - **Configuration** — `JARVIS_BROWSER_PREVIEW_ENABLED=true`,

@@ -549,6 +549,7 @@ try {
     const form = page.locator('#workspace-website-form');
     const input = page.locator('#workspace-website-input');
     const button = page.locator('#workspace-website-open');
+    const clean = page.locator('#workspace-website-clean');
     const refresh = page.locator('#workspace-website-refresh');
     const status = page.locator('#workspace-website-status');
     await form.waitFor({ state: 'visible' });
@@ -556,6 +557,8 @@ try {
       form: Boolean(document.querySelector('#workspace-website-form')),
       input: Boolean(document.querySelector('#workspace-website-input')),
       button: document.querySelector('#workspace-website-open')?.textContent?.trim(),
+      clean: document.querySelector('#workspace-website-clean')?.textContent?.trim(),
+      cleanPressed: document.querySelector('#workspace-website-clean')?.getAttribute('aria-pressed'),
       refresh: document.querySelector('#workspace-website-refresh')?.textContent?.trim(),
       refreshDisabled: document.querySelector('#workspace-website-refresh')?.disabled,
       status: document.querySelector('#workspace-website-status')?.textContent?.trim(),
@@ -566,7 +569,11 @@ try {
     // disabled refresh control or an already-visible preview.  The contract
     // here is the launcher shape and the public read-only guard; the explicit
     // open check below proves the live preview path end-to-end.
-    assert(snapshot.form && snapshot.input && snapshot.button === 'OPEN WEBSITE' && snapshot.refresh === 'REFRESH PREVIEW' && typeof snapshot.refreshDisabled === 'boolean' && /public read-only/i.test(snapshot.status || ''), JSON.stringify(snapshot));
+    assert(snapshot.form && snapshot.input && snapshot.button === 'OPEN WEBSITE' && snapshot.clean === 'CLEAN VIEW ON' && snapshot.cleanPressed === 'true' && snapshot.refresh === 'REFRESH PREVIEW' && typeof snapshot.refreshDisabled === 'boolean' && /public read-only/i.test(snapshot.status || ''), JSON.stringify(snapshot));
+    await clean.click();
+    assert((await clean.getAttribute('aria-pressed')) === 'false' && (await clean.textContent()).trim() === 'CLEAN VIEW OFF', 'clean-view toggle did not turn off');
+    await clean.click();
+    assert((await clean.getAttribute('aria-pressed')) === 'true' && (await clean.textContent()).trim() === 'CLEAN VIEW ON', 'clean-view toggle did not restore');
     const quickSources = await page.locator('[data-website-alias]').evaluateAll((buttons) => buttons.map((button) => button.dataset.websiteAlias));
     assert(JSON.stringify(quickSources) === JSON.stringify(['Twitch', 'Discord', 'GitHub', 'Reddit', 'Instagram', 'Google News']), JSON.stringify(quickSources));
     return { ...snapshot, quickSources, inputVisible: await input.isVisible(), buttonVisible: await button.isVisible(), refreshVisible: await refresh.isVisible(), statusVisible: await status.isVisible() };
@@ -581,6 +588,7 @@ try {
     });
     await form.evaluate((node) => node.requestSubmit());
     const chatResponse = await chatResponsePromise;
+    assert(chatResponse.request().postDataJSON()?.browserCleanView === true, 'new website preview should enable clean view by default');
     const chatPayload = await chatResponse.json();
     const hostBrowserRequestId = Number(chatPayload.action?.hostBrowserRequestId) || 0;
     assert(hostBrowserRequestId > 0, JSON.stringify(chatPayload.action || {}));

@@ -55,7 +55,7 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const appVersion = '3.31.0';
+const appVersion = '3.32.0';
 const host = process.env.HOST || '127.0.0.1';
 const port = Number(process.env.PORT || 8787);
 const openJarvisUrl = (process.env.OPENJARVIS_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
@@ -1190,10 +1190,10 @@ app.post('/api/browser/preview', async (request, response) => {
   const target = cleanText(request.body?.url || active.previewUrl, 1000);
   if (!target) { response.status(400).json({ error: 'Open a public website first, then refresh its preview.' }); return; }
   try {
-    const preview = await capturePublicBrowserPreview(target, { timeoutMs: browserPreviewTimeoutMs });
+    const preview = await capturePublicBrowserPreview(target, { timeoutMs: browserPreviewTimeoutMs, cleanView: request.body?.cleanView !== false });
     openJarvisLive.noteBrowserPreview(preview, { url: preview.url, title: preview.title });
-    await eventStore.append('browser', 'Private browser preview refreshed', { host: new URL(preview.url).hostname, title: preview.title || 'untitled', readOnly: true });
-    response.json({ ok: true, preview: { url: preview.url, title: preview.title, capturedAt: preview.capturedAt, frameAvailable: true, readOnly: true } });
+    await eventStore.append('browser', 'Private browser preview refreshed', { host: new URL(preview.url).hostname, title: preview.title || 'untitled', readOnly: true, cleanView: preview.cleanView, blockedAdRequests: preview.blockedAdRequests });
+    response.json({ ok: true, preview: { url: preview.url, title: preview.title, capturedAt: preview.capturedAt, frameAvailable: true, readOnly: true, cleanView: preview.cleanView, blockedAdRequests: preview.blockedAdRequests, cosmeticFilterApplied: preview.cosmeticFilterApplied } });
   } catch (error) { response.status(400).json({ error: cleanText(error.message, 260) }); }
 });
 app.get('/api/obs/status', async (_request, response) => { response.set('Cache-Control', 'no-store'); response.json(await obsClient.readStatus({ force: true })); });
@@ -1713,10 +1713,10 @@ app.post('/api/chat', async (request, response) => {
       let previewReady = false;
       if (browserPreviewEnabled) {
         try {
-          const preview = await capturePublicBrowserPreview(safeUrl.href, { timeoutMs: browserPreviewTimeoutMs });
+          const preview = await capturePublicBrowserPreview(safeUrl.href, { timeoutMs: browserPreviewTimeoutMs, cleanView: request.body?.browserCleanView !== false });
           if (openJarvisLive.noteBrowserPreview(preview, { url: preview.url, title: preview.title })) {
             previewReady = true;
-            await eventStore.append('browser', 'Private browser preview captured', { host: new URL(preview.url).hostname, title: preview.title || 'untitled', readOnly: true });
+            await eventStore.append('browser', 'Private browser preview captured', { host: new URL(preview.url).hostname, title: preview.title || 'untitled', readOnly: true, cleanView: preview.cleanView, blockedAdRequests: preview.blockedAdRequests });
           }
         } catch (error) {
           await eventStore.append('alert', 'Private browser preview unavailable', { error: cleanText(error.message, 220) });

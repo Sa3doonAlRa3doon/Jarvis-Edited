@@ -5,7 +5,7 @@ const ui = {
   tool: $('#workspace-tool'), elapsed: $('#workspace-elapsed'), serviceCount: $('#workspace-service-count'), serviceList: $('#workspace-service-list'),
   printerState: $('#workspace-printer-state'), printerFile: $('#workspace-printer-file'), printerProgress: $('#workspace-printer-progress'),
   printerPercent: $('#workspace-printer-percent'), printerRemaining: $('#workspace-printer-remaining'), nozzle: $('#workspace-nozzle'), bed: $('#workspace-bed'),
-  screenTitle: $('#workspace-screen-title'), screenState: $('#workspace-screen-state'), frame: $('#workspace-frame'), screenShareVideo: $('#workspace-screen-share-video'), screenShareToggle: $('#workspace-screen-share-toggle'), screenExplain: $('#workspace-screen-explain'), screenCompact: $('#workspace-screen-compact'), screenFocus: $('#workspace-screen-focus'), screenFullscreen: $('#workspace-screen-fullscreen'), screenStage: $('#workspace-screen-stage'), screenCanvas: $('#workspace-screen-canvas'), screenExplanation: $('#workspace-screen-explanation'), screenExplanationCopy: $('#workspace-screen-explanation-copy'), screenShareState: $('#workspace-screen-share-state'), placeholder: $('#workspace-screen-placeholder'), websiteForm: $('#workspace-website-form'), websiteInput: $('#workspace-website-input'), websiteOpen: $('#workspace-website-open'), websiteRefresh: $('#workspace-website-refresh'), websiteStatus: $('#workspace-website-status'),
+  screenTitle: $('#workspace-screen-title'), screenState: $('#workspace-screen-state'), frame: $('#workspace-frame'), screenShareVideo: $('#workspace-screen-share-video'), screenShareToggle: $('#workspace-screen-share-toggle'), screenExplain: $('#workspace-screen-explain'), screenCompact: $('#workspace-screen-compact'), screenFocus: $('#workspace-screen-focus'), screenFullscreen: $('#workspace-screen-fullscreen'), screenStage: $('#workspace-screen-stage'), screenCanvas: $('#workspace-screen-canvas'), screenExplanation: $('#workspace-screen-explanation'), screenExplanationCopy: $('#workspace-screen-explanation-copy'), screenShareState: $('#workspace-screen-share-state'), placeholder: $('#workspace-screen-placeholder'), websiteForm: $('#workspace-website-form'), websiteInput: $('#workspace-website-input'), websiteOpen: $('#workspace-website-open'), websiteClean: $('#workspace-website-clean'), websiteRefresh: $('#workspace-website-refresh'), websiteStatus: $('#workspace-website-status'),
   placeholderTitle: $('#workspace-placeholder-title'), placeholderCopy: $('#workspace-placeholder-copy'), frameDot: $('#workspace-frame-dot'), frameState: $('#workspace-frame-state'), frameTime: $('#workspace-frame-time'),
   cameraFrame: $('#workspace-camera-frame'), cameraPlaceholder: $('#workspace-camera-placeholder'), cameraState: $('#workspace-camera-state'), cameraSource: $('#workspace-camera-source'), cameraDevice: $('#workspace-camera-device'), cameraTime: $('#workspace-camera-time'),
   printerCameraFrame: $('#workspace-printer-camera-frame'), printerCameraPlaceholder: $('#workspace-printer-camera-placeholder'), printerCameraState: $('#workspace-printer-camera-state'), printerCameraHost: $('#workspace-printer-camera-host'), printerCameraTime: $('#workspace-printer-camera-time'),
@@ -27,6 +27,12 @@ function text(element, value) { if (element) element.textContent = String(value 
 function websitePrompt(value) {
   const target = String(value || '').replace(/[\0\r\n]+/g, ' ').trim().slice(0, 300);
   return target ? `open ${target}` : '';
+}
+function websiteCleanViewEnabled() { return ui.websiteClean?.getAttribute('aria-pressed') !== 'false'; }
+function syncWebsiteCleanView() {
+  const enabled = websiteCleanViewEnabled();
+  if (ui.websiteClean) { ui.websiteClean.setAttribute('aria-pressed', String(enabled)); ui.websiteClean.textContent = `CLEAN VIEW ${enabled ? 'ON' : 'OFF'}`; }
+  return enabled;
 }
 function clock() {
   const now = new Date();
@@ -356,12 +362,12 @@ async function openWorkspaceWebsite(event) {
   if (ui.websiteOpen) { ui.websiteOpen.disabled = true; ui.websiteOpen.textContent = 'OPENING…'; }
   text(ui.websiteStatus, 'VALIDATING PUBLIC URL // PREPARING PRIVATE PREVIEW…');
   try {
-    const response = await (window.jarvisFetch || fetch)('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }) });
+    const response = await (window.jarvisFetch || fetch)('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt, browserCleanView: websiteCleanViewEnabled() }) });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
     const opened = payload.action?.type === 'open_url';
     text(ui.websiteStatus, opened
-      ? `CAMOUFOX STARTING // ${new URL(payload.action.url).hostname.toUpperCase()} // ${payload.action.preview === 'ready-read-only' ? 'PREVIEW READY' : 'PREVIEW UNAVAILABLE'}`
+      ? `CAMOUFOX STARTING // ${new URL(payload.action.url).hostname.toUpperCase()} // ${payload.action.preview === 'ready-read-only' ? 'PREVIEW READY' : 'PREVIEW UNAVAILABLE'} // AD REDUCTION ${websiteCleanViewEnabled() ? 'ON' : 'OFF'}`
       : String(payload.content || 'The browser did not return an open confirmation.').slice(0, 240));
     if (opened) {
       state.hostBrowserRequestId = Number(payload.action.hostBrowserRequestId) || 0;
@@ -373,7 +379,7 @@ async function openWorkspaceWebsite(event) {
       // recover without asking the user to reopen the site.
       if (payload.action.preview !== 'ready-read-only' && payload.action.url) {
         try {
-          await request('/api/browser/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: payload.action.url }) });
+          await request('/api/browser/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: payload.action.url, cleanView: websiteCleanViewEnabled() }) });
         } catch {}
       }
     }
@@ -422,10 +428,10 @@ async function refreshWorkspacePreview({ automatic = false } = {}) {
   }
   text(ui.websiteStatus, automatic ? 'AUTO-REFRESHING READ-ONLY PREVIEW // NO COOKIES' : 'CAPTURING FRESH READ-ONLY PREVIEW // NO COOKIES');
   try {
-    const payload = await request('/api/browser/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+    const payload = await request('/api/browser/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url, cleanView: websiteCleanViewEnabled() }) });
     if (requestId !== state.previewRequest) return;
     state.frameVersion = -1;
-    text(ui.websiteStatus, `${automatic ? 'PREVIEW AUTO-REFRESHED' : 'PREVIEW REFRESHED'} // ${new URL(payload.preview?.url || url).hostname} // EXPIRES AUTOMATICALLY`);
+    text(ui.websiteStatus, `${automatic ? 'PREVIEW AUTO-REFRESHED' : 'PREVIEW REFRESHED'} // ${new URL(payload.preview?.url || url).hostname} // AD REQUESTS BLOCKED ${Number(payload.preview?.blockedAdRequests) || 0} // COSMETIC FILTER ${payload.preview?.cosmeticFilterApplied ? 'APPLIED' : 'UNAVAILABLE'} // CLEAN VIEW ${payload.preview?.cleanView ? 'ON' : 'OFF'}`);
     await refresh();
   } catch (error) { text(ui.websiteStatus, `PREVIEW REFRESH FAILED // ${error.message || 'try again'}`); }
   finally {
@@ -735,6 +741,11 @@ ui.screenCompact?.addEventListener('click', toggleCompactView);
 ui.screenFocus?.addEventListener('click', toggleFocusView);
 ui.screenFullscreen?.addEventListener('click', () => void toggleStageFullscreen());
 ui.websiteForm?.addEventListener('submit', (event) => void openWorkspaceWebsite(event));
+ui.websiteClean?.addEventListener('click', () => {
+  if (ui.websiteClean) ui.websiteClean.setAttribute('aria-pressed', String(!websiteCleanViewEnabled()));
+  const enabled = syncWebsiteCleanView();
+  text(ui.websiteStatus, `AD REDUCTION ${enabled ? 'ON' : 'OFF'} // NEXT PREVIEW REFRESH WILL APPLY THIS SETTING`);
+});
 ui.websiteRefresh?.addEventListener('click', () => void refreshWorkspacePreview());
 ui.directiveForm?.addEventListener('submit', (event) => void submitWorkspaceDirective(event));
 ui.directivePlan?.addEventListener('click', () => void previewWorkspaceMission());
@@ -754,6 +765,7 @@ document.addEventListener('fullscreenchange', syncStageFullscreenUi);
 document.addEventListener('webkitfullscreenchange', syncStageFullscreenUi);
 window.addEventListener('beforeunload', () => { clearPreviewRefreshTimer(); state.screenStream?.getTracks().forEach((track) => track.stop()); });
 setLocalScreenUi(false);
+syncWebsiteCleanView();
 clearScreenExplanation();
 syncStageFullscreenUi();
 setInterval(clock, 1000); setInterval(() => void refresh(), 2000); setInterval(() => void refreshPiCamera(), 4000); void refresh(); void refreshPiCamera();
