@@ -1,4 +1,11 @@
-# OpenJarvis Pi Command Center 3.35.1
+# OpenJarvis Pi Command Center 3.35.2
+
+### 3.35.2 retry dismissed screen pickers
+
+- Pressing Escape or Cancel in the initial screen-share picker now schedules
+  one retry after 20 seconds in both `/workspace` and `/settings#screen`.
+  Dismissing the automatic retry returns to a clear click-to-retry state if the
+  browser requires another user gesture; it never loops permission prompts.
 
 ### 3.35.1 Pi microphone sensitivity wiring
 

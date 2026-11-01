@@ -3,7 +3,7 @@ import {
 } from './voice-utils.js';
 import { analyzeVoiceFrame, analyzeVoiceSpectrum, clearVoiceProfile, configureRecognitionCapabilities, isSpeechBandEligible, loadVoiceProfile, saveVoiceProfile, stabilizeNoiseFloor, startRecognitionWithTrack } from './voice-controller.js';
 import { deviceIdConstraint, deviceSelectionAvailability, friendlyMediaError, getUserMediaWithFallback, normalizeDeviceId, reconcileDeviceSelection } from './media-utils.js';
-import { SCREEN_RETRY_DELAY_MS, canScheduleScreenRetry, screenRetryStatus, secondsUntilScreenRetry } from './screen-retry-policy.js';
+import { SCREEN_RETRY_DELAY_MS, canScheduleScreenRetry, isRetryableScreenPickerDismissal, screenRetryStatus, secondsUntilScreenRetry } from './screen-retry-policy.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -1110,12 +1110,17 @@ async function startScreenShare({ automaticRetry = false } = {}) {
     ui.startScreen.disabled = true; ui.stopScreen.disabled = false; ui.analyzeScreen.disabled = false; ui.screenState.textContent = 'LIVE'; ui.screenState.classList.add('active');
     setMessage('Live display preview is active. JARVIS receives nothing until you press ANALYZE SNAPSHOT.');
   } catch (error) {
-    stopScreenShare({ quiet: true, preserveRetry: automaticRetry });
+    const pickerDismissed = !automaticRetry && isRetryableScreenPickerDismissal(error?.name);
+    stopScreenShare({ quiet: true, preserveRetry: automaticRetry || pickerDismissed });
     if (automaticRetry) {
       state.screenRetryable = false; state.screenRetryRequested = false;
       ui.screenState.textContent = 'CLICK TO RETRY';
       setMessage('The browser requires a fresh user gesture before another display can be selected. Press START SCREEN SHARE once.');
-    } else setMessage(error.name === 'NotAllowedError' ? 'Screen selection was cancelled or blocked. Choose a display when the browser asks.' : `Screen share failed: ${error.message}`);
+    } else if (pickerDismissed) {
+      state.screenRetryable = true; state.screenRetryRequested = true;
+      scheduleScreenRetry();
+      setMessage('Screen picker dismissed with Escape or Cancel. JARVIS will retry once in 20 seconds.');
+    } else setMessage(`Screen share failed: ${error.message}`);
   }
 }
 
@@ -1525,7 +1530,7 @@ async function init() {
   try {
     await window.ensureDashboardAuthentication?.();
     const [settings, status, config, workspace, desktopApps, routines, memory, media] = await Promise.all([json('/api/settings'), json('/api/status'), json('/api/config'), json('/api/workspace/status'), json('/api/desktop/apps').catch(() => ({ apps: [], platform: 'host' })), json('/api/routines'), json('/api/memory'), json('/api/media/state').catch(() => ({}))]);
-    ui.version.textContent = config.version || '3.35.1';
+    ui.version.textContent = config.version || '3.35.2';
     ui.node.textContent = config.piOnly ? 'PI-5' : 'LOCAL';
     state.config = config;
     ui.screenVisionNote.textContent = config.visionRuntime === 'ready'

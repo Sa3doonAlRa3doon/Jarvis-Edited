@@ -1017,6 +1017,43 @@ try {
     }
   });
 
+  await check('Settings retries once after the initial screen picker is dismissed', async () => {
+    await openSettingsSection(page, 'screen');
+    const result = await page.evaluate(`mw:(async () => {
+      const mediaDevices = navigator.mediaDevices;
+      const originalMediaDescriptor = Object.getOwnPropertyDescriptor(mediaDevices, 'getDisplayMedia');
+      const originalSetTimeout = window.setTimeout;
+      let calls = 0;
+      Object.defineProperty(mediaDevices, 'getDisplayMedia', {
+        configurable: true,
+        writable: true,
+        value: async () => {
+          calls += 1;
+          throw new DOMException('Display picker dismissed', 'NotAllowedError');
+        }
+      });
+      // Keep the production 20-second retry policy while making this browser
+      // smoke deterministic and fast. Only the one policy timer is shortened.
+      window.setTimeout = (callback, delay, ...args) => originalSetTimeout(callback, delay === 20_000 ? 0 : delay, ...args);
+      try {
+        await document.querySelector('#start-screen-share')?.click();
+        const deadline = Date.now() + 2500;
+        while (calls < 2 && Date.now() < deadline) await new Promise((resolve) => originalSetTimeout(resolve, 20));
+        return {
+          calls,
+          state: document.querySelector('#screen-state')?.textContent?.trim() || '',
+          message: document.querySelector('#settings-message')?.textContent?.trim() || ''
+        };
+      } finally {
+        window.setTimeout = originalSetTimeout;
+        if (originalMediaDescriptor) Object.defineProperty(mediaDevices, 'getDisplayMedia', originalMediaDescriptor);
+        else delete mediaDevices.getDisplayMedia;
+      }
+    })()`);
+    assert(result.calls === 2 && result.state === 'CLICK TO RETRY', JSON.stringify(result));
+    return result;
+  });
+
   await check('Settings reports local vision readiness', async () => {
     const vision = await page.evaluate(async () => {
       const response = await fetch('/api/vision/status', { cache: 'no-store' });

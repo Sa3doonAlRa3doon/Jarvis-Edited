@@ -1,9 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SCREEN_RETRY_DELAY_MS, canScheduleScreenRetry, secondsUntilScreenRetry, screenRetryStatus } from '../public/screen-retry-policy.js';
+import { SCREEN_RETRY_DELAY_MS, canScheduleScreenRetry, isRetryableScreenPickerDismissal, secondsUntilScreenRetry, screenRetryStatus } from '../public/screen-retry-policy.js';
 
 test('screen retry uses the requested bounded 20 second delay', () => {
   assert.equal(SCREEN_RETRY_DELAY_MS, 20_000);
+});
+
+test('Escape and browser cancellation errors schedule a single picker retry', () => {
+  assert.equal(isRetryableScreenPickerDismissal('AbortError'), true);
+  assert.equal(isRetryableScreenPickerDismissal('NotAllowedError'), true);
+  assert.equal(isRetryableScreenPickerDismissal('NotFoundError'), false);
+  assert.equal(isRetryableScreenPickerDismissal('NotReadableError'), false);
 });
 
 test('screen retry permits one requested retry and blocks duplicate or unsafe scheduling', () => {

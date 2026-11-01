@@ -1,5 +1,9 @@
 export const SCREEN_RETRY_DELAY_MS = 20_000;
 
+export function isRetryableScreenPickerDismissal(errorName) {
+  return errorName === 'NotAllowedError' || errorName === 'AbortError';
+}
+
 export function canScheduleScreenRetry({ retryable, requested, timerActive, attempts } = {}) {
   return Boolean(retryable && requested && !timerActive && Number.isFinite(attempts) && attempts < 1);
 }

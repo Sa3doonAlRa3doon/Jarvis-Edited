@@ -1,4 +1,4 @@
-import { SCREEN_RETRY_DELAY_MS, canScheduleScreenRetry, screenRetryStatus, secondsUntilScreenRetry } from './screen-retry-policy.js';
+import { SCREEN_RETRY_DELAY_MS, canScheduleScreenRetry, isRetryableScreenPickerDismissal, screenRetryStatus, secondsUntilScreenRetry } from './screen-retry-policy.js';
 
 const $ = (selector) => document.querySelector(selector);
 const ui = {
@@ -308,6 +308,11 @@ async function discoverPrinterCamera(status = {}) {
 }
 async function toggleLocalScreenShare({ automaticRetry = false } = {}) {
   if (localScreenActive()) { stopLocalScreenShare(); return; }
+  if (!automaticRetry) {
+    clearScreenRetry();
+    state.screenRetryAttempts = 0;
+    state.screenRetryable = false;
+  }
   if (!navigator.mediaDevices?.getDisplayMedia) {
     text(ui.screenShareState, 'SCREEN CAPTURE UNAVAILABLE');
     text(ui.placeholderTitle, 'SCREEN CAPTURE UNAVAILABLE');
@@ -343,6 +348,12 @@ async function toggleLocalScreenShare({ automaticRetry = false } = {}) {
       text(ui.screenShareState, 'SCREEN RETRY NEEDS CLICK');
       text(ui.placeholderTitle, 'SCREEN CAPTURE NEEDS APPROVAL');
       text(ui.placeholderCopy, 'The browser requires a fresh user gesture before another display can be selected. Press SHARE YOUR SCREEN once.');
+    } else if (isRetryableScreenPickerDismissal(error?.name)) {
+      state.screenRetryable = true;
+      state.screenRetryRequested = true;
+      scheduleScreenRetry();
+      text(ui.placeholderTitle, 'SCREEN PICKER DISMISSED');
+      text(ui.placeholderCopy, 'Escape or Cancel closed the display picker. JARVIS will retry once in 20 seconds.');
     }
   }
 }
