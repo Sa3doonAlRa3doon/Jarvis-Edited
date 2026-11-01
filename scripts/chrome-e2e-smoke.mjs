@@ -473,6 +473,7 @@ try {
   });
 
   await check('Gesture camera link starts and stops in Camoufox', async () => {
+    if (noDisplay) return { skipped: true, reason: 'Headless Pi Camoufox cannot access a local browser camera stream; Pi hardware camera/microphone are checked through the native sensor bus.' };
     let lastError;
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       // Use a fresh browser process after the isolated media probe. Firefox can
