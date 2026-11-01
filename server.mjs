@@ -742,6 +742,7 @@ async function startWakeListener() {
   if (settings.doubleClap) args.push('--clap-enabled');
   const child = spawn(python, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PYTHONUNBUFFERED: '1' } });
   wakeState.process = child; wakeState.running = true;
+  let stderrTail = '';
   let buffer = '';
   child.stdout.setEncoding('utf8');
   child.stdout.on('data', (chunk) => {
@@ -769,9 +770,13 @@ async function startWakeListener() {
       } catch {}
     }
   });
-  child.stderr.setEncoding('utf8'); child.stderr.on('data', (chunk) => { wakeState.error = cleanText(chunk, 220); });
+  // Python runtimes such as ONNX Runtime can write normal provider notices
+  // and UserWarnings to stderr while the listener remains healthy. Keep a
+  // bounded tail for crash diagnosis, but only surface it if the child exits
+  // abnormally; structured listener errors arrive on stdout above.
+  child.stderr.setEncoding('utf8'); child.stderr.on('data', (chunk) => { stderrTail = `${stderrTail}${chunk}`.slice(-1_200); });
   child.on('exit', (code) => {
-    if (wakeState.process === child) { wakeState.process = null; wakeState.running = false; wakeState.ready = false; wakeState.model = false; wakeState.sttModel = false; wakeState.commandCapture = normalizeWakeCapture({ state: 'idle' }); if (code && !wakeState.error) wakeState.error = `Wake listener exited with code ${code}.`; }
+    if (wakeState.process === child) { wakeState.process = null; wakeState.running = false; wakeState.ready = false; wakeState.model = false; wakeState.sttModel = false; wakeState.commandCapture = normalizeWakeCapture({ state: 'idle' }); if (code && !wakeState.error) wakeState.error = cleanText(stderrTail, 220) || `Wake listener exited with code ${code}.`; }
   });
 }
 
