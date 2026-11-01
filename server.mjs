@@ -210,7 +210,7 @@ function voiceVocabulary(value) {
 }
 
 const defaultSettings = {
-  source: 'browser', browserCamera: '', browserMicrophone: '', piCamera: '', piMicrophone: '',
+  source: 'browser', browserCamera: '', browserMicrophone: '', piCamera: '', printerPiCamera: '', piMicrophone: '',
   defaultCountry: /^[A-Za-z]{2}$/.test(String(process.env.PUBLIC_API_DEFAULT_COUNTRY || 'AE').trim()) ? String(process.env.PUBLIC_API_DEFAULT_COUNTRY || 'AE').trim().toUpperCase() : 'AE',
   defaultLocation: cleanText(process.env.PUBLIC_API_DEFAULT_LOCATION || 'Dubai', 100) || 'Dubai',
   personDetection: true, voiceActivity: true, wakeWord: true, doubleClap: true,
@@ -237,6 +237,7 @@ function validateSettings(input = {}) {
     source: input.source === 'pi' ? 'pi' : 'browser',
     browserCamera: cleanBrowserDeviceId(input.browserCamera), browserMicrophone: cleanBrowserDeviceId(input.browserMicrophone),
     piCamera: /^\/dev\/video\d+$/.test(String(input.piCamera || '')) ? String(input.piCamera) : '',
+    printerPiCamera: /^\/dev\/video\d+$/.test(String(input.printerPiCamera || '')) ? String(input.printerPiCamera) : '',
     piMicrophone: /^plughw:\d+,\d+$/.test(String(input.piMicrophone || '')) ? String(input.piMicrophone) : '',
     defaultCountry, defaultLocation,
     personDetection: input.personDetection !== false, voiceActivity: input.voiceActivity !== false,
@@ -940,7 +941,7 @@ app.get('/api/config', async (_request, response) => {
   const vision = await visionRuntimeStatus(installed);
   const sttConfigured = Boolean(String(process.env.JARVIS_STT_MODEL_DIR || '').trim());
   const stt = { configured: sttConfigured, localOnly: true, commandTimeoutMs: safeNumber(process.env.JARVIS_STT_COMMAND_TIMEOUT_MS, 15_000, 5_000, 30_000), commandSilenceMs: safeNumber(process.env.JARVIS_STT_COMMAND_SILENCE_MS, 900, 350, 2_000), commandWarmupMs: safeNumber(process.env.JARVIS_STT_COMMAND_WARMUP_MS, 1_200, 0, 5_000) };
-  response.json({ name: 'JARVIS', version: appVersion, ttsMode: process.env.TTS_MODE || 'local', fishVoiceId: process.env.FISH_AUDIO_VOICE_ID || '', fishModel: process.env.FISH_AUDIO_MODEL || 's2.1-pro-free', fishConfigured: Boolean(process.env.FISH_AUDIO_API_KEY && process.env.FISH_AUDIO_VOICE_ID), fishRetryPolicy: { maxAttempts: 2, retryableStatusCodes: [500, 502, 503, 504], backoffMs: 350 }, fishReplyTimeoutMs: fishAudioTimeoutMs, fishWakeTimeoutMs: fishAudioWakeTimeoutMs, allowBrowserTtsFallback: asBool(process.env.ALLOW_BROWSER_TTS_FALLBACK, false), model: primaryModel, models, visionModel, visionConfigured: vision.configured, visionInstalled: vision.installed, visionRuntime: vision.runtime, visionCapabilityVerified: vision.capabilityVerified, stt, emailSendEnabled: googleEmailSendEnabled, browserEngine: camoufoxEngine(), browserControlEnabled, browserPreviewEnabled, stirling: { ...stirlingPdf.snapshot(), operations: stirlingCatalog() }, printerCamera: printerCamera.snapshot(), tools: { google: true, emailDraft: true, emailSend: googleEmailSendEnabled, web: true, googleNews: true, publicApis: true, screen: true, screenExplain: true, compactLocalView: true, websiteLiveView: true, websitePreview: browserPreviewEnabled, piCameraView: true, printerCameraView: printerCamera.configured, hostBrowser: true, browserControl: browserControlEnabled, officeArtifacts: true, stirlingPdf: true, liveAgentView: true, roleRouting: true, localPiCommandTranscription: sttConfigured, obs: true, obsOverlay: Boolean(obsOverlayToken), broadcastKit: true, analytics: true, mediaDeck: true, desktopApps: true, routines: true, memory: true, notes: true, reminders: true }, routineCatalog, publicApiServices: publicServiceCatalog(), agents: Object.fromEntries(Object.entries(agentRoles).map(([route, role]) => [route, role.name])), timezone: 'Asia/Dubai', piOnly: true, operationsEnabled: Boolean(operationsControlPin), printerConfigured: printerClient.configured, printerCameraConfigured: printerCamera.configured, obsConfigured: obsClient.configured });
+  response.json({ name: 'JARVIS', version: appVersion, ttsMode: process.env.TTS_MODE || 'local', fishVoiceId: process.env.FISH_AUDIO_VOICE_ID || '', fishModel: process.env.FISH_AUDIO_MODEL || 's2.1-pro-free', fishConfigured: Boolean(process.env.FISH_AUDIO_API_KEY && process.env.FISH_AUDIO_VOICE_ID), fishRetryPolicy: { maxAttempts: 2, retryableStatusCodes: [500, 502, 503, 504], backoffMs: 350 }, fishReplyTimeoutMs: fishAudioTimeoutMs, fishWakeTimeoutMs: fishAudioWakeTimeoutMs, allowBrowserTtsFallback: asBool(process.env.ALLOW_BROWSER_TTS_FALLBACK, false), model: primaryModel, models, visionModel, visionConfigured: vision.configured, visionInstalled: vision.installed, visionRuntime: vision.runtime, visionCapabilityVerified: vision.capabilityVerified, stt, emailSendEnabled: googleEmailSendEnabled, browserEngine: camoufoxEngine(), browserControlEnabled, browserPreviewEnabled, stirling: { ...stirlingPdf.snapshot(), operations: stirlingCatalog() }, printerCamera: printerCamera.snapshot(), tools: { google: true, emailDraft: true, emailSend: googleEmailSendEnabled, web: true, googleNews: true, publicApis: true, screen: true, screenExplain: true, compactLocalView: true, websiteLiveView: true, websitePreview: browserPreviewEnabled, piCameraView: true, printerCameraView: printerCamera.configured || Boolean(settings.printerPiCamera), hostBrowser: true, browserControl: browserControlEnabled, officeArtifacts: true, stirlingPdf: true, liveAgentView: true, roleRouting: true, localPiCommandTranscription: sttConfigured, obs: true, obsOverlay: Boolean(obsOverlayToken), broadcastKit: true, analytics: true, mediaDeck: true, desktopApps: true, routines: true, memory: true, notes: true, reminders: true }, routineCatalog, publicApiServices: publicServiceCatalog(), agents: Object.fromEntries(Object.entries(agentRoles).map(([route, role]) => [route, role.name])), timezone: 'Asia/Dubai', piOnly: true, operationsEnabled: Boolean(operationsControlPin), printerConfigured: printerClient.configured, printerCameraConfigured: printerCamera.configured || Boolean(settings.printerPiCamera), obsConfigured: obsClient.configured });
 });
 app.get('/api/vision/status', async (_request, response) => {
   const installed = await installedOllamaModels();
@@ -971,7 +972,9 @@ app.get('/api/workspace/status', async (_request, response) => {
     screenExplain: { available: true, requiresUserSelection: true, continuousCapture: false, model: visionModel || '', adOrPaywallBypass: false },
     websites: { engine: camoufoxEngine(), openOnHost: true, liveView: true, readOnlyPreview: browserPreviewEnabled, previewTimeoutMs: browserPreviewTimeoutMs, liveViewSource: 'user-selected-display-or-isolated-browser', readOnlyByDefault: true, adOrPaywallBypass: false },
     camera: { source: settings.source, selected: selectedPiCamera, available: Boolean(selectedPiCamera && piCameras.some((item) => item.id === selectedPiCamera)), devices: piCameras.map((item) => ({ id: item.id, label: item.label })), frameEndpoint: '/api/media/pi-camera/frame.jpg', continuousCapture: false },
-    printerCamera: printerCamera.snapshot(),
+    printerCamera: settings.printerPiCamera
+      ? { configured: true, source: 'pi-v4l2', device: settings.printerPiCamera, host: 'Raspberry Pi camera', endpoint: '/api/media/printer-camera/frame.jpg', autoDiscovery: false, continuousCapture: false }
+      : printerCamera.snapshot(),
     obs: { configured: obsClient.configured, control: obsClient.configured ? 'PIN-and-phrase' : 'not configured', overlay: Boolean(obsOverlayToken) },
     obsOverlay: { available: Boolean(obsOverlayToken), readOnly: true, url: obsOverlayToken ? obsOverlayUrl(_request) : '' },
     broadcastKit: { available: true, mode: 'local-stage', externalConnected: false, state: broadcastState },
@@ -1341,6 +1344,7 @@ app.get('/api/settings', (_request, response) => response.json(settings));
 app.put('/api/settings', async (request, response) => {
   const next = validateSettings({ ...settings, ...request.body });
   if (next.piCamera && process.platform === 'linux' && !(await linuxCameras()).some((item) => item.id === next.piCamera)) { response.status(400).json({ error: 'Selected Pi camera is not currently available.' }); return; }
+  if (next.printerPiCamera && process.platform === 'linux' && !(await linuxCameras()).some((item) => item.id === next.printerPiCamera)) { response.status(400).json({ error: 'Selected Pi printer camera is not currently available.' }); return; }
   if (next.piMicrophone && process.platform === 'linux' && !(await linuxMicrophones()).some((item) => item.id === next.piMicrophone)) { response.status(400).json({ error: 'Selected Pi microphone is not currently available.' }); return; }
   settings = next; await fs.writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
   await startWakeListener(); await eventStore.append('settings', 'Perception settings updated', { source: settings.source, wakeWord: settings.wakeWord, doubleClap: settings.doubleClap });
@@ -1361,6 +1365,11 @@ app.get('/api/media/pi-camera/frame.jpg', async (request, response) => {
 });
 app.get('/api/media/printer-camera/frame.jpg', async (_request, response) => {
   try {
+    if (settings.printerPiCamera) {
+      if (!(await linuxCameras()).some((item) => item.id === settings.printerPiCamera)) { response.status(503).json({ error: 'The selected Pi printer camera is no longer available.' }); return; }
+      const frame = await runBinary('ffmpeg', ['-nostdin', '-hide_banner', '-loglevel', 'error', '-f', 'v4l2', '-i', settings.printerPiCamera, '-frames:v', '1', '-vf', 'scale=960:-2', '-f', 'image2pipe', '-vcodec', 'mjpeg', 'pipe:1'], { encoding: 'buffer', timeout: 9000, maxBuffer: 8 * 1024 * 1024 });
+      response.set({ 'Cache-Control': 'no-store, max-age=0', 'Content-Type': 'image/jpeg', 'Content-Length': frame.length }); response.send(frame); return;
+    }
     const frame = await printerCamera.frame();
     response.set({ 'Cache-Control': 'no-store, max-age=0', 'Content-Type': frame.contentType, 'Content-Length': frame.buffer.length });
     response.send(frame.buffer);

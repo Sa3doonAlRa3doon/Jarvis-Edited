@@ -277,7 +277,8 @@ function renderPrinterCamera(status = {}) {
     state.printerCameraAt = Date.now();
     ui.printerCameraFrame.onload = () => { text(ui.printerCameraState, 'LIVE SNAPSHOT'); text(ui.printerCameraTime, new Date().toLocaleTimeString('en-GB', { hour12: false })); if (ui.printerCameraPlaceholder) ui.printerCameraPlaceholder.hidden = true; ui.printerCameraFrame.hidden = false; syncExplainButton(); };
     ui.printerCameraFrame.onerror = () => { text(ui.printerCameraState, 'OFFLINE'); text(ui.printerCameraTime, 'RETRYING'); ui.printerCameraFrame.hidden = true; if (ui.printerCameraPlaceholder) ui.printerCameraPlaceholder.hidden = false; syncExplainButton(); };
-    ui.printerCameraFrame.src = `${status.endpoint || '/api/media/printer-camera/frame.jpg'}?v=${Date.now()}`;
+    const endpoint = status.endpoint || '/api/media/printer-camera/frame.jpg';
+    ui.printerCameraFrame.src = `${endpoint}${endpoint.includes('?') ? '&' : '?'}v=${Date.now()}`;
   }
 }
 function schedulePrinterCameraDiscovery(status = {}) {
@@ -571,8 +572,26 @@ function renderLive(live) {
     setLocalScreenUi(true); text(ui.screenState, 'LOCAL SCREEN'); text(ui.screenTitle, 'YOUR SELECTED SCREEN'); text(ui.frameState, 'LOCAL SCREEN'); renderFrameFooter(); clock(); return;
   }
   if (live?.frameAvailable && Number(live.frameVersion) !== state.frameVersion) {
-    state.frameVersion = Number(live.frameVersion) || 0; ui.frame.dataset.frameVersion = String(state.frameVersion); ui.frame.hidden = false; ui.placeholder.hidden = true; ui.frame.src = `/api/agent/live-frame?v=${encodeURIComponent(state.frameVersion)}`;
-  } else if (!visible) { ui.frame.hidden = true; ui.frame.removeAttribute('src'); ui.placeholder.hidden = false; }
+    state.frameVersion = Number(live.frameVersion) || 0; ui.frame.dataset.frameVersion = String(state.frameVersion);
+    // Keep the idle/working display visible until the protected frame has
+    // actually loaded. A stale frame URL can fail after screen-share cleanup.
+    ui.frame.hidden = true; ui.placeholder.hidden = false;
+    ui.frame.onload = () => {
+      if (!localScreenActive() && state.frameVersion === Number(ui.frame.dataset.frameVersion)) {
+        ui.frame.hidden = false; ui.placeholder.hidden = true;
+      }
+    };
+    ui.frame.onerror = () => { ui.frame.hidden = true; ui.placeholder.hidden = false; };
+    ui.frame.src = `/api/agent/live-frame?v=${encodeURIComponent(state.frameVersion)}`;
+  } else if (!visible || !live?.frameAvailable) {
+    ui.frame.hidden = true; ui.frame.removeAttribute('src'); ui.placeholder.hidden = false;
+    text(ui.placeholderTitle, active ? 'AGENT WORKING' : preview ? 'PRIVATE WEBSITE PREVIEW' : 'JARVIS SCREEN READY');
+    text(ui.placeholderCopy, active
+      ? 'JARVIS is processing the approved task. Its next protected browser frame will appear here.'
+      : preview
+        ? 'The protected website preview is preparing its next frame. It stays inside the local Camoufox view.'
+        : 'Open a website with JARVIS, start an approved browser task, or share your screen to see it here.');
+  }
   renderFrameFooter();
   if (ui.screenExplain) ui.screenExplain.disabled = !canExplainVisibleScreen();
   clock();
@@ -768,4 +787,5 @@ setLocalScreenUi(false);
 syncWebsiteCleanView();
 clearScreenExplanation();
 syncStageFullscreenUi();
+document.body.dataset.workspaceReady = 'true';
 setInterval(clock, 1000); setInterval(() => void refresh(), 2000); setInterval(() => void refreshPiCamera(), 4000); void refresh(); void refreshPiCamera();

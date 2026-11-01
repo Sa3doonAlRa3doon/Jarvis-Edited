@@ -10,7 +10,7 @@ const form = $('#settings-form');
 
 const ui = {
   status: $('#settings-status'), message: $('#settings-message'), profile: $('#settings-profile'), version: $('#settings-version'), node: $('#settings-node'),
-  source: $('#source'), sourceBrowser: $('#source-browser'), sourcePi: $('#source-pi'), browserCamera: $('#browser-camera'), browserMicrophone: $('#browser-microphone'), microphoneProfile: $('#microphone-profile'), resetMicrophoneProfile: $('#reset-microphone-profile'), piCamera: $('#pi-camera'), piMicrophone: $('#pi-microphone'), defaultCountry: $('#default-country'), defaultLocation: $('#default-location'),
+  source: $('#source'), sourceBrowser: $('#source-browser'), sourcePi: $('#source-pi'), browserCamera: $('#browser-camera'), browserMicrophone: $('#browser-microphone'), microphoneProfile: $('#microphone-profile'), resetMicrophoneProfile: $('#reset-microphone-profile'), piCamera: $('#pi-camera'), printerPiCamera: $('#printer-pi-camera'), piMicrophone: $('#pi-microphone'), defaultCountry: $('#default-country'), defaultLocation: $('#default-location'),
   browserDeviceCount: $('#browser-device-count'), piDeviceCount: $('#pi-device-count'), refreshDevices: $('#refresh-devices'),
   personDetection: $('#person-detection'), voiceActivity: $('#voice-activity'), wakeWord: $('#wake-word'), doubleClap: $('#double-clap'), gestureControl: $('#gesture-control'), autoSpeak: $('#auto-speak'), autoRepair: $('#auto-repair'),
   personThreshold: $('#person-threshold'), micSensitivity: $('#mic-sensitivity'), wakeSensitivity: $('#wake-sensitivity'), clapSensitivity: $('#clap-sensitivity'), gestureSensitivity: $('#gesture-sensitivity'), doubleClapWindow: $('#double-clap-window'), scanInterval: $('#scan-interval'), accent: $('#accent'),
@@ -108,7 +108,7 @@ function currentSettings() {
   return {
     source: ui.source.value, browserCamera: normalizeDeviceId(ui.browserCamera.value), browserMicrophone: normalizeDeviceId(ui.browserMicrophone.value),
     defaultCountry: ui.defaultCountry.value, defaultLocation: ui.defaultLocation.value.trim(),
-    piCamera: ui.piCamera.value, piMicrophone: ui.piMicrophone.value,
+    piCamera: ui.piCamera.value, printerPiCamera: ui.printerPiCamera.value, piMicrophone: ui.piMicrophone.value,
     personDetection: ui.personDetection.checked, voiceActivity: ui.voiceActivity.checked, wakeWord: ui.wakeWord.checked,
     doubleClap: ui.doubleClap.checked, gestureControl: ui.gestureControl.checked, autoSpeak: ui.autoSpeak.checked, autoRepair: ui.autoRepair.checked,
     personThreshold: Number(ui.personThreshold.value), micSensitivity: Number(ui.micSensitivity.value),
@@ -158,7 +158,7 @@ function applySettings(settings, { saved = false, message = '' } = {}) {
   ui.voiceVocabulary.value = normalizeVocabulary(settings.voiceVocabulary ?? DEFAULT_VOICE_VOCABULARY).join(', ');
   if (settings.ttsVoice && ![...ui.ttsVoice.options].some((item) => item.value === settings.ttsVoice)) ui.ttsVoice.append(option(settings.ttsVoice, `Saved voice (currently unavailable): ${settings.ttsVoice}`));
   for (const [key, element] of [
-    ['source', ui.source], ['browserCamera', ui.browserCamera], ['browserMicrophone', ui.browserMicrophone], ['piCamera', ui.piCamera], ['piMicrophone', ui.piMicrophone], ['defaultCountry', ui.defaultCountry], ['defaultLocation', ui.defaultLocation],
+    ['source', ui.source], ['browserCamera', ui.browserCamera], ['browserMicrophone', ui.browserMicrophone], ['piCamera', ui.piCamera], ['printerPiCamera', ui.printerPiCamera], ['piMicrophone', ui.piMicrophone], ['defaultCountry', ui.defaultCountry], ['defaultLocation', ui.defaultLocation],
     ['personThreshold', ui.personThreshold], ['micSensitivity', ui.micSensitivity], ['wakeSensitivity', ui.wakeSensitivity], ['clapSensitivity', ui.clapSensitivity],
     ['gestureSensitivity', ui.gestureSensitivity], ['doubleClapWindow', ui.doubleClapWindow], ['scanInterval', ui.scanInterval], ['accent', ui.accent],
     ['voiceLanguage', ui.voiceLanguage], ['recognitionConfidence', ui.recognitionConfidence], ['commandSilenceMs', ui.commandSilence],
@@ -542,7 +542,27 @@ async function loadDeviceLists(selections = currentSettings(), { requestBrowserP
     const cameras = state.media.cameras || [];
     const microphones = state.media.microphones || [];
     fillSelect(ui.piCamera, cameras, 'Select /dev/video*', draft.piCamera);
+    fillSelect(ui.printerPiCamera, cameras, 'Use configured printer URL', draft.printerPiCamera);
     fillSelect(ui.piMicrophone, microphones, 'Select plughw device', draft.piMicrophone);
+    let suggestedCamera = false;
+    if (state.media.platform === 'linux' && !draft.piCamera) {
+      const mainCamera = cameras.find((item) => /\blenovo\b/i.test(item.label || ''));
+      if (mainCamera) { ui.piCamera.value = mainCamera.id; suggestedCamera = true; }
+    }
+    const mainCameraId = ui.piCamera.value || draft.piCamera;
+    if (state.media.platform === 'linux' && !draft.printerPiCamera && mainCameraId) {
+      const printerCamera = cameras.find((item) => item.id !== mainCameraId && /integrated camera/i.test(item.label || ''))
+        || cameras.find((item) => item.id !== mainCameraId);
+      if (printerCamera) { ui.printerPiCamera.value = printerCamera.id; suggestedCamera = true; }
+    }
+    if (state.media.platform === 'linux' && !draft.piMicrophone) {
+      const mainMicrophone = microphones.find((item) => /lenovo/i.test(item.label || ''));
+      if (mainMicrophone) { ui.piMicrophone.value = mainMicrophone.id; suggestedCamera = true; }
+    }
+    if (suggestedCamera) {
+      updateDirty();
+      setMessage('Pi camera roles staged: Lenovo as your main camera, and the separate integrated camera for the printer. Save to keep them.');
+    }
     ui.piDeviceCount.textContent = `${cameras.length} CAM / ${microphones.length} MIC`;
     const browserAvailability = await browserInventory;
     if (browserAvailability.error) throw browserAvailability.error;

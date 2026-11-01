@@ -234,12 +234,18 @@ try {
   await page.goto(`${baseUrl}/?smoke=1`, { waitUntil: 'domcontentloaded' });
   await check('Camoufox dashboard authentication dialog', async () => {
     const dialog = page.locator('#auth-dialog');
-    await dialog.waitFor({ state: 'visible' });
-    await dialog.locator('input').fill(String(process.env.DASHBOARD_ACCESS_PIN || ''));
-    await dialog.locator('button[type="submit"]').click({ force: true });
-    await dialog.waitFor({ state: 'detached' });
+    const visible = await dialog.isVisible().catch(() => false);
+    if (visible) {
+      const pin = String(process.env.DASHBOARD_ACCESS_PIN || '');
+      assert(pin, 'dashboard PIN is configured but DASHBOARD_ACCESS_PIN is unavailable to this smoke process');
+      await dialog.locator('input').fill(pin);
+      await dialog.locator('button[type="submit"]').click({ force: true });
+      await dialog.waitFor({ state: 'detached' });
+    } else {
+      assert(!process.env.DASHBOARD_ACCESS_PIN, 'dashboard PIN is configured, but the expected authentication dialog did not appear');
+    }
     authCookies = await context.cookies().catch(() => []);
-    return 'authenticated through the visible Camoufox dialog';
+    return visible ? 'authenticated through the visible Camoufox dialog' : 'local dashboard has no PIN gate configured';
   });
 
   // Fresh browser processes are intentional for fake-device isolation, but
@@ -317,8 +323,13 @@ try {
     return { ...voice, deck };
   });
 
-  await check('Fish Audio talkback decodes and plays in Camoufox', async () => {
+  await check('Configured Fish Audio playback decodes in Camoufox', async () => {
     const playback = await page.evaluate(async () => {
+      const configResponse = await fetch('/api/config', { cache: 'no-store' });
+      const config = await configResponse.json();
+      if (config.ttsMode !== 'fish' || !config.fishConfigured) {
+        return { skipped: true, reason: config.fishConfigured ? `Fish Audio is configured but inactive (mode ${config.ttsMode})` : 'Fish Audio credentials are not configured on this host', ttsMode: config.ttsMode };
+      }
       const response = await fetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -350,6 +361,7 @@ try {
         await Promise.race([context.close().catch(() => {}), new Promise((resolve) => setTimeout(resolve, 2_000))]);
       }
     });
+    if (playback.skipped) return playback;
     assert(playback.status === 200 && playback.bytes > 1000 && playback.audioContext === true && Number(playback.duration) > 0, JSON.stringify(playback));
     return playback;
   });
@@ -812,7 +824,7 @@ try {
     return { events, services: payload.services?.online || 0, note };
   });
 
-  await check('Private workspace restores the agent view after local share', async () => {
+  await check('Private workspace restores its agent or idle view after local share', async () => {
     // Keep the display-stream probe in a fresh workspace document. Camoufox
     // can invalidate a MediaStream remote object after the preview/analytics
     // page has changed views; the new document still exercises the real UI
@@ -833,26 +845,25 @@ try {
         await authDialog.waitFor({ state: 'detached' });
       }
       await screenPage.locator('#workspace-screen-share-toggle').waitFor({ state: 'visible' });
+      await screenPage.waitForFunction(() => document.body.dataset.workspaceReady === 'true', null, { timeout: 10_000 });
       await releaseDashboardMedia(screenPage);
       await evaluateWithRetry(screenPage, async () => {
         const mediaDevices = navigator.mediaDevices;
         const originalOwnDescriptor = Object.getOwnPropertyDescriptor(mediaDevices, 'getDisplayMedia');
-        // Defer the synthetic camera open until the real UI click calls
-        // getDisplayMedia. Keeping the MediaStream out of the evaluation
-        // return value avoids Firefox remote-object invalidation after a
-        // previous fake track was released.
+        // Use a page-local synthetic display stream here. Physical camera
+        // capture is verified in its own real-device probe above; borrowing a
+        // camera track for screen-share tests races Firefox device teardown.
         Object.defineProperty(mediaDevices, 'getDisplayMedia', {
           configurable: true,
           writable: true,
           value: async () => {
-            let stream;
-            let lastError;
-            for (let attempt = 0; attempt < 3 && !stream; attempt += 1) {
-              try { stream = await mediaDevices.getUserMedia({ video: true, audio: false }); }
-              catch (error) { lastError = error; await new Promise((resolve) => setTimeout(resolve, 220)); }
-            }
-            if (!stream) throw lastError || new Error('camera stream could not be opened');
-            window.__jarvisScreenSmoke = { originalOwnDescriptor, stream };
+            const canvas = document.createElement('canvas');
+            canvas.width = 640; canvas.height = 360;
+            const context = canvas.getContext('2d');
+            context.fillStyle = '#06111a'; context.fillRect(0, 0, canvas.width, canvas.height);
+            context.fillStyle = '#72e8ff'; context.fillRect(24, 24, 180, 6);
+            const stream = canvas.captureStream(12);
+            window.__jarvisScreenSmoke = { originalOwnDescriptor, stream, canvas };
             return stream;
           }
         });
@@ -863,11 +874,26 @@ try {
       // the production gesture requirement intact while the page-side mock
       // supplies a deterministic local MediaStream.
       await screenPage.locator('#workspace-screen-share-toggle').click({ force: true });
-      await screenPage.waitForFunction(() => document.querySelector('#workspace-screen-share-state')?.textContent?.trim() === 'LOCAL SCREEN LIVE // NO UPLOAD', null, { timeout: 8_000 });
+      try {
+        await screenPage.waitForFunction(() => document.querySelector('#workspace-screen-share-state')?.textContent?.trim() === 'LOCAL SCREEN LIVE // NO UPLOAD', null, { timeout: 20_000, polling: 100 });
+      } catch (error) {
+        const state = await screenPage.evaluate(() => ({ status: document.querySelector('#workspace-screen-share-state')?.textContent?.trim(), videoHidden: document.querySelector('#workspace-screen-share-video')?.hidden, trackState: window.__jarvisScreenSmoke?.stream?.getVideoTracks?.().map((track) => track.readyState) }));
+        throw new Error(`Local screen did not start: ${JSON.stringify(state)} // ${String(error?.message || error).slice(0, 180)}`);
+      }
       const started = await screenPage.evaluate(() => ({ state: document.querySelector('#workspace-screen-share-state')?.textContent?.trim(), videoHidden: document.querySelector('#workspace-screen-share-video')?.hidden }));
       await screenPage.locator('#workspace-screen-share-toggle').click({ force: true });
-      await screenPage.waitForFunction(() => document.querySelector('#workspace-screen-share-state')?.textContent?.trim() === 'LOCAL SCREEN OFF // NO UPLOAD', null, { timeout: 8_000 });
-      const stopped = await screenPage.evaluate(() => ({ state: document.querySelector('#workspace-screen-share-state')?.textContent?.trim(), videoHidden: document.querySelector('#workspace-screen-share-video')?.hidden }));
+      try {
+        await screenPage.waitForFunction(() => document.querySelector('#workspace-screen-share-state')?.textContent?.trim() === 'LOCAL SCREEN OFF // NO UPLOAD', null, { timeout: 20_000, polling: 100 });
+      } catch (error) {
+        const state = await screenPage.evaluate(() => ({ status: document.querySelector('#workspace-screen-share-state')?.textContent?.trim(), videoHidden: document.querySelector('#workspace-screen-share-video')?.hidden, trackState: window.__jarvisScreenSmoke?.stream?.getVideoTracks?.().map((track) => track.readyState) }));
+        throw new Error(`Local screen did not stop: ${JSON.stringify(state)} // ${String(error?.message || error).slice(0, 180)}`);
+      }
+      const stopped = await screenPage.evaluate(() => ({
+        state: document.querySelector('#workspace-screen-share-state')?.textContent?.trim(),
+        videoHidden: document.querySelector('#workspace-screen-share-video')?.hidden,
+        agentFrameVisible: Boolean(document.querySelector('#workspace-frame') && !document.querySelector('#workspace-frame').hidden && document.querySelector('#workspace-frame').complete && document.querySelector('#workspace-frame').naturalWidth > 0),
+        placeholderVisible: !document.querySelector('#workspace-screen-placeholder')?.hidden
+      }));
       const active = await screenPage.evaluate(() => {
         const smoke = window.__jarvisScreenSmoke;
         const active = Boolean(document.querySelector('#workspace-screen-share-video')?.srcObject?.getVideoTracks?.().some((track) => track.readyState === 'live'));
@@ -880,7 +906,7 @@ try {
       });
       const transition = { started, stopped, active };
       assert(transition.started.state === 'LOCAL SCREEN LIVE // NO UPLOAD' && transition.started.videoHidden === false, JSON.stringify(transition));
-      assert(transition.stopped.state === 'LOCAL SCREEN OFF // NO UPLOAD' && transition.stopped.videoHidden === true, JSON.stringify(transition));
+      assert(transition.stopped.state === 'LOCAL SCREEN OFF // NO UPLOAD' && transition.stopped.videoHidden === true && (transition.stopped.agentFrameVisible || transition.stopped.placeholderVisible), JSON.stringify(transition));
       return transition;
     } finally {
       await closeBounded(screenContext);
@@ -909,7 +935,7 @@ try {
     // Set up a deterministic page-local display stream first. The actual
     // button activation is performed by Playwright below so Firefox sees a
     // genuine transient user gesture instead of a programmatic `.click()`.
-    await page.evaluate((useSynthetic) => {
+    await evaluateWithRetry(page, (useSynthetic) => {
       const mediaDevices = navigator.mediaDevices;
       const originalOwnDescriptor = Object.getOwnPropertyDescriptor(mediaDevices, 'getDisplayMedia');
       let canvas = null;
@@ -955,7 +981,7 @@ try {
     try {
       await page.locator('#start-screen-share').click({ force: true });
       await page.waitForFunction(() => document.querySelector('#screen-state')?.textContent?.trim() === 'LIVE' || document.querySelector('#screen-state')?.textContent?.trim() === 'OFFLINE', null, { timeout: 7000 });
-      const transition = await page.evaluate(async () => {
+      const transition = await evaluateWithRetry(page, async () => {
         const smoke = window.__jarvisSettingsSmoke;
         const live = document.querySelector('#screen-state')?.textContent?.trim() === 'LIVE';
         window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
@@ -1009,8 +1035,12 @@ try {
     const replyTimeoutMs = Number(policy.body.fishReplyTimeoutMs);
     assert(policy.http === 200 && Number(retry.maxAttempts) === 2 && Number(retry.backoffMs) === 350 && Array.isArray(retry.retryableStatusCodes) && retry.retryableStatusCodes.join(',') === '500,502,503,504', JSON.stringify(policy));
     assert(Number.isFinite(wakeTimeoutMs) && wakeTimeoutMs >= 4_000 && wakeTimeoutMs <= 60_000 && Number.isFinite(replyTimeoutMs) && replyTimeoutMs >= 5_000 && replyTimeoutMs <= 120_000, `Fish Audio timeout bounds missing: ${JSON.stringify(policy.body)}`);
-    assert(/retry/i.test(policy.note), `Fish Audio retry policy missing from Settings: ${policy.note}`);
-    assert(/Wake ack <=\d+s/i.test(policy.note), `Fish Audio wake deadline missing from Settings: ${policy.note}`);
+    if (policy.body.ttsMode === 'fish' && policy.body.fishConfigured) {
+      assert(/retry/i.test(policy.note), `Fish Audio retry policy missing from Settings: ${policy.note}`);
+      assert(/Wake ack <=\d+s/i.test(policy.note), `Fish Audio wake deadline missing from Settings: ${policy.note}`);
+    } else {
+      assert(policy.body.ttsMode === 'local', `unexpected talkback mode ${policy.body.ttsMode}`);
+    }
     return { maxAttempts: retry.maxAttempts, backoffMs: retry.backoffMs, retryableStatusCodes: retry.retryableStatusCodes, wakeTimeoutMs, replyTimeoutMs, note: policy.note.slice(0, 180) };
   });
 
@@ -1027,6 +1057,19 @@ try {
     const profile = (await page.locator('#microphone-profile').textContent()).trim();
     assert(/PROFILE|CALIBRATE/.test(profile), `microphone profile indicator missing: ${profile}`);
     return { cameras: Number(match[1]), microphones: Number(match[2]), options: { cameras, microphones }, profile, media: captureLabel };
+  });
+
+  await check('Settings separates the main Pi camera from the printer camera', async () => {
+    const result = await page.evaluate(() => ({
+      mainLabel: document.querySelector('label:has(#pi-camera) > span')?.textContent?.trim(),
+      printerLabel: document.querySelector('label:has(#printer-pi-camera) > span')?.textContent?.trim(),
+      mainSelected: document.querySelector('#pi-camera')?.value || '',
+      printerSelected: document.querySelector('#printer-pi-camera')?.value || '',
+      deviceCount: document.querySelectorAll('#pi-camera option').length
+    }));
+    assert(result.mainLabel === 'MAIN PI CAMERA' && result.printerLabel === 'LOCAL PRINTER CAMERA', JSON.stringify(result));
+    if (result.mainSelected && result.printerSelected) assert(result.mainSelected !== result.printerSelected, JSON.stringify(result));
+    return result;
   });
 
   await check('Settings refreshes browser devices after a hot-plug event', async () => {
@@ -1137,41 +1180,44 @@ try {
   });
 
   await check('Settings auto-tunes the voice gate from local diagnostics', async () => {
-    await openSettingsSection(page, 'voice');
-    await page.locator('#auto-tune-voice').waitFor({ state: 'visible' });
-    // Settings loads the protected profile and device list in parallel with
-    // the real camera teardown. Wait for the synchronized marker before
-    // clicking so a queued tune cannot be mistaken for a lost click.
-    await page.waitForFunction(() => document.querySelector('#save-state-title')?.dataset.ready === 'true', null, { timeout: 20_000 });
-    const before = await page.evaluate(() => ({
-      mic: document.querySelector('#mic-sensitivity')?.value,
-      wake: document.querySelector('#wake-sensitivity')?.value,
-      clap: document.querySelector('#clap-sensitivity')?.value,
-      confidence: document.querySelector('#recognition-confidence')?.value,
-      silence: document.querySelector('#command-silence')?.value
-    }));
-    // Dispatch the same button event without asking Playwright to scroll a
-    // fixed-height settings pane; the control can be attached while its
-    // parent section is transitioning after a real media teardown.
-    await page.evaluate(() => document.querySelector('#auto-tune-voice')?.click());
-    const messageHandle = await page.waitForFunction(() => {
-      const value = document.querySelector('#settings-message')?.textContent?.trim() || '';
-      return value.includes('Voice gate staged') ? value : false;
-    }, null, { timeout: 8000 });
-    const message = String(await messageHandle.jsonValue());
-    const tuned = await page.evaluate(() => ({
-      mic: document.querySelector('#mic-sensitivity')?.value,
-      wake: document.querySelector('#wake-sensitivity')?.value,
-      clap: document.querySelector('#clap-sensitivity')?.value,
-      confidence: document.querySelector('#recognition-confidence')?.value,
-      silence: document.querySelector('#command-silence')?.value,
-      dirty: document.querySelector('#dirty-dot')?.classList.contains('dirty')
-    }));
-    const changed = [tuned.mic, tuned.wake, tuned.clap, tuned.confidence, tuned.silence]
-      .some((value, index) => value !== Object.values(before)[index]);
-    assert(tuned.dirty && tuned.confidence && tuned.silence && changed, JSON.stringify({ before, tuned }));
-    assert(/last calibration sample|current mic sample|safe defaults/.test(message), `auto-tune did not report its bounded sample source: ${message}`);
-    return { before, ...tuned, message };
+    await releaseDashboardMedia(page);
+    const tunePage = await context.newPage();
+    tunePage.setDefaultTimeout(12_000);
+    try {
+      await tunePage.goto(`${baseUrl}/settings#voice`, { waitUntil: 'domcontentloaded' });
+      await tunePage.locator('#settings-workspace').waitFor({ state: 'attached' });
+      await tunePage.waitForFunction(() => document.querySelector('#save-state-title')?.dataset.ready === 'true', null, { timeout: 20_000 });
+      await openSettingsSection(tunePage, 'voice');
+      await tunePage.locator('#auto-tune-voice').waitFor({ state: 'visible' });
+      const before = await tunePage.evaluate(() => ({
+        mic: document.querySelector('#mic-sensitivity')?.value,
+        wake: document.querySelector('#wake-sensitivity')?.value,
+        clap: document.querySelector('#clap-sensitivity')?.value,
+        confidence: document.querySelector('#recognition-confidence')?.value,
+        silence: document.querySelector('#command-silence')?.value
+      }));
+      await tunePage.evaluate(() => document.querySelector('#auto-tune-voice')?.click());
+      const messageHandle = await tunePage.waitForFunction(() => {
+        const value = document.querySelector('#settings-message')?.textContent?.trim() || '';
+        return value.includes('Voice gate staged') ? value : false;
+      }, null, { timeout: 8000 });
+      const message = String(await messageHandle.jsonValue());
+      const tuned = await tunePage.evaluate(() => ({
+        mic: document.querySelector('#mic-sensitivity')?.value,
+        wake: document.querySelector('#wake-sensitivity')?.value,
+        clap: document.querySelector('#clap-sensitivity')?.value,
+        confidence: document.querySelector('#recognition-confidence')?.value,
+        silence: document.querySelector('#command-silence')?.value,
+        dirty: document.querySelector('#dirty-dot')?.classList.contains('dirty')
+      }));
+      const changed = [tuned.mic, tuned.wake, tuned.clap, tuned.confidence, tuned.silence]
+        .some((value, index) => value !== Object.values(before)[index]);
+      assert(tuned.dirty && tuned.confidence && tuned.silence && changed, JSON.stringify({ before, tuned }));
+      assert(/last calibration sample|current mic sample|safe defaults/.test(message), `auto-tune did not report its bounded sample source: ${message}`);
+      return { before, ...tuned, message };
+    } finally {
+      await tunePage.close().catch(() => {});
+    }
   });
 
   await check('Settings Google verification reaches a real result', async () => {
