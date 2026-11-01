@@ -31,6 +31,7 @@ import { issueDashboardSession, loadDashboardSessionSecret, verifyDashboardSessi
 import { PrinterClient } from './lib/printer-client.mjs';
 import { PrinterCameraClient } from './lib/printer-camera.mjs';
 import { normalizeWakeCapture } from './public/wake-state.js';
+import { piWakeEnergyFloor } from './lib/pi-wake-profile.mjs';
 import { RoutineEngine, routineCatalog } from './lib/routine-engine.mjs';
 import { StirlingPdfClient, parseStirlingPrompt, stirlingCatalog } from './lib/stirling-pdf.mjs';
 import { buildSyntheticPdf, documentSignature } from './lib/stirling-fixture.mjs';
@@ -58,7 +59,7 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const appVersion = '3.35.0';
+const appVersion = '3.35.1';
 const host = process.env.HOST || '127.0.0.1';
 const port = Number(process.env.PORT || 8787);
 const openJarvisUrl = (process.env.OPENJARVIS_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
@@ -727,7 +728,7 @@ async function startWakeListener() {
     '--callback', `http://127.0.0.1:${port}/api/wake-event`, '--token', wakeEventToken,
     '--wake-threshold', String(settings.wakeSensitivity), '--clap-threshold', String(settings.clapSensitivity),
     '--double-clap-ms', String(settings.doubleClapWindow),
-    '--wake-energy-floor', String(safeNumber(process.env.PI_WAKE_ENERGY_FLOOR, 0.0035, 0.0005, 0.05)),
+    '--wake-energy-floor', String(piWakeEnergyFloor(settings.micSensitivity, safeNumber(process.env.PI_WAKE_ENERGY_FLOOR, 0.0035, 0.0005, 0.05))),
     '--wake-noise-multiplier', String(safeNumber(process.env.PI_WAKE_NOISE_MULTIPLIER, 1.6, 1.05, 8)),
     '--wake-peak-floor', String(safeNumber(process.env.PI_WAKE_PEAK_FLOOR, 0.004, 0.0005, 0.25)),
     '--wake-peak-ratio', String(safeNumber(process.env.PI_WAKE_PEAK_RATIO, 1.12, 1, 3))];

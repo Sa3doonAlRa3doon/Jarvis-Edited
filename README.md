@@ -1,4 +1,12 @@
-# OpenJarvis Pi Command Center 3.35.0
+# OpenJarvis Pi Command Center 3.35.1
+
+### 3.35.1 Pi microphone sensitivity wiring
+
+- The shared **VOICE SENSITIVITY** control now adjusts the Raspberry Pi ALSA
+  wake listener's bounded physical energy floor. Lower values allow quieter
+  speech through; the independent wake-model score, noise multiplier, peak
+  checks, and speech-shape gate still guard against false activations. An
+  explicit `PI_WAKE_ENERGY_FLOOR` remains the calibration anchor.
 
 ### 3.35.0 Camoufox-only browser handoff
 
