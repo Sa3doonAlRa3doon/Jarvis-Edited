@@ -26,6 +26,7 @@ const wakeListener = await read('lib/wake-listener.py');
 const piInstaller = await read('install-pi.sh');
 const piSmoke = await read('scripts/pi-smoke.sh');
 const piSmokeEntry = await read('scripts/pi-smoke.mjs');
+const wakeDiagnostics = await read('lib/wake-diagnostics.mjs');
 
 for (const [source, document, label] of [[client, html, 'main'], [settingsClient, settingsHtml, 'settings']]) {
   for (const match of source.matchAll(/querySelector\('#([^'$]+)'\)/g)) {
@@ -176,6 +177,10 @@ assert.doesNotMatch(doctor, /console\.log\(process\.env/);
 assert.match(piSmoke, /JARVIS PI ACCEPTANCE/);
 assert.match(piSmokeEntry, /\/api\/vision\/status/);
 assert.match(piSmokeEntry, /\/api\/wake\/status/);
+assert.match(piSmokeEntry, /freshPiWakeDiagnostic\(wake\.diagnostics\)/);
+assert.match(piSmokeEntry, /live mic samples fresh/);
+assert.match(wakeDiagnostics, /maxAgeMs = 7_000/);
+assert.match(wakeDiagnostics, /value\.source !== 'pi'/);
 assert.match(piSmokeEntry, /Lenovo main camera selected/);
 assert.match(piSmokeEntry, /separate printer camera frame received/);
 assert.match(piSmokeEntry, /dashboard PIN login/);

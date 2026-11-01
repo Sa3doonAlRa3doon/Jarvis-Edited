@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { freshPiWakeDiagnostic } from '../lib/wake-diagnostics.mjs';
 
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const strict = process.argv.slice(2).includes('--strict');
@@ -63,6 +64,12 @@ async function liveApiChecks() {
     if (wakeEnabled && wake.running && wake.ready && wake.model) pass('Hey Jarvis wake model and microphone listener ready');
     else if (wakeEnabled) fail(`wake listener is not ready (${wake.error || 'check /api/wake/status'})`);
     else warn('Pi wake listener is disabled in configuration');
+    const micSignal = freshPiWakeDiagnostic(wake.diagnostics);
+    if (wakeEnabled && micSignal) {
+      const level = (micSignal.micLevel * 100).toFixed(2);
+      const noise = (micSignal.noiseFloor * 100).toFixed(2);
+      pass(`live mic samples fresh (RMS ${level}%, noise floor ${noise}%, SNR ${micSignal.signalToNoiseDb.toFixed(1)} dB, physical gate ${micSignal.physicalGate ? 'open' : 'closed'})`);
+    } else if (wakeEnabled && wake.running && wake.ready) warn('live mic signal telemetry is missing or stale; device selection alone does not prove current audio frames');
     if (process.env.JARVIS_STT_MODEL_DIR && wake.sttModel) pass('local Vosk command transcription loaded');
     else if (process.env.JARVIS_STT_MODEL_DIR) fail('local Vosk command model is configured but not loaded');
     else warn('local command transcription model is not configured');
