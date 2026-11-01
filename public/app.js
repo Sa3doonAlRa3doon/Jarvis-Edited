@@ -5,6 +5,7 @@ import { isIntegratedBrowserName, searchCatalog } from './search-utils.js';
 import { shouldApplyTranscriptToInput } from './voice-utils.js';
 import { hasWakeCommand, normalizeWakeCommand } from './wake-command.js';
 import { wakeCaptureLabel } from './wake-state.js';
+import { requiresBrowserTtsGesture } from './tts-autoplay-policy.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -888,7 +889,11 @@ async function speak(text, { pendingContext = null, onPlaybackStart = null, fish
     }
     if ('speechSynthesis' in window) {
       document.body.dataset.ttsProvider = 'browser'; document.body.dataset.ttsVoice = selectBrowserVoice()?.voiceURI || 'system-default'; document.body.dataset.ttsState = 'requesting';
-      if (navigator.userActivation && !navigator.userActivation.hasBeenActive) {
+      if (requiresBrowserTtsGesture({
+        userActivationAvailable: Boolean(navigator.userActivation),
+        hasBeenActive: Boolean(navigator.userActivation?.hasBeenActive),
+        allowAutoplay: state.config?.allowBrowserTtsAutoplay === true
+      })) {
         onPlaybackStart?.();
         state.pendingSpeech = { text, context: pendingContext }; document.body.classList.add('audio-locked'); document.body.dataset.ttsState = 'blocked'; state.galaxy?.setActivity('armed', 1); return false;
       }
