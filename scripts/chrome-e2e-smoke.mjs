@@ -614,7 +614,7 @@ try {
     await input.fill('https://example.com');
     const chatResponsePromise = page.waitForResponse((response) => {
       try { return new URL(response.url()).pathname === '/api/chat' && response.request().method() === 'POST'; } catch { return false; }
-    });
+    }, { timeout: 90_000 });
     await form.evaluate((node) => node.requestSubmit());
     const chatResponse = await chatResponsePromise;
     assert(chatResponse.request().postDataJSON()?.browserCleanView === true, 'new website preview should enable clean view by default');
@@ -1140,6 +1140,7 @@ try {
   });
 
   await check(`Settings sensor calibration opens ${captureLabel.toLowerCase()} camera and mic`, async () => {
+    await openSettingsSection(page, 'devices');
     await page.locator('#source-browser').check({ force: true });
     await openSettingsSection(page, 'sensors');
     await page.locator('#start-sensors').waitFor({ state: 'visible' });

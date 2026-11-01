@@ -54,6 +54,47 @@ test('authenticated proxy pins the public DNS answer at the socket boundary', as
   }
 });
 
+test('cancelled upstream page loads do not break later proxy requests', async () => {
+  const upstream = http.createServer((request, response) => {
+    if (request.url === '/stream') {
+      response.writeHead(200, { 'Content-Type': 'text/plain' });
+      response.write('first chunk');
+      const timer = setInterval(() => response.write('next chunk'), 5);
+      response.once('close', () => clearInterval(timer));
+      return;
+    }
+    response.end('proxy remains healthy');
+  });
+  await new Promise((resolve) => upstream.listen(0, '127.0.0.1', resolve));
+  const address = upstream.address();
+  const proxy = await createPublicNetworkProxy({
+    lookup: async () => [{ address: '93.184.216.34', family: 4 }],
+    connect: (options, callback) => net.connect({ host: '127.0.0.1', port: address.port }, callback)
+  });
+  try {
+    const target = new URL(proxy.server);
+    const authorization = Buffer.from(`${proxy.username}:${proxy.password}`).toString('base64');
+    await new Promise((resolve, reject) => {
+      const request = http.request({
+        hostname: target.hostname, port: Number(target.port), path: 'http://public.example/stream',
+        headers: { 'Proxy-Authorization': `Basic ${authorization}` }
+      }, (response) => {
+        response.once('data', () => { request.destroy(); resolve(); });
+        response.once('error', resolve);
+      });
+      request.once('error', (error) => { if (!request.destroyed) reject(error); });
+      request.end();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const healthy = await requestThroughProxy(proxy, 'http://public.example/healthy');
+    assert.equal(healthy.status, 200);
+    assert.equal(healthy.body, 'proxy remains healthy');
+  } finally {
+    await proxy.close();
+    await new Promise((resolve) => upstream.close(resolve));
+  }
+});
+
 test('proxy requires a per-process credential and refuses private DNS results', async () => {
   let connects = 0;
   const proxy = await createPublicNetworkProxy({ lookup: async () => [{ address: '127.0.0.1', family: 4 }], connect: () => { connects += 1; throw new Error('must not connect'); } });
