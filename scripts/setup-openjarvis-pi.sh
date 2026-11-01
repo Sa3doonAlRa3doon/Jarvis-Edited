@@ -75,6 +75,10 @@ sudo install -d -o root -g root -m 0755 "$AGENT_TOOLS_DIR"
 sudo install -o root -g root -m 0755 "$SCRIPT_DIR/start-browser-mcp.mjs" "$AGENT_TOOLS_DIR/start-browser-mcp.mjs"
 sudo install -o root -g root -m 0644 "$SCRIPT_DIR/mcp-prefix.mjs" "$AGENT_TOOLS_DIR/mcp-prefix.mjs"
 sudo install -o root -g root -m 0644 "$SCRIPT_DIR/browser-network-guard.ts" "$AGENT_TOOLS_DIR/browser-network-guard.ts"
+# /home/$APP_USER is private (0700), so the unprivileged agent cannot read
+# configuration code from this checkout. Install a root-owned readable copy
+# alongside the agent tools instead of widening access to the user's home.
+sudo install -o root -g root -m 0644 "$SCRIPT_DIR/configure-openjarvis.py" "$AGENT_TOOLS_DIR/configure-openjarvis.py"
 sudo npm install --prefix "$AGENT_TOOLS_DIR" --omit=dev --ignore-scripts @playwright/mcp@0.0.83 camoufox@0.5.8 playwright-core@1.62.1
 sudo -u "$AGENT_USER" env HOME="$AGENT_HOME" "$AGENT_TOOLS_DIR/node_modules/.bin/camoufox" fetch
 sudo chown -R root:root "$AGENT_TOOLS_DIR"
@@ -86,7 +90,7 @@ if [[ "$HOST_CONTROL" == true ]]; then
 elif [[ "$BROWSER_CONTROL" == true ]]; then
   CONFIG_ARGS+=(--browser-control)
 fi
-sudo -u "$AGENT_USER" env HOME="$AGENT_HOME" "$SOURCE_DIR/.venv/bin/python" "$SCRIPT_DIR/configure-openjarvis.py" "${CONFIG_ARGS[@]}"
+sudo -u "$AGENT_USER" env HOME="$AGENT_HOME" "$SOURCE_DIR/.venv/bin/python" "$AGENT_TOOLS_DIR/configure-openjarvis.py" "${CONFIG_ARGS[@]}"
 
 ENV_FILE="$SCRIPT_DIR/../.env"
 if [[ ! -f "$ENV_FILE" ]]; then
