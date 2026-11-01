@@ -13,7 +13,7 @@ function Read-DotEnvValue {
   return $Default
 }
 
-$dashboardPort = [int](Read-DotEnvValue 'PORT' '8788')
+$dashboardPort = [int](Read-DotEnvValue 'PORT' '8787')
 $connection = Get-NetTCPConnection -LocalPort $dashboardPort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($connection) {
   $process = Get-CimInstance Win32_Process -Filter "ProcessId=$($connection.OwningProcess)"
@@ -23,7 +23,7 @@ if ($connection) {
   $commandMatchesProject = $normalizedCommand.Contains($normalizedRoot) -and $normalizedCommand.Contains('server.mjs')
   $healthMatchesProject = $false
   if (-not $commandMatchesProject -and $normalizedCommand -match '(?:^|\s)server\.mjs(?:\s|$)') {
-    $knownJarvisVersions = @('3.33.0', '3.34.0')
+    $knownJarvisVersions = @('3.33.0', '3.34.0', '3.35.0')
     try { $healthMatchesProject = (Invoke-RestMethod "http://127.0.0.1:$dashboardPort/api/health" -TimeoutSec 3).version -in $knownJarvisVersions } catch {}
   }
   if (-not $commandMatchesProject -and -not $healthMatchesProject) {

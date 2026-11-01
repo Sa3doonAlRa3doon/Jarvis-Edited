@@ -38,7 +38,7 @@ function Wait-Http {
 $node = Get-Command node -ErrorAction SilentlyContinue
 if (-not $node) { throw 'Node.js is required and was not found in PATH.' }
 
-$dashboardPort = [int](Read-DotEnvValue 'PORT' '8788')
+$dashboardPort = [int](Read-DotEnvValue 'PORT' '8787')
 $ollamaUrl = [uri](Read-DotEnvValue 'OLLAMA_BASE_URL' 'http://127.0.0.1:11434')
 $openJarvisUrl = [uri](Read-DotEnvValue 'OPENJARVIS_BASE_URL' 'http://127.0.0.1:8000')
 $openJarvisInstall = Read-DotEnvValue 'OPENJARVIS_INSTALL_DIR' (Join-Path $env:LOCALAPPDATA 'OpenJarvis\src')

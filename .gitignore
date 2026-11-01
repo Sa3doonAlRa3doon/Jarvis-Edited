@@ -1,6 +1,7 @@
 node_modules/
 .wake-venv/
 data/
+runtime-logs/
 .env
 npm-debug.log*
 *.wav

@@ -32,6 +32,15 @@ function fuzzyTermMatch(term, words) {
 
 export function normalizeSearchText(value) { return normalize(value); }
 
+const INTEGRATED_BROWSER_NAMES = new Set([
+  'camoufox', 'chrome', 'google chrome', 'chromium', 'edge', 'microsoft edge',
+  'firefox', 'mozilla firefox', 'safari', 'brave', 'brave browser', 'opera', 'vivaldi'
+]);
+
+export function isIntegratedBrowserName(value) {
+  return INTEGRATED_BROWSER_NAMES.has(normalize(value));
+}
+
 export function searchCatalog(items, query, { limit = 10 } = {}) {
   const normalizedQuery = normalize(query);
   const terms = normalizedQuery.split(' ').filter(Boolean);

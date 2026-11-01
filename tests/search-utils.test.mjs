@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeSearchText, searchCatalog } from '../public/search-utils.js';
+import { isIntegratedBrowserName, normalizeSearchText, searchCatalog } from '../public/search-utils.js';
 
 const catalog = [
   { id: 'docker', label: 'Docker Matrix', detail: 'Inspect live containers', keywords: 'compose services', priority: 40 },
@@ -20,6 +20,13 @@ test('finds synonyms and tolerates a small typing mistake', () => {
 
 test('preserves multilingual letters while normalizing search text', () => {
   assert.equal(normalizeSearchText('  يا جارفيس!  '), 'يا جارفيس');
+});
+
+test('keeps browser app requests on the integrated Camoufox browser', () => {
+  for (const name of ['Camoufox', 'Chrome', 'Google Chrome', 'Chromium', 'Firefox', 'Microsoft Edge', 'Safari', 'Brave', 'Opera', 'Vivaldi']) {
+    assert.equal(isIntegratedBrowserName(name), true, `${name} should stay in the integrated browser lane`);
+  }
+  assert.equal(isIntegratedBrowserName('Calculator'), false);
 });
 
 test('returns high-priority quick actions for an empty query', () => {

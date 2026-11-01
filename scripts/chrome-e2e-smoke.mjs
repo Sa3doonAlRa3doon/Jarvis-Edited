@@ -1,9 +1,11 @@
 import dotenv from 'dotenv';
 import { Camoufox } from 'camoufox';
+import fs from 'node:fs/promises';
 
 dotenv.config({ override: true, quiet: true });
 
 const baseUrl = String(process.env.JARVIS_BASE_URL || `http://127.0.0.1:${process.env.PORT || 8788}`).replace(/\/$/, '');
+const expectedVersion = JSON.parse(await fs.readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
 // Headless is the reliable default on Windows: hidden headful browser windows
 // can accept DOM reads but fail to deliver pointer input to modal controls.
 // Pass --headed only when a visible window is useful for debugging.
@@ -32,6 +34,20 @@ const browserOptions = {
 };
 
 function assert(condition, message) { if (!condition) throw new Error(message); }
+
+async function verifySmokeTarget() {
+  let health;
+  try {
+    const response = await fetch(`${baseUrl}/api/health`, { signal: AbortSignal.timeout(2_500) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    health = await response.json();
+  } catch (error) {
+    throw new Error(`Camoufox smoke target ${baseUrl} is unreachable or unhealthy. Set JARVIS_BASE_URL or PORT to the running JARVIS dashboard. (${String(error?.message || error).slice(0, 160)})`);
+  }
+  if (String(health?.version || '') !== expectedVersion) {
+    throw new Error(`Camoufox smoke target version ${String(health?.version || 'unknown')} does not match this checkout (${expectedVersion}). Point JARVIS_BASE_URL at the matching runnable build.`);
+  }
+}
 
 // Firefox can briefly invalidate the page's remote object while a camera or
 // display track is being stopped. Retry only the read-only test evaluation;
@@ -203,6 +219,7 @@ async function check(name, operation) {
   }
 }
 
+await verifySmokeTarget();
 const browser = await launchSmokeBrowser();
 let context;
 let authCookies = [];

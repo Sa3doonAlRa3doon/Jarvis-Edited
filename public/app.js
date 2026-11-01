@@ -1,7 +1,7 @@
 import { createKnowledgeGalaxy } from './galaxy.js';
 import { GestureController } from './gesture-controller.js';
 import { VoiceController } from './voice-controller.js';
-import { searchCatalog } from './search-utils.js';
+import { isIntegratedBrowserName, searchCatalog } from './search-utils.js';
 import { shouldApplyTranscriptToInput } from './voice-utils.js';
 import { hasWakeCommand, normalizeWakeCommand } from './wake-command.js';
 import { wakeCaptureLabel } from './wake-state.js';
@@ -993,6 +993,10 @@ async function sendPrompt(prompt, { browserGrant = '', appendUser = true, fromVo
   // match. Otherwise the request continues through the normal web/AI lane.
   const naturalDesktopMatch = text.match(/^\s*(?:please\s+)?(?:open|launch|start)\s+(?:the\s+)?["']?([^"']{1,120}?)["']?\s*$/i);
   if (naturalDesktopMatch && !/[/:?&=]/.test(naturalDesktopMatch[1])) {
+    if (isIntegratedBrowserName(naturalDesktopMatch[1])) {
+      appendMessage('assistant', 'JARVIS uses its integrated Camoufox browser. Ask me to open a website here and I will use that private browser.', 'CAMOUFOX');
+      return;
+    }
     const catalog = await json('/api/desktop/apps').catch(() => null);
     if (findDesktopApp(catalog, naturalDesktopMatch[1])) {
       await openDesktopAction(naturalDesktopMatch[1], { catalog }); return;

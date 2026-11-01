@@ -1,4 +1,8 @@
-# OpenJarvis Pi Command Center 3.34.0
+# OpenJarvis Pi Command Center 3.35.0
+
+### 3.35.0 Camoufox-only browser handoff
+
+- Natural requests to open a named browser are kept inside JARVIS's integrated Camoufox lane instead of launching a separate Chrome, Edge, Firefox, Safari, or other browser app. Requests to open ordinary desktop applications still use the existing approval-gated host-app flow.
 
 ### 3.34.0 Moonraker webcam configuration diagnosis
 
@@ -308,7 +312,7 @@ A private, Pi-first JARVIS visualization for OpenJarvis, Ollama, Docker, Google 
 
 - **Own-screen host status** — the private `/workspace` screen now reports the live host-app catalog count and platform beside OpenJarvis, Ollama, Google, OBS, and printer status. The count is produced from the same redacted allow-list used for guarded launches, so the workspace never exposes executable paths or shell commands.
 - **Fresh local snapshot** — `/api/workspace/status` refreshes the host catalog without caching secrets and keeps the bridge visibly degraded when no applications are discoverable.
-- **Natural app requests** — `open Calculator` and `launch Chrome` now use the host catalog only when a matching app exists; unmatched phrases continue to the normal web/research lane instead of being treated as arbitrary process commands.
+- **Camoufox-only browser requests** — `open Chrome`, `launch Firefox`, or similar browser-name requests stay in the integrated Camoufox browser lane; they cannot launch a separate browser. `open Calculator` and other ordinary apps still use the approval-gated host app catalog.
 
 ### 3.13 clean-room host app bridge
 
