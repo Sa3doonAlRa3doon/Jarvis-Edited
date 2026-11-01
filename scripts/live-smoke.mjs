@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import { assertLoopbackBaseUrl, validCameraSmokeFrame } from '../lib/live-smoke-utils.mjs';
 
 // A shell may already contain stale dashboard values. For this explicit live
 // test, the repository's local .env is the source of truth; never print it.
@@ -11,6 +12,7 @@ const requireModel = args.has('--require-model');
 const requireVision = args.has('--require-vision');
 const requireStirling = args.has('--require-stirling');
 const requireStirlingProcessing = args.has('--require-stirling-processing');
+const useRealCamera = args.has('--real-camera');
 const skipTts = args.has('--skip-tts');
 const publicPrompts = [
   ['weather', 'weather in Dubai'], ['air_quality', 'air quality in Dubai'], ['map', 'map of Dubai'], ['time', 'local time in Dubai'],
@@ -108,12 +110,40 @@ try {
     const status = await request('/api/vision/status', { headers: { cookie } });
     const runtime = status.body?.runtime || 'unknown';
     let analyze = null;
+    let frameBytes = 0;
+    let cameraDevice = '';
     if (runtime === 'ready') {
-      const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
-      analyze = await request('/api/screen/analyze', { method: 'POST', ...jsonBody({ image, prompt: 'Describe this approved test snapshot briefly.' }, { cookie }), timeoutMs: 180_000 });
+      let image;
+      let prompt = 'Describe this approved test snapshot briefly.';
+      if (useRealCamera) {
+        assertLoopbackBaseUrl(baseUrl);
+        const workspace = await request('/api/workspace/status', { headers: { cookie } });
+        cameraDevice = workspace.body?.camera?.selected || '';
+        const cameraLabel = workspace.body?.camera?.devices?.find((item) => item.id === cameraDevice)?.label || '';
+        if (workspace.status !== 200 || workspace.body?.camera?.source !== 'pi' || !cameraDevice || !/lenovo/i.test(cameraLabel)) {
+          throw new Error('The selected Pi Lenovo camera is required for --real-camera.');
+        }
+        const framePath = `${workspace.body.camera.frameEndpoint}?device=${encodeURIComponent(cameraDevice)}`;
+        const frame = await request(framePath, { headers: { cookie } });
+        const contentType = frame.headers.get('content-type')?.split(';')[0].toLowerCase() || '';
+        const bytes = Buffer.from(frame.body);
+        if (!validCameraSmokeFrame({ status: frame.status, contentType, byteLength: bytes.length })) {
+          throw new Error(`Selected Pi camera capture failed validation (HTTP ${frame.status}, ${bytes.length} bytes).`);
+        }
+        frameBytes = bytes.length;
+        image = `data:${contentType};base64,${bytes.toString('base64')}`;
+        prompt = `This is a single live frame from the user-selected local camera (${cameraLabel}). For a device test, say only whether a person is visible and briefly describe the scene. Do not identify the person or infer sensitive traits.`;
+      } else {
+        image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+      }
+      analyze = await request('/api/screen/analyze', { method: 'POST', ...jsonBody({ image, prompt }, { cookie }), timeoutMs: 180_000 });
     }
-    result.vision = { status: status.status, runtime, configured: Boolean(status.body?.configured), installed: Boolean(status.body?.installed), ready: Boolean(status.body?.ready), capabilityVerified: Boolean(status.body?.capabilityVerified), capabilitySource: status.body?.capabilitySource || '', model: status.body?.model || '', analyzeStatus: analyze?.status || 0, ok: status.status === 200 && (runtime !== 'ready' || analyze?.status === 200 && Boolean(analyze.body?.content)) };
-  } catch (error) { result.vision = { status: 0, runtime: 'error', configured: false, installed: false, model: '', analyzeStatus: 0, ok: false, error: safeError(error) }; }
+    const analysisPassed = analyze?.status === 200 && Boolean(analyze.body?.content);
+    const visionPassed = useRealCamera
+      ? runtime === 'ready' && Boolean(cameraDevice) && frameBytes >= 128 && analysisPassed
+      : runtime !== 'ready' || analysisPassed;
+    result.vision = { status: status.status, runtime, configured: Boolean(status.body?.configured), installed: Boolean(status.body?.installed), ready: Boolean(status.body?.ready), capabilityVerified: Boolean(status.body?.capabilityVerified), capabilitySource: status.body?.capabilitySource || '', model: status.body?.model || '', realCamera: useRealCamera, cameraSelected: Boolean(cameraDevice), frameBytes, analyzeStatus: analyze?.status || 0, ok: status.status === 200 && visionPassed };
+  } catch (error) { result.vision = { status: 0, runtime: 'error', configured: false, installed: false, model: '', realCamera: useRealCamera, cameraSelected: false, frameBytes: 0, analyzeStatus: 0, ok: false, error: safeError(error) }; }
   try {
     const link = await request('/api/obs/overlay/link?theme=jarvis', { headers: { cookie } });
     const overlayUrl = typeof link.body?.url === 'string' ? new URL(link.body.url) : null;
