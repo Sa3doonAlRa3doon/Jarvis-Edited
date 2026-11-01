@@ -12,6 +12,7 @@ const expectedVersion = JSON.parse(await fs.readFile(new URL('../package.json', 
 const headless = process.argv.includes('--headless') || !process.argv.includes('--headed');
 const checkVisionUi = process.argv.includes('--vision-ui');
 const fakeMedia = process.argv.includes('--fake-media');
+const noDisplay = process.argv.includes('--no-display');
 const captureLabel = fakeMedia ? 'Synthetic' : 'Real';
 const checks = [];
 const observations = {};
@@ -209,6 +210,11 @@ async function check(name, operation) {
   if (process.env.JARVIS_SMOKE_PROGRESS === '1') console.error(`SMOKE START // ${name}`);
   try {
     const detail = await operation();
+    if (detail?.skipped === true) {
+      checks.push({ name, ok: null, skipped: true, detail });
+      if (process.env.JARVIS_SMOKE_PROGRESS === '1') console.error(`SMOKE SKIP // ${name} // ${detail.reason || 'unsupported in this environment'}`);
+      return;
+    }
     checks.push({ name, ok: true, detail: detail ?? undefined });
     if (process.env.JARVIS_SMOKE_PROGRESS === '1') console.error(`SMOKE PASS // ${name}`);
   } catch (error) {
@@ -825,6 +831,7 @@ try {
   });
 
   await check('Private workspace restores its agent or idle view after local share', async () => {
+    if (noDisplay) return { skipped: true, reason: 'Pi Camoufox is headless and has no desktop display to share; the laptop real-display path is tested separately.' };
     // Keep the display-stream probe in a fresh workspace document. Camoufox
     // can invalidate a MediaStream remote object after the preview/analytics
     // page has changed views; the new document still exercises the real UI
@@ -931,6 +938,7 @@ try {
   });
 
   await check('Settings screen schedules one bounded Escape retry', async () => {
+    if (noDisplay) return { skipped: true, reason: 'Pi Camoufox is headless and cannot capture a desktop display; the laptop retry path is tested separately.' };
     await openSettingsSection(page, 'screen');
     // Set up a deterministic page-local display stream first. The actual
     // button activation is performed by Playwright below so Firefox sees a
@@ -1139,12 +1147,16 @@ try {
     return { mode: payload.mode, externalConnected: payload.externalConnected, removed };
   });
 
-  await check(`Settings sensor calibration opens ${captureLabel.toLowerCase()} camera and mic`, async () => {
-    await openSettingsSection(page, 'devices');
-    await page.locator('#source-browser').check({ force: true });
+  await check('Settings sensor calibration opens the configured camera and microphone', async () => {
+    const source = await page.locator('#source').evaluate((node) => node.value);
+    const piSource = source === 'pi';
+    if (!piSource) {
+      await openSettingsSection(page, 'devices');
+      await page.locator('#source-browser').check({ force: true });
+    }
     await openSettingsSection(page, 'sensors');
     await page.locator('#start-sensors').waitFor({ state: 'visible' });
-    if (fakeMedia) return { skipped: true, media: 'Synthetic', reason: 'physical sensor acceptance runs in the real Camoufox profile' };
+    if (fakeMedia && !piSource) return { skipped: true, media: 'Synthetic', reason: 'physical sensor acceptance runs in the real Camoufox profile' };
     await releaseDashboardMedia(page);
     await page.evaluate(() => {
       // A prior screen-share acceptance check may leave a local preview or a
@@ -1173,6 +1185,18 @@ try {
     }));
     assert(started, `sensor calibration did not start: ${JSON.stringify(startup)}`);
     const sensor = await page.evaluate(() => ({ state: document.querySelector('#sensor-state')?.textContent?.trim(), videoWidth: document.querySelector('#camera-video')?.videoWidth || 0, mic: document.querySelector('#mic-readout')?.textContent?.trim() || '', evidence: document.querySelector('#voice-evidence')?.textContent?.trim() || '', snr: document.querySelector('#voice-snr')?.textContent?.trim() || '', spectrum: document.querySelector('#voice-spectrum')?.textContent?.trim() || '', epoch: document.querySelector('#voice-epoch')?.textContent?.trim() || '' }));
+    if (piSource) {
+      const piSensor = await page.evaluate(() => ({
+        state: document.querySelector('#sensor-state')?.textContent?.trim(),
+        cameraWidth: document.querySelector('#pi-camera-image')?.naturalWidth || 0,
+        mic: document.querySelector('#mic-readout')?.textContent?.trim() || '',
+        evidence: document.querySelector('#voice-evidence')?.textContent?.trim() || ''
+      }));
+      assert(piSensor.state === 'CALIBRATING' && piSensor.cameraWidth > 0, `Pi camera did not return a frame: ${JSON.stringify(piSensor)}`);
+      assert(/\d+%/.test(piSensor.mic) && /PI (LEVEL|GATE OPEN|GATE HOLD)/.test(piSensor.evidence), `Pi microphone telemetry unavailable: ${JSON.stringify(piSensor)}`);
+      await page.locator('#stop-sensors').click({ force: true });
+      return { source: 'pi', cameraWidth: piSensor.cameraWidth, mic: piSensor.mic, evidence: piSensor.evidence };
+    }
     assert(sensor.state === 'CALIBRATING' && sensor.videoWidth > 0, JSON.stringify(sensor));
     assert(sensor.evidence && sensor.snr && sensor.epoch !== '', `voice diagnostics missing ${JSON.stringify(sensor)}`);
     assert(sensor.spectrum && sensor.spectrum !== '--', `spectrum gate diagnostics missing ${JSON.stringify(sensor)}`);
@@ -1292,13 +1316,14 @@ try {
   });
 
   observations.pageErrors = pageErrors;
-  const passed = checks.filter((item) => item.ok).length;
-  const failed = checks.length - passed;
-  const failures = checks.filter((item) => !item.ok).map((item) => ({ name: item.name, error: item.error }));
-  console.log(JSON.stringify({ camoufox: true, baseUrl, checks, observations, summary: { passed, failed, pageErrors: pageErrors.length } }, null, 2));
+  const passed = checks.filter((item) => item.ok === true).length;
+  const skipped = checks.filter((item) => item.skipped === true).length;
+  const failed = checks.filter((item) => item.ok === false).length;
+  const failures = checks.filter((item) => item.ok === false).map((item) => ({ name: item.name, error: item.error }));
+  console.log(JSON.stringify({ camoufox: true, baseUrl, checks, observations, summary: { passed, skipped, failed, pageErrors: pageErrors.length } }, null, 2));
   // Keep a compact verdict after the large JSON payload so the bounded
   // Architect/CRITIC evidence tail always retains the failing check names.
-  console.log(`CAMOUFOX SUMMARY // passed=${passed} failed=${failed} pageErrors=${pageErrors.length}`);
+  console.log(`CAMOUFOX SUMMARY // passed=${passed} skipped=${skipped} failed=${failed} pageErrors=${pageErrors.length}`);
   if (failures.length || pageErrors.length) console.error(`CAMOUFOX FAILURES // ${JSON.stringify({ failures, pageErrors })}`);
   process.exitCode = failed || pageErrors.length ? 1 : 0;
 } finally {
