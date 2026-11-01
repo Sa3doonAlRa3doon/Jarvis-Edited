@@ -63,7 +63,7 @@ const state = {
   chart: { cpu: Array(52).fill(0), ram: Array(52).fill(0), gpu: Array(52).fill(0) },
   neuralEnergy: 0.22, coreMode: 'system', voiceState: 'standby', voiceLevel: 0, searchResults: [], searchSelection: 0,
   refreshFastPending: false, refreshSlowPending: false, pendingSpeech: null, audioPriming: false, wakeSession: 0, thinkingSound: null,
-  voiceCapture: { active: false, phase: 'idle', deadline: 0, ticker: 0, closeTimer: 0 },
+  voiceCapture: { active: false, phase: 'idle', source: '', deadline: 0, ticker: 0, closeTimer: 0 },
   agentLive: { pending: false, timer: 0, frameVersion: 0 }, emailDraft: null, browserRequest: null, artifact: null, missionPlan: null
 };
 
@@ -342,7 +342,7 @@ function startVoiceCaptureCountdown(timeoutMs = VOICE_COMMAND_TIMEOUT_MS) {
 
 function openVoiceCommandWindow() {
   if (ui.operationDialog?.open || ui.emailDialog?.open) return false;
-  stopVoiceCaptureTimers(); state.voiceCapture.active = true; state.voiceCapture.phase = 'acknowledging';
+  stopVoiceCaptureTimers(); state.voiceCapture.active = true; state.voiceCapture.phase = 'acknowledging'; state.voiceCapture.source = '';
   if (!ui.searchDialog.open) {
     try { ui.searchDialog.showModal(); }
     catch { ui.searchDialog.setAttribute('open', ''); }
@@ -600,6 +600,27 @@ function renderStatus(payload) {
   const captureAt = Date.parse(capture?.at || '');
   const captureFresh = capture && (capture.state === 'warming' || capture.state === 'listening' || (capture.state === 'complete' && Number.isFinite(captureAt) && Date.now() - captureAt < 8_000));
   ui.wakeState.textContent = captureFresh ? (wakeCaptureLabel(capture) || 'CAPTURING') : payload.wake?.ready ? 'LISTENING' : payload.wake?.configured ? 'STARTING' : 'STANDBY';
+  if (state.voiceCapture.active && state.voiceCapture.source === 'pi') {
+    if (capture?.state === 'warming') {
+      state.voiceCapture.phase = 'warming';
+      ui.voiceCaptureState.textContent = 'PI MIC WARMING';
+      ui.voiceCaptureTranscript.textContent = 'Wake detected. Speak your question after the acknowledgement.';
+      ui.searchMode.textContent = 'VOICE SESSION // PI MIC';
+    } else if (capture?.state === 'listening') {
+      state.voiceCapture.phase = 'listening';
+      ui.voiceCaptureState.textContent = 'PI MIC LISTENING';
+      ui.voiceCaptureTranscript.textContent = 'JARVIS is listening through the Raspberry Pi microphone.';
+      ui.searchMode.textContent = 'VOICE SESSION // PI MIC LIVE';
+    } else if (capture?.state === 'timeout') {
+      state.voiceCapture.source = '';
+      updateVoiceCapture({ state: 'timeout' });
+    } else if (capture?.state === 'error') {
+      state.voiceCapture.source = '';
+      updateVoiceCapture({ state: 'error' });
+      ui.voiceCaptureState.textContent = 'PI SPEECH ERROR';
+      ui.voiceCaptureTranscript.textContent = payload.wake?.error || 'The Raspberry Pi speech recognizer stopped unexpectedly.';
+    }
+  }
   state.neuralEnergy = healthy ? .42 : .18;
   renderOperationStatus(payload.operations);
   refreshSearchIfOpen();
@@ -925,13 +946,13 @@ async function unlockAudioFromGesture() {
     const pending = state.pendingSpeech; state.pendingSpeech = null;
     if (pending?.text) {
       const played = await speak(pending.text, { pendingContext: pending.context });
-      if (played && pending.context?.kind === 'wake') await beginWakeCommandCapture(pending.context.session, pending.context.command);
+      if (played && pending.context?.kind === 'wake') await beginWakeCommandCapture(pending.context.session, pending.context.command, pending.context.source);
     }
   } catch {}
   finally { state.audioPriming = false; }
 }
 
-async function beginWakeCommandCapture(session, initialCommand = '') {
+async function beginWakeCommandCapture(session, initialCommand = '', source = '') {
   if (session !== state.wakeSession || !state.voiceCapture.active) return;
   // The Pi listener can finish a bounded local Vosk sentence before the wake
   // event reaches the dashboard. Route that verified command immediately;
@@ -941,6 +962,15 @@ async function beginWakeCommandCapture(session, initialCommand = '') {
   if (hasWakeCommand(directCommand)) {
     updateVoiceCommandTranscript(directCommand, true);
     handleVoiceCommand(directCommand);
+    return;
+  }
+  if (source === 'pi') {
+    state.voiceCapture.source = 'pi';
+    state.voiceCapture.phase = 'warming';
+    ui.voiceCaptureState.textContent = 'PI MIC WARMING';
+    ui.voiceCaptureTranscript.textContent = 'Wake detected. Speak your question after the acknowledgement.';
+    ui.searchMode.textContent = 'VOICE SESSION // PI MIC';
+    startVoiceCaptureCountdown(Number(state.status?.wake?.commandCapture?.timeoutMs) || VOICE_COMMAND_TIMEOUT_MS);
     return;
   }
   try {
@@ -966,26 +996,28 @@ async function beginConversationCapture() {
   ui.voiceCaptureTranscript.textContent = 'Ask another question without saying Hey Jarvis.';
   ui.searchMode.textContent = 'VOICE SESSION // FOLLOW-UP';
   try {
-    await beginWakeCommandCapture(session);
+    const source = state.settings?.source === 'pi' && state.settings?.piMicrophone ? 'pi' : 'browser';
+    await beginWakeCommandCapture(session, '', source);
     return session === state.wakeSession && state.voiceCapture.active;
   } catch { return false; }
 }
 
 async function handleWake(event) {
   const session = ++state.wakeSession; const initialCommand = String(event?.detail?.command || '').trim();
+  const source = event?.detail?.source === 'pi' || (state.settings?.source === 'pi' && state.settings?.piMicrophone) ? 'pi' : 'browser';
   if (!openVoiceCommandWindow()) return;
   ui.wakeFlash.classList.remove('active'); void ui.wakeFlash.offsetWidth; ui.wakeFlash.classList.add('active');
   ui.wakeState.textContent = event?.detail?.kind === 'double_clap' ? 'CLAP' : event?.detail?.kind === 'push_to_talk' ? 'PTT' : 'HEARD'; state.neuralEnergy = 1;
   updateVoiceVisual('armed', 1);
-  const context = { kind: 'wake', session, command: initialCommand };
+  const context = { kind: 'wake', session, command: initialCommand, source };
   const wakeTimeout = Number(state.config?.fishWakeTimeoutMs) || FISH_TTS_WAKE_TIMEOUT_MS;
-  const played = isEmbeddedPreview() || !state.settings?.wakeResponse ? true : await speak(state.settings.wakeResponse, { pendingContext: context, fishTimeoutMs: wakeTimeout });
+  const played = Boolean(initialCommand) || isEmbeddedPreview() || !state.settings?.wakeResponse ? true : await speak(state.settings.wakeResponse, { pendingContext: context, fishTimeoutMs: wakeTimeout });
   if (session !== state.wakeSession || !state.voiceCapture.active) return;
   if (!played && document.body.dataset.ttsState === 'blocked') {
     ui.voiceCaptureState.textContent = 'TAP TO ENABLE AUDIO'; ui.voiceCaptureTranscript.textContent = 'Tap anywhere once. JARVIS will reply, then begin listening.';
     ui.searchMode.textContent = 'VOICE SESSION // AUDIO LOCKED'; ui.searchCount.textContent = 'WAIT'; return;
   }
-  await beginWakeCommandCapture(session, initialCommand);
+  await beginWakeCommandCapture(session, initialCommand, source);
   setTimeout(() => { ui.wakeState.textContent = state.status?.wake?.ready ? 'LISTENING' : 'STANDBY'; }, 2200);
 }
 
