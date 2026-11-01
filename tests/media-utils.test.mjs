@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  deviceIdConstraint, deviceSelectionAvailability, friendlyMediaError, getUserMediaWithFallback, normalizeDeviceId
+  deviceIdConstraint, deviceSelectionAvailability, friendlyMediaError, getUserMediaWithFallback, normalizeDeviceId, reconcileDeviceSelection
 } from '../public/media-utils.js';
 
 test('removes invalid serialized device sentinels', () => {
@@ -29,6 +29,13 @@ test('detects a disconnected saved camera or microphone without exposing raw inv
   const defaulted = deviceSelectionAvailability({ cameras: [], microphones: [] });
   assert.equal(defaulted.cameraAvailable, true);
   assert.equal(defaulted.microphoneAvailable, true);
+});
+
+test('reconciles browser-profile-specific saved devices to default when a real inventory is available', () => {
+  assert.deepEqual(reconcileDeviceSelection('cam-old-profile', [{ deviceId: 'cam-current-profile' }]), { deviceId: '', stale: true });
+  assert.deepEqual(reconcileDeviceSelection('mic-current-profile', [{ deviceId: 'mic-current-profile' }]), { deviceId: 'mic-current-profile', stale: false });
+  assert.deepEqual(reconcileDeviceSelection('cam-old-profile', []), { deviceId: 'cam-old-profile', stale: false });
+  assert.deepEqual(reconcileDeviceSelection('', [{ deviceId: 'cam-current-profile' }]), { deviceId: '', stale: false });
 });
 
 test('retries once with browser defaults when a saved device is stale', async () => {

@@ -30,6 +30,19 @@ export function deviceSelectionAvailability({ selectedCamera = '', selectedMicro
   };
 }
 
+/**
+ * A saved browser device id can become profile-specific or stale after moving
+ * JARVIS to another browser/OS account. Keep it if the browser has not exposed
+ * any usable ids yet; otherwise return to the browser default when it is gone.
+ */
+export function reconcileDeviceSelection(selectedDevice, devices = []) {
+  const selected = normalizeDeviceId(selectedDevice);
+  if (!selected) return { deviceId: '', stale: false };
+  const ids = new Set((Array.isArray(devices) ? devices : []).map((item) => normalizeDeviceId(item?.deviceId || item?.id || item)).filter(Boolean));
+  if (!ids.size || ids.has(selected)) return { deviceId: selected, stale: false };
+  return { deviceId: '', stale: true };
+}
+
 function withoutExactDevice(track) {
   if (!track || track === true || typeof track !== 'object') return track;
   const { deviceId: _deviceId, ...fallback } = track;

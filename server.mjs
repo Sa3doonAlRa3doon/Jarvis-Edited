@@ -45,6 +45,7 @@ import { boundedTtsHttpStatus, isRetryableTtsStatus, ttsFailureMessage, ttsRetry
 import { buildStatsDeck, summarizeStatsDeck, summarizeVoiceDiagnostics } from './lib/stats-deck.mjs';
 import { capturePublicBrowserPreview } from './lib/browser-preview.mjs';
 import { camoufoxEngine, closeCamoufoxHostContext } from './lib/camoufox-browser.mjs';
+import { closePublicNetworkProxy } from './lib/public-network-proxy.mjs';
 import { localStatusIntent, localStatusRoute, summarizeLocalStatus } from './lib/local-response.mjs';
 import { createPipelineRun, normalizePipelineRequest, redactRun } from './lib/engineering-pipeline.mjs';
 import { runEngineeringPipeline } from './scripts/engineering-pipeline.mjs';
@@ -1987,6 +1988,6 @@ const server = app.listen(port, host, async () => {
 const monitorTimer = setInterval(() => void monitorTick(), 12_000);
 const printerTimer = setInterval(() => void refreshPrinterStatus(), 2_000);
 async function shutdown() {
-  clearInterval(monitorTimer); clearInterval(printerTimer); googleAuthFlow.stop(); await routineEngine.stop(); await openJarvisLive.stop(); await stopWakeListener(); await closeCamoufoxHostContext(); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 3000).unref();
+  clearInterval(monitorTimer); clearInterval(printerTimer); googleAuthFlow.stop(); await routineEngine.stop(); await openJarvisLive.stop(); await stopWakeListener(); await closeCamoufoxHostContext(); await closePublicNetworkProxy(); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 3000).unref();
 }
 process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);

@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { browserRequestToUpstream, browserResponseToClient, MCP_TOOL_PREFIX } from './mcp-prefix.mjs';
+import { createPublicNetworkProxy } from '../lib/public-network-proxy.mjs';
 import { listInstalled } from 'camoufox';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -73,6 +74,15 @@ if (process.argv.includes('--check')) {
   process.exit(0);
 }
 
+// The browser's route guard is useful defense in depth, but only the proxy
+// controls the address used by the actual socket. It resolves each request,
+// rejects private or mixed answers, and connects to that same vetted IP.
+// Playwright MCP's Firefox CLI supports a proxy URL but not proxy credentials.
+// Bind the short-lived proxy to loopback on an unpredictable port and permit
+// this local-only client to use it without credentials; destination pinning
+// and private-address rejection remain enforced at the proxy socket boundary.
+const publicProxy = await createPublicNetworkProxy({ allowUnauthenticated: true });
+args.push(`--proxy-server=${publicProxy.unauthenticatedCliProxyUrl}`);
 const child = spawn(process.execPath, args, { cwd: workspace, env: process.env, stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true });
 const captureAfter = new Map();
 const heldResponses = new Map();
@@ -164,6 +174,7 @@ forwardChildLines(child.stdout);
 child.stdin.on('error', () => {});
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => child.kill(signal));
 child.once('exit', (code, signal) => {
+  void publicProxy.close();
   clearTimeout(liveFrameCleanupTimer);
   for (const held of heldResponses.values()) {
     clearTimeout(held.replyTimer);

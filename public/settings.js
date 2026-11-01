@@ -2,7 +2,7 @@ import {
   DEFAULT_VOICE_VOCABULARY, normalizeVocabulary, normalizeWakePhrases, recommendVoiceSettings, selectRecognitionAlternative
 } from './voice-utils.js';
 import { analyzeVoiceFrame, analyzeVoiceSpectrum, clearVoiceProfile, configureRecognitionCapabilities, isSpeechBandEligible, loadVoiceProfile, saveVoiceProfile, stabilizeNoiseFloor, startRecognitionWithTrack } from './voice-controller.js';
-import { deviceIdConstraint, deviceSelectionAvailability, friendlyMediaError, getUserMediaWithFallback, normalizeDeviceId } from './media-utils.js';
+import { deviceIdConstraint, deviceSelectionAvailability, friendlyMediaError, getUserMediaWithFallback, normalizeDeviceId, reconcileDeviceSelection } from './media-utils.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -202,7 +202,7 @@ function searchControls() {
   ui.searchEmpty.hidden = matches > 0;
 }
 
-async function enumerateBrowserDevices() {
+async function enumerateBrowserDevices({ requestPermission = false } = {}) {
   if (!navigator.mediaDevices?.enumerateDevices) {
     ui.browserDeviceCount.textContent = 'UNAVAILABLE';
     return { cameraAvailable: false, microphoneAvailable: false, cameraCount: 0, microphoneCount: 0 };
@@ -210,30 +210,44 @@ async function enumerateBrowserDevices() {
   let devices = await navigator.mediaDevices.enumerateDevices();
   let cameras = devices.filter((item) => item.kind === 'videoinput');
   let microphones = devices.filter((item) => item.kind === 'audioinput');
+  // Firefox lists generic devices before permission is granted, but hides
+  // their IDs. An explicit rescan should request the missing kind even when
+  // those placeholder rows already exist; otherwise saved selections can
+  // never be matched to a real camera or microphone.
+  const cameraIdsMissing = !cameras.some((item) => normalizeDeviceId(item.deviceId));
+  const microphoneIdsMissing = !microphones.some((item) => normalizeDeviceId(item.deviceId));
   // Device labels and even the fake-browser device list can briefly disappear
   // after another dashboard view releases a track. A user-initiated rescan may
   // open each missing kind once to refresh permission state, then enumerate
   // again. Tracks are always stopped before returning to the settings UI.
-  for (const constraints of [
-    cameras.length ? null : { video: true, audio: false },
-    microphones.length ? null : { video: false, audio: true }
-  ].filter(Boolean)) {
+  for (const constraints of (requestPermission ? [
+    cameraIdsMissing ? { video: true, audio: false } : null,
+    microphoneIdsMissing ? { video: false, audio: true } : null
+  ].filter(Boolean) : [])) {
     let stream;
     try { stream = await getUserMediaWithFallback(navigator.mediaDevices, constraints); }
     catch {}
     finally { stream?.stream?.getTracks?.().forEach((track) => track.stop()); }
   }
-  if (!cameras.length || !microphones.length) {
+  if ((requestPermission && (cameraIdsMissing || microphoneIdsMissing)) || !cameras.length || !microphones.length) {
     devices = await navigator.mediaDevices.enumerateDevices();
     cameras = devices.filter((item) => item.kind === 'videoinput');
     microphones = devices.filter((item) => item.kind === 'audioinput');
   }
   const draft = currentSettings();
-  fillSelect(ui.browserCamera, cameras.map((item, index) => ({ id: item.deviceId, label: item.label || `Browser camera ${index + 1}` })), 'Default browser camera', draft.browserCamera);
-  fillSelect(ui.browserMicrophone, microphones.map((item, index) => ({ id: item.deviceId, label: item.label || `Browser microphone ${index + 1}` })), 'Default browser microphone', draft.browserMicrophone);
-  renderMicrophoneProfile(draft.browserMicrophone);
+  const cameraSelection = reconcileDeviceSelection(draft.browserCamera, cameras);
+  const microphoneSelection = reconcileDeviceSelection(draft.browserMicrophone, microphones);
+  const repairedCamera = cameraSelection.stale;
+  const repairedMicrophone = microphoneSelection.stale;
+  fillSelect(ui.browserCamera, cameras.map((item, index) => ({ id: item.deviceId, label: item.label || `Browser camera ${index + 1}` })), 'Default browser camera', cameraSelection.deviceId);
+  fillSelect(ui.browserMicrophone, microphones.map((item, index) => ({ id: item.deviceId, label: item.label || `Browser microphone ${index + 1}` })), 'Default browser microphone', microphoneSelection.deviceId);
+  renderMicrophoneProfile(microphoneSelection.deviceId);
+  if (repairedCamera || repairedMicrophone) updateDirty();
   ui.browserDeviceCount.textContent = `${cameras.length} CAM / ${microphones.length} MIC`;
-  return deviceSelectionAvailability({ selectedCamera: draft.browserCamera, selectedMicrophone: draft.browserMicrophone, cameras, microphones });
+  return {
+    ...deviceSelectionAvailability({ selectedCamera: cameraSelection.deviceId, selectedMicrophone: microphoneSelection.deviceId, cameras, microphones }),
+    repairedCamera, repairedMicrophone
+  };
 }
 
 let browserDeviceChangeTimer = 0;
@@ -249,6 +263,9 @@ async function refreshBrowserDevicesAfterChange() {
       setMessage('A selected camera or microphone was disconnected. Sensors stopped safely; choose a new device and restart calibration.');
     } else if (state.sensorsActive) {
       setMessage('Browser device list updated. Active tracks remain unchanged until you restart calibration.');
+    } else if (availability.repairedCamera || availability.repairedMicrophone) {
+      const repaired = [availability.repairedCamera ? 'camera' : '', availability.repairedMicrophone ? 'microphone' : ''].filter(Boolean).join(' and ');
+      setMessage(`Saved ${repaired} selection was unavailable in this browser profile. JARVIS switched to the browser default; choose a connected device and save if you want a specific one.`);
     } else {
       setMessage('Browser camera and microphone list updated automatically.');
     }
@@ -512,9 +529,13 @@ async function testTalkback() {
   speechSynthesis.speak(utterance);
 }
 
-async function loadDeviceLists(selections = currentSettings()) {
+async function loadDeviceLists(selections = currentSettings(), { requestBrowserPermission = false } = {}) {
   ui.refreshDevices.disabled = true;
   ui.refreshDevices.textContent = 'SCANNING…';
+  // Start browser enumeration during the user's click activation before the
+  // slower Pi-device request. Firefox may otherwise suppress a needed camera
+  // or microphone permission prompt after that network await.
+  const browserInventory = enumerateBrowserDevices({ requestPermission: requestBrowserPermission }).catch((error) => ({ error }));
   try {
     const draft = selections;
     state.media = await json('/api/media/devices');
@@ -523,8 +544,12 @@ async function loadDeviceLists(selections = currentSettings()) {
     fillSelect(ui.piCamera, cameras, 'Select /dev/video*', draft.piCamera);
     fillSelect(ui.piMicrophone, microphones, 'Select plughw device', draft.piMicrophone);
     ui.piDeviceCount.textContent = `${cameras.length} CAM / ${microphones.length} MIC`;
-    await enumerateBrowserDevices();
-    setMessage('Device buses rescanned. Selections were preserved where available.');
+    const browserAvailability = await browserInventory;
+    if (browserAvailability.error) throw browserAvailability.error;
+    if (browserAvailability.repairedCamera || browserAvailability.repairedMicrophone) {
+      const repaired = [browserAvailability.repairedCamera ? 'camera' : '', browserAvailability.repairedMicrophone ? 'microphone' : ''].filter(Boolean).join(' and ');
+      setMessage(`Saved ${repaired} selection was unavailable in this browser profile. JARVIS switched to the browser default; choose a connected device and save if you want a specific one.`);
+    } else setMessage('Device buses rescanned. Selections were preserved where available.');
   } catch (error) {
     ui.piDeviceCount.textContent = 'SCAN ERROR';
     setMessage(`Device scan failed: ${error.message}`);
@@ -1375,7 +1400,7 @@ function onFormInput(event) {
 
 for (const button of $$('.settings-nav-list button')) button.addEventListener('click', () => activateSection(button.dataset.target));
 ui.search.addEventListener('input', searchControls);
-ui.refreshDevices.addEventListener('click', () => void loadDeviceLists());
+ui.refreshDevices.addEventListener('click', () => void loadDeviceLists(currentSettings(), { requestBrowserPermission: true }));
 navigator.mediaDevices?.addEventListener?.('devicechange', queueBrowserDeviceRefresh);
 ui.resetMicrophoneProfile?.addEventListener('click', () => {
   const deviceId = state.profileDevice || ui.browserMicrophone?.value || '';
