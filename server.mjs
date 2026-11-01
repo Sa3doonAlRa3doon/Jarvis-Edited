@@ -47,6 +47,7 @@ import { capturePublicBrowserPreview } from './lib/browser-preview.mjs';
 import { camoufoxEngine, closeCamoufoxHostContext } from './lib/camoufox-browser.mjs';
 import { closePublicNetworkProxy } from './lib/public-network-proxy.mjs';
 import { localStatusIntent, localStatusRoute, summarizeLocalStatus } from './lib/local-response.mjs';
+import { selectVisionModel } from './lib/vision-model-profile.mjs';
 import { createPipelineRun, normalizePipelineRequest, redactRun } from './lib/engineering-pipeline.mjs';
 import { runEngineeringPipeline } from './scripts/engineering-pipeline.mjs';
 import {
@@ -140,7 +141,10 @@ let obsOverlayToken = '';
 const helperPath = process.env.OPS_HELPER_PATH || '/usr/local/sbin/jarvis-service-control';
 const models = resolveModelMap(process.env);
 const primaryModel = models.primary || resolvePrimaryModel(process.env);
-const visionModel = cleanText(process.env.JARVIS_VISION_MODEL || process.env.VISION_MODEL || '', 120);
+const visionModel = selectVisionModel({
+  configured: process.env.JARVIS_VISION_MODEL || process.env.VISION_MODEL || '',
+  totalRamBytes: os.totalmem()
+}).model;
 const browserLiveFrameFile = process.env.JARVIS_BROWSER_LIVE_FRAME_FILE || path.join(process.env.OPENJARVIS_WORKSPACE || path.join(os.homedir(), '.jarvis-workspace'), 'jarvis-live.png');
 const openJarvisLive = new OpenJarvisLiveBridge({
   baseUrl: openJarvisUrl,
