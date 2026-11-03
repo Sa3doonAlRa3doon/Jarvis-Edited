@@ -1,16 +1,16 @@
 # JARVIS reference projects
 
-This page records projects used for design research. It is not a bundle of their source code. The current service split and integrations in this repository are implemented here; this change does not copy source files, assets, or model weights from these projects.
+These references informed actual integrations and code reuse where compatible. See [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md) for retained third-party notices.
 
 ## Sources and reuse notes
 
 | Source | What it is useful for | License / reuse decision |
 | --- | --- | --- |
 | [Jarvis voice assistant gist](https://gist.github.com/brayn003/e3367283d1137e1fc237a685fdcae2dc) | A small example of spoken acknowledgement and explicit command routing. | No license is shown on the gist page, so its code is not copied. Its sample calls `recognize_google`, which sends audio for cloud recognition and does not fit JARVIS's local-first Pi microphone path. |
-| [OpenJarvis repository](https://github.com/open-jarvis/openjarvis) | Agent, engine, tool, memory, and orchestration patterns. | Apache-2.0. We use the project's documented interfaces and concepts; no source code from it is copied by this change. If code is reused later, preserve its license and notices and mark modified files. |
-| [OpenJarvis documentation](https://open-jarvis.github.io/OpenJarvis/) | Official architecture, API, agent, and user guides for the OpenJarvis engine already connected to JARVIS. | Documentation reference; no documentation text is copied into the application. |
-| [Sukeesh/Jarvis](https://github.com/sukeesh/Jarvis) | A personal-assistant command catalog and Linux/macOS implementation example. | MIT. No code is copied by this change. Any later reuse must retain the copyright and license notice. |
-| [Priler/jarvis](https://github.com/Priler/jarvis) | Offline voice architecture examples using Rust/Tauri, Vosk, and wake-word components. | CC BY-NC-SA 4.0. No code is copied. This license is non-commercial and share-alike, so its code must not be mixed into this project without an explicit compatible distribution decision. |
+| [OpenJarvis repository](https://github.com/open-jarvis/openjarvis) | Local model, agent, and orchestration runtime. | Apache-2.0. The Pi installer installs and runs the actual upstream project as JARVIS's private API/event service; JARVIS sends requests to its local API. Upstream source remains separately installed and its license is retained there. |
+| [OpenJarvis documentation](https://open-jarvis.github.io/OpenJarvis/) | Official API and agent-runtime reference. | Used to connect to the upstream runtime and event stream; no documentation passages are copied. |
+| [Sukeesh/Jarvis](https://github.com/sukeesh/Jarvis) | Its `PluginStorage` pattern for registering and retrieving nested assistant plugins. | MIT. Adapted into `lib/plugin-storage.mjs` and used by `lib/agent-router.mjs` to register specialist domains. The port adds validated identifiers, defensive enumeration, copy-on-transfer, and startup-only in-process registration. The original MIT notice is retained in `third_party/licenses/sukeesh-jarvis-MIT.txt`. |
+| [Priler/jarvis](https://github.com/Priler/jarvis) | Offline voice architecture and voice activity detection. | CC BY-NC-SA 4.0. The inspected energy detector is a fixed RMS threshold; JARVIS already uses an adaptive noise floor, SNR, speech-shape, spectrum, and wake-model gates, so copying it would reduce the current mic gate's evidence. No source from this repository is included. |
 
 ## Applied design direction
 
