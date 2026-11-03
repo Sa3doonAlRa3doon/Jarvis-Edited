@@ -18,6 +18,17 @@ test('tool-enabled OpenJarvis messages exclude all client-supplied history', () 
   assert.deepEqual(safeConversationHistory(history, { toolFree: true }), history);
 });
 
+test('tool-free history keeps the newest complete turns inside a total context budget', () => {
+  const history = [
+    { role: 'user', content: 'older1' },
+    { role: 'assistant', content: 'older2' },
+    { role: 'user', content: 'newest3' },
+    { role: 'assistant', content: 'answer4' }
+  ];
+  assert.deepEqual(safeConversationHistory(history, { toolFree: true, maxMessageChars: 7, maxTotalChars: 14 }), history.slice(-2));
+  assert.deepEqual(safeConversationHistory(history, { toolFree: true, maxMessageChars: 7, maxTotalChars: 14, maxMessages: 1 }), history.slice(-1));
+});
+
 test('plain remote HTTP is rejected while localhost and trusted local TLS proxy are accepted', () => {
   assert.equal(privateApiTransportAllowed({ remoteAddress: '192.168.4.55' }), false);
   assert.equal(privateApiTransportAllowed({ remoteAddress: '127.0.0.1' }), true);
