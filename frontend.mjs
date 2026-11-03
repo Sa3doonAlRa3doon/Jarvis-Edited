@@ -4,13 +4,14 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { trustedProxyClientAddress, trustedProxyHttpsState } from './lib/request-security.mjs';
+import { DEFAULT_LOCAL_PORTS } from './lib/local-ports.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const host = process.env.HOST || '127.0.0.1';
-const port = Number(process.env.PORT || 8787);
+const port = Number(process.env.PORT || DEFAULT_LOCAL_PORTS.dashboard);
 const apiHost = process.env.API_HOST || '127.0.0.1';
-const apiPort = Number(process.env.API_PORT || 8788);
+const apiPort = Number(process.env.API_PORT || DEFAULT_LOCAL_PORTS.api);
 const trustedProxyAddresses = String(process.env.TRUSTED_DASHBOARD_PROXY_IPS || '').split(',').map((value) => value.trim()).filter(Boolean);
 const publicDir = path.join(root, 'public');
 

@@ -123,3 +123,29 @@ test('keeps the requested Google service name when a connector read fails', asyn
   assert.equal(result.service, 'gmail');
   assert.equal(result.result, null);
 });
+
+test('pairs a Documents OAuth client with its local token instead of a token from another folder', async () => {
+  const credentialsPath = path.join(TEST_HOME, 'Documents', 'Jarvis-Google-Auth', 'credentials.json');
+  const matchingTokenPath = path.join(TEST_HOME, 'Documents', 'Jarvis-Google-Auth', 'token.json');
+  const unrelatedTokenPath = path.join(TEST_HOME, 'jarvis-google', 'token.json');
+  const files = new Map([
+    [credentialsPath, JSON.stringify({ installed: { client_id: 'documents-client', client_secret: 'documents-secret' } })],
+    [matchingTokenPath, JSON.stringify({ refresh_token: 'documents-refresh' })],
+    [unrelatedTokenPath, JSON.stringify({ refresh_token: 'unrelated-refresh' })]
+  ]);
+  let refreshToken = '';
+  const bridge = new GoogleWorkspaceBridge({
+    environment: {}, home: TEST_HOME,
+    reader: async (file) => { if (!files.has(file)) throw new Error('missing'); return files.get(file); },
+    fetchImpl: async (url, options = {}) => {
+      if (String(url).includes('oauth2.googleapis.com')) {
+        refreshToken = new URLSearchParams(options.body).get('refresh_token') || '';
+        return response({ access_token: 'documents-access', expires_in: 3600 });
+      }
+      return response({ messages: [] });
+    }
+  });
+
+  await bridge.getAccessToken();
+  assert.equal(refreshToken, 'documents-refresh');
+});

@@ -3,16 +3,17 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+import { DEFAULT_LOCAL_PORTS } from '../lib/local-ports.mjs';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const children = new Map();
 let shuttingDown = false;
 const ports = {
-  settings: Number(process.env.JARVIS_SETTINGS_BACKEND_PORT || 8789),
-  camera: Number(process.env.JARVIS_CAMERA_BACKEND_PORT || 8790),
-  microphone: Number(process.env.JARVIS_MIC_BACKEND_PORT || 8791),
-  api: Number(process.env.API_PORT || 8788),
-  dashboard: Number(process.env.PORT || 8787)
+  settings: Number(process.env.JARVIS_SETTINGS_BACKEND_PORT || DEFAULT_LOCAL_PORTS.settings),
+  camera: Number(process.env.JARVIS_CAMERA_BACKEND_PORT || DEFAULT_LOCAL_PORTS.camera),
+  microphone: Number(process.env.JARVIS_MIC_BACKEND_PORT || DEFAULT_LOCAL_PORTS.microphone),
+  api: Number(process.env.API_PORT || DEFAULT_LOCAL_PORTS.api),
+  dashboard: Number(process.env.PORT || DEFAULT_LOCAL_PORTS.dashboard)
 };
 
 if (!process.env.JARVIS_INTERNAL_SERVICE_TOKEN) {

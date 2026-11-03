@@ -753,7 +753,7 @@ The OAuth client secret posted in chat is exposed. Delete or rotate that OAuth c
 Forward the OAuth callback from a second PowerShell/SSH session:
 
 ```powershell
-ssh -L 8789:127.0.0.1:8789 pi5@192.168.4.123
+ssh -L 8792:127.0.0.1:8792 pi5@192.168.4.123
 ```
 
 Then on the Pi:
@@ -769,7 +769,7 @@ The direct bridge can search Gmail, list Calendar events, search Drive metadata,
 To authorize or refresh all required read scopes plus `gmail.send`, keep this PowerShell tunnel open:
 
 ```powershell
-ssh -N -L 8789:127.0.0.1:8789 pi5@192.168.4.123
+ssh -N -L 8792:127.0.0.1:8792 pi5@192.168.4.123
 ```
 
 Then run on the Pi:
@@ -781,9 +781,9 @@ npm run google:authorize
 
 Open the printed Google URL, approve it with your configured OAuth test-user account, and wait for `token.json` to be saved privately. Then set this only in the Pi `.env` and restart:
 
-If the protected Settings screen reports **REAUTH REQUIRED**, use **REAUTHORIZE GOOGLE** in `/settings#integrations`. JARVIS starts the same local helper, gives you a one-time consent link, and keeps the callback listener bound to loopback. On a Pi reached over SSH, keep the `8789` tunnel open while the consent tab is active; when Google shows the success page, return to Settings and press **VERIFY GOOGLE**.
+If the protected Settings screen reports **REAUTH REQUIRED**, use **REAUTHORIZE GOOGLE** in `/settings#integrations`. JARVIS starts the same local helper, gives you a one-time consent link, and keeps the callback listener bound to loopback. On a Pi reached over SSH, keep the `8792` tunnel open while the consent tab is active; when Google shows the success page, return to Settings and press **VERIFY GOOGLE**.
 
-The helper accepts a downloaded desktop client or a web client with an explicitly registered loopback redirect. For a web client, register `http://127.0.0.1:8789/` (or `http://localhost:8789/`) in Google Cloud and set `GOOGLE_OAUTH_REDIRECT_URI` to the exact same value in the private `.env`. Non-loopback redirects are rejected, and the client secret stays on the host.
+The helper accepts a downloaded desktop client or a web client with an explicitly registered loopback redirect. The OAuth listener uses its own port (`8792` by default); the settings backend remains on `8789`. For a web client, register `http://127.0.0.1:8792/` (or `http://localhost:8792/`) in Google Cloud and set `GOOGLE_OAUTH_PORT=8792` and `GOOGLE_OAUTH_REDIRECT_URI` to the exact same URI in the private `.env`. The Pi installer migrates the old callback default from `8789` to `8792`. Non-loopback redirects are rejected, and the client secret stays on the host.
 
 ```dotenv
 GOOGLE_EMAIL_SEND_ENABLED=true

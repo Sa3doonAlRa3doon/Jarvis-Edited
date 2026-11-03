@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import { GoogleAuthFlow } from '../lib/google-auth-flow.mjs';
 
 function childFixture() {
@@ -21,7 +22,7 @@ test('Google OAuth flow exposes only the consent URL and refreshes its lifecycle
   const flow = new GoogleAuthFlow({
     scriptPath: 'C:\\jarvis\\scripts\\google-oauth-local.mjs',
     execPath: 'node',
-    environment: { GOOGLE_AUTH_DIRECTORY: 'C:\\jarvis\\google' },
+    environment: { GOOGLE_AUTH_DIRECTORY: 'C:\\jarvis\\google', GOOGLE_TOKEN_PATH: 'C:\\jarvis\\private-token\\token.json' },
     accessImpl: async () => {},
     spawnImpl: (command, args, options) => {
       calls.push({ command, args, options });
@@ -36,6 +37,7 @@ test('Google OAuth flow exposes only the consent URL and refreshes its lifecycle
   assert.equal(calls[0].command, 'node');
   assert.equal(calls[0].args[0], 'C:\\jarvis\\scripts\\google-oauth-local.mjs');
   assert.equal(calls[0].options.stdio[1], 'pipe');
+  assert.equal(calls[0].options.env.GOOGLE_TOKEN_PATH, 'C:\\jarvis\\private-token\\token.json');
   assert.match(flow.snapshot().url, /^https:\/\/accounts\.google\.com\/o\/oauth2\/v2\/auth\?/);
   child.emit('exit', 0);
   assert.equal(flow.snapshot().running, false);
@@ -48,4 +50,53 @@ test('Google OAuth flow refuses to start without private credentials', async () 
   await assert.rejects(() => flow.start(), /credentials were not found/i);
   assert.equal(flow.snapshot().running, false);
   assert.equal(flow.snapshot().status, 'idle');
+});
+
+test('Google reauthorization finds Documents credentials and keeps their matching token together', async () => {
+  const home = path.join(path.parse(process.cwd()).root, 'jarvis-google-auth-flow-home');
+  const authDirectory = path.join(home, 'Documents', 'Jarvis-Google-Auth');
+  const credentialsPath = path.join(authDirectory, 'credentials.json');
+  const tokenPath = path.join(authDirectory, 'token.json');
+  const staleTokenPath = path.join(home, 'jarvis-google', 'token.json');
+  const existing = new Set([credentialsPath, tokenPath, staleTokenPath]);
+  const child = childFixture();
+  let spawnedOptions;
+  const flow = new GoogleAuthFlow({
+    scriptPath: path.join(home, 'scripts', 'google-oauth-local.mjs'),
+    environment: {}, home,
+    accessImpl: async (file) => { if (!existing.has(file)) throw new Error('missing'); },
+    spawnImpl: (_command, _args, options) => {
+      spawnedOptions = options;
+      queueMicrotask(() => child.stdout.emit('data', 'https://accounts.google.com/o/oauth2/v2/auth?client_id=fixture&state=abc\n'));
+      return child;
+    }
+  });
+
+  await flow.start();
+  assert.equal(spawnedOptions.env.GOOGLE_CREDENTIALS_PATH, credentialsPath);
+  assert.equal(spawnedOptions.env.GOOGLE_TOKEN_PATH, tokenPath);
+  flow.stop();
+});
+
+test('Google reauthorization honors an explicit new token destination before auto-discovery fallbacks', async () => {
+  const home = path.join(path.parse(process.cwd()).root, 'jarvis-google-explicit-token-home');
+  const credentialsPath = path.join(home, 'jarvis-google', 'credentials.json');
+  const explicitTokenPath = path.join(home, 'private-google', 'token.json');
+  const child = childFixture();
+  let spawnedOptions;
+  const flow = new GoogleAuthFlow({
+    scriptPath: path.join(home, 'scripts', 'google-oauth-local.mjs'),
+    environment: { GOOGLE_TOKEN_PATH: explicitTokenPath }, home,
+    accessImpl: async (file) => { if (file !== credentialsPath) throw new Error('missing'); },
+    spawnImpl: (_command, _args, options) => {
+      spawnedOptions = options;
+      queueMicrotask(() => child.stdout.emit('data', 'https://accounts.google.com/o/oauth2/v2/auth?client_id=fixture&state=abc\n'));
+      return child;
+    }
+  });
+
+  await flow.start();
+  assert.equal(spawnedOptions.env.GOOGLE_CREDENTIALS_PATH, credentialsPath);
+  assert.equal(spawnedOptions.env.GOOGLE_TOKEN_PATH, explicitTokenPath);
+  flow.stop();
 });

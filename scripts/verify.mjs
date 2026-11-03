@@ -28,6 +28,13 @@ const piInstaller = await read('install-pi.sh');
 const piSmoke = await read('scripts/pi-smoke.sh');
 const piSmokeEntry = await read('scripts/pi-smoke.mjs');
 const wakeDiagnostics = await read('lib/wake-diagnostics.mjs');
+const googleOAuthConfig = await read('lib/google-oauth-config.mjs');
+const googleFilePaths = await read('lib/google-file-paths.mjs');
+const localPorts = await read('lib/local-ports.mjs');
+const googleAuthFlow = await read('lib/google-auth-flow.mjs');
+const googleOAuthHelper = await read('scripts/google-oauth-local.mjs');
+const envExample = await read('.env.example');
+const readme = await read('README.md');
 
 for (const [source, document, label] of [[client, html, 'main'], [settingsClient, settingsHtml, 'settings']]) {
   for (const match of source.matchAll(/querySelector\('#([^'$]+)'\)/g)) {
@@ -642,6 +649,17 @@ assert.match(piInstaller, /frontend\.mjs/);
 assert.match(piInstaller, /openjarvis-settings\.service/);
 assert.match(piInstaller, /openjarvis-camera\.service/);
 assert.match(piInstaller, /openjarvis-mic\.service/);
+assert.match(localPorts, /googleOAuth:\s*8792/);
+assert.match(googleOAuthConfig, /DEFAULT_GOOGLE_OAUTH_PORT/);
+assert.match(googleOAuthConfig, /DEFAULT_SETTINGS_BACKEND_PORT/);
+assert.match(googleFilePaths, /Documents.*Jarvis-Google-Auth/);
+assert.match(googleFilePaths, /googleTokenCandidatesForCredentials/);
+assert.match(googleAuthFlow, /googleTokenCandidatesForCredentials/);
+assert.match(googleOAuthHelper, /googleTokenCandidatesForCredentials/);
+assert.match(piInstaller, /GOOGLE_OAUTH_REDIRECT_URI_VALUE/);
+assert.match(envExample, /GOOGLE_OAUTH_PORT=8792/);
+assert.match(envExample, /GOOGLE_OAUTH_REDIRECT_URI=http:\/\/127\.0\.0\.1:8792\//);
+assert.match(readme, /ssh -N -L 8792:127\.0\.0\.1:8792/);
 assert.match(piInstaller, /SUDO_USER/);
 assert.match(await read('scripts/start-split-stack.mjs'), /microphone backend/);
 assert.match(await read('mic-service.mjs'), /JARVIS_WAKE_EVENT_TOKEN/);

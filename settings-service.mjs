@@ -4,10 +4,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requireInternalServiceAuth } from './lib/local-service-auth.mjs';
+import { DEFAULT_LOCAL_PORTS } from './lib/local-ports.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const port = Number(process.env.JARVIS_SETTINGS_BACKEND_PORT || 8789);
+const port = Number(process.env.JARVIS_SETTINGS_BACKEND_PORT || DEFAULT_LOCAL_PORTS.settings);
 const token = String(process.env.JARVIS_INTERNAL_SERVICE_TOKEN || '');
 const dataDirectory = path.resolve(process.env.JARVIS_DATA_DIR || path.join(root, 'data'));
 const settingsPath = path.join(dataDirectory, 'settings.json');

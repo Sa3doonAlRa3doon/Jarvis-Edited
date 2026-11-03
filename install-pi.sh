@@ -211,6 +211,19 @@ set_env_value JARVIS_MIC_BACKEND_PORT 8791
 set_env_value JARVIS_SETTINGS_BACKEND_URL http://127.0.0.1:8789
 set_env_value JARVIS_CAMERA_BACKEND_URL http://127.0.0.1:8790
 set_env_value JARVIS_MIC_BACKEND_URL http://127.0.0.1:8791
+if ! grep -q '^GOOGLE_OAUTH_PORT=.' .env; then
+  set_env_value GOOGLE_OAUTH_PORT 8792
+elif grep -Eq '^GOOGLE_OAUTH_PORT=8789\r?$' .env; then
+  set_env_value GOOGLE_OAUTH_PORT 8792
+fi
+GOOGLE_OAUTH_PORT_VALUE="$(sed -n 's/^GOOGLE_OAUTH_PORT=//p' .env | tr -d '\r' | tail -n 1)"
+GOOGLE_OAUTH_REDIRECT_URI_VALUE="$(sed -n 's/^GOOGLE_OAUTH_REDIRECT_URI=//p' .env | tr -d '\r' | tail -n 1)"
+if [[ "$GOOGLE_OAUTH_REDIRECT_URI_VALUE" == "http://127.0.0.1:8789/" || "$GOOGLE_OAUTH_REDIRECT_URI_VALUE" == "http://localhost:8789/" ]]; then
+  set_env_value GOOGLE_OAUTH_REDIRECT_URI "http://127.0.0.1:${GOOGLE_OAUTH_PORT_VALUE}/"
+  echo "Moved the legacy Google OAuth callback off the settings backend port to ${GOOGLE_OAUTH_PORT_VALUE}; update the registered redirect URI for a web OAuth client."
+elif [[ -z "$GOOGLE_OAUTH_REDIRECT_URI_VALUE" ]]; then
+  set_env_value GOOGLE_OAUTH_REDIRECT_URI "http://127.0.0.1:${GOOGLE_OAUTH_PORT_VALUE}/"
+fi
 
 if ! grep -q '^OPS_CONTROL_PIN=.' .env; then
   GENERATED_PIN="$(python3 -c 'import secrets; print(f"{secrets.randbelow(1000000):06d}")')"

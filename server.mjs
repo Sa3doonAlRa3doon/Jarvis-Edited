@@ -48,6 +48,7 @@ import { camoufoxEngine, closeCamoufoxHostContext } from './lib/camoufox-browser
 import { closePublicNetworkProxy } from './lib/public-network-proxy.mjs';
 import { localStatusIntent, localStatusRoute, summarizeLocalStatus } from './lib/local-response.mjs';
 import { selectVisionModel } from './lib/vision-model-profile.mjs';
+import { DEFAULT_LOCAL_PORTS } from './lib/local-ports.mjs';
 import { createPipelineRun, normalizePipelineRequest, redactRun } from './lib/engineering-pipeline.mjs';
 import { runEngineeringPipeline } from './scripts/engineering-pipeline.mjs';
 import {
@@ -59,7 +60,7 @@ const app = express();
 const appVersion = '3.36.0';
 const apiOnly = process.env.JARVIS_API_ONLY === '1';
 const host = apiOnly ? (process.env.API_HOST || '127.0.0.1') : (process.env.HOST || '127.0.0.1');
-const port = Number(apiOnly ? (process.env.API_PORT || 8788) : (process.env.PORT || 8787));
+const port = Number(apiOnly ? (process.env.API_PORT || DEFAULT_LOCAL_PORTS.api) : (process.env.PORT || DEFAULT_LOCAL_PORTS.dashboard));
 const openJarvisUrl = (process.env.OPENJARVIS_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
 const ollamaUrl = (process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').replace(/\/$/, '');
 const openJarvisChatTimeoutMs = safeNumber(process.env.OPENJARVIS_CHAT_TIMEOUT_MS, 45_000, 10_000, 180_000);
@@ -68,9 +69,9 @@ const multiPurposeOllamaTimeoutMs = safeNumber(process.env.MULTI_PURPOSE_OLLAMA_
 const ollamaStructuredTimeoutMs = safeNumber(process.env.OLLAMA_STRUCTURED_TIMEOUT_MS, 30_000, 8_000, 120_000);
 const dataDirectory = path.resolve(process.env.JARVIS_DATA_DIR || path.join(__dirname, 'data'));
 const internalServiceToken = String(process.env.JARVIS_INTERNAL_SERVICE_TOKEN || '');
-const settingsBackendUrl = String(process.env.JARVIS_SETTINGS_BACKEND_URL || 'http://127.0.0.1:8789').replace(/\/$/, '');
-const cameraBackendUrl = String(process.env.JARVIS_CAMERA_BACKEND_URL || 'http://127.0.0.1:8790').replace(/\/$/, '');
-const micBackendUrl = String(process.env.JARVIS_MIC_BACKEND_URL || 'http://127.0.0.1:8791').replace(/\/$/, '');
+const settingsBackendUrl = String(process.env.JARVIS_SETTINGS_BACKEND_URL || `http://127.0.0.1:${DEFAULT_LOCAL_PORTS.settings}`).replace(/\/$/, '');
+const cameraBackendUrl = String(process.env.JARVIS_CAMERA_BACKEND_URL || `http://127.0.0.1:${DEFAULT_LOCAL_PORTS.camera}`).replace(/\/$/, '');
+const micBackendUrl = String(process.env.JARVIS_MIC_BACKEND_URL || `http://127.0.0.1:${DEFAULT_LOCAL_PORTS.microphone}`).replace(/\/$/, '');
 const obsOverlayTokenPath = path.join(dataDirectory, '.obs-overlay-token');
 const eventStore = new EventStore(dataDirectory);
 const broadcastHub = new BroadcastHub(path.join(dataDirectory, 'broadcast.json'), {
