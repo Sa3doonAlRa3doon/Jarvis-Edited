@@ -1187,6 +1187,10 @@ try {
 
   await check('Settings shows the host app catalog', async () => {
     await page.locator('#desktop-apps-grid').waitFor({ state: 'attached' });
+    await page.waitForFunction(() => {
+      const status = document.querySelector('#desktop-app-state')?.textContent?.trim() || '';
+      return status && status !== 'CHECKING';
+    }, null, { timeout: 15_000, polling: 250 });
     const status = (await page.locator('#desktop-app-state').textContent()).trim();
     const cards = await page.locator('#desktop-apps-grid .google-item').count();
     assert(status !== 'CHECKING' && cards > 0, `${status} / cards=${cards}`);

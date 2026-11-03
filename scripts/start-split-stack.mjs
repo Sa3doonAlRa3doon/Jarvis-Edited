@@ -83,7 +83,12 @@ try {
   await launch('settings backend', 'settings-service.mjs', ports.settings);
   await launch('camera backend', 'camera-service.mjs', ports.camera);
   await launch('microphone backend', 'mic-service.mjs', ports.microphone);
-  await launch('core API', 'server.mjs', ports.api, { JARVIS_API_ONLY: '1' }, '/api/health');
+  await launch('core API', 'server.mjs', ports.api, {
+    JARVIS_API_ONLY: '1',
+    JARVIS_SETTINGS_BACKEND_URL: `http://127.0.0.1:${ports.settings}`,
+    JARVIS_CAMERA_BACKEND_URL: `http://127.0.0.1:${ports.camera}`,
+    JARVIS_MIC_BACKEND_URL: `http://127.0.0.1:${ports.microphone}`
+  }, '/api/health');
   await launch('dashboard front end', 'frontend.mjs', ports.dashboard, { JARVIS_API_ONLY: '0' });
   console.log(`JARVIS is ready at http://127.0.0.1:${ports.dashboard}/ (API: 127.0.0.1:${ports.api}).`);
 } catch (error) {
