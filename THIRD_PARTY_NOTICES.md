@@ -27,8 +27,10 @@ tree. See the upstream [`LICENSE`](https://github.com/open-jarvis/OpenJarvis/blo
 OpenJarvis's `src/openjarvis/agents/loop_guard.py` (Copyright 2025 The
 OpenJarvis Authors), under Apache-2.0. The license is included in
 [`third_party/licenses/openjarvis-Apache-2.0.txt`](third_party/licenses/openjarvis-Apache-2.0.txt).
-JARVIS ports these pieces to JavaScript: the browser guard expires hashes
-after a short window and applies only to repeated browser actions; the history
-window keeps whole recent user/assistant messages within a character budget
-and remains disabled for tool-enabled requests. The guard stores hashes in
-memory and does not log action arguments.
+JARVIS ports these pieces to JavaScript and adapts OpenJarvis's alternating
+tool-cycle idea: its browser guard compares complete call signatures, warns
+before blocking an exact two-action cycle, expires state after a short window,
+and applies only to browser actions. The history window keeps whole recent
+user/assistant messages within a character budget and remains disabled for
+tool-enabled requests. The guard stores hashes in memory and does not log
+action arguments.

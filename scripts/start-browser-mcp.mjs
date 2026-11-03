@@ -107,8 +107,7 @@ function handleClientLine(line) {
   } catch { return { forwarded: browserRequestToUpstream(line) }; }
   const guardResult = guardBrowserToolRequest(payload, browserActionLoopGuard, materialTools);
   if (guardResult?.blocked) {
-    const name = String(payload?.params?.name || 'browser action');
-    process.stderr.write(`[JARVIS] Browser loop guard stopped a repeated ${name} call.\n`);
+    process.stderr.write('[JARVIS] Browser loop guard stopped a repeated action pattern.\n');
     return { localResponse: JSON.stringify(guardResult.localResponse) };
   }
   if (guardResult?.warned) process.stderr.write(`[JARVIS] Browser loop guard warning: repeated ${String(payload?.params?.name || 'browser action')} call.\n`);
