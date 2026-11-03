@@ -12,6 +12,13 @@
 - The installer resolves the service user from `SUDO_USER` when run with sudo,
   then starts the mic backend as that account so its `audio` group membership
   applies.
+- Mic health now treats `ENABLE_PI_WAKE_LISTENER=false` as an intentional
+  disable, and a failed listener spawn clears stale readiness and retries with
+  bounded backoff. Errors from a child that already has a PID do not make the
+  backend forget a process that could still be alive.
+- The isolated browser agent warns before blocking a repeated two-action loop;
+  the full loop must fall inside the guard's expiry window, and changing pages
+  or controls does not trigger it.
 
 ### 3.35.2 retry dismissed screen pickers
 

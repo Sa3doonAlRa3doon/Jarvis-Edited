@@ -110,7 +110,7 @@ function handleClientLine(line) {
     process.stderr.write('[JARVIS] Browser loop guard stopped a repeated action pattern.\n');
     return { localResponse: JSON.stringify(guardResult.localResponse) };
   }
-  if (guardResult?.warned) process.stderr.write(`[JARVIS] Browser loop guard warning: repeated ${String(payload?.params?.name || 'browser action')} call.\n`);
+  if (guardResult?.warned) process.stderr.write(`[JARVIS] Browser loop guard warning: ${guardResult.reason}\n`);
   if (guardResult?.tracked) {
     captureAfter.set(messageId(payload), true);
   }

@@ -5,10 +5,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import { appendWakeStderr, wakeListenerExitError } from './lib/wake-stderr.mjs';
+import { appendWakeStderr, markWakeListenerSpawnFailure, wakeListenerExitError } from './lib/wake-stderr.mjs';
 import { requireInternalServiceAuth } from './lib/local-service-auth.mjs';
 import { binaryAvailable, linuxMicrophones } from './lib/system-probe.mjs';
-import { piWakeEnergyFloor } from './lib/pi-wake-profile.mjs';
+import { piWakeEnergyFloor, piWakeListenerEnabled } from './lib/pi-wake-profile.mjs';
 import { normalizeWakeCapture } from './public/wake-state.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
@@ -39,7 +39,10 @@ function publicState() {
 }
 
 function listenerWanted() {
-  return process.platform === 'linux' && /^(1|true|yes|on)$/i.test(String(process.env.ENABLE_PI_WAKE_LISTENER || 'true')) && activeSettings?.source === 'pi' && Boolean(activeSettings.piMicrophone) && (activeSettings.wakeWord || activeSettings.doubleClap);
+  return piWakeListenerEnabled(process.platform, process.env.ENABLE_PI_WAKE_LISTENER)
+    && activeSettings?.source === 'pi'
+    && Boolean(activeSettings.piMicrophone)
+    && (activeSettings.wakeWord || activeSettings.doubleClap);
 }
 
 function scheduleListenerRetry(revision, detail = 'Mic listener stopped unexpectedly.') {
@@ -102,7 +105,7 @@ async function configureListenerNow(input = {}) {
   activeSettings = settings;
   callbackUrl = /^http:\/\/127\.0\.0\.1:\d{1,5}\/api\/wake-event$/.test(String(input.callbackUrl || '')) ? String(input.callbackUrl) : defaultCallback;
   desiredConfiguration = { settings: { ...settings }, callbackUrl };
-  if (process.platform !== 'linux' || !/^(1|true|yes|on)$/i.test(String(process.env.ENABLE_PI_WAKE_LISTENER || 'true'))) return publicState();
+  if (!piWakeListenerEnabled(process.platform, process.env.ENABLE_PI_WAKE_LISTENER)) return publicState();
   if (settings.source !== 'pi' || !settings.piMicrophone || (!settings.wakeWord && !settings.doubleClap)) return publicState();
 
   const microphones = await linuxMicrophones();
@@ -194,7 +197,16 @@ async function configureListenerNow(input = {}) {
     if (exitError) wakeState.error = String(exitError).slice(0, 220);
     if (intentionalChildStop !== child) scheduleListenerRetry(revision, wakeState.error || `Mic listener exited (${code ?? 'unknown'}).`);
   });
-  child.on('error', (error) => { wakeState.error = String(error?.message || 'Could not start the mic listener.').slice(0, 220); });
+  child.on('error', (error) => {
+    if (wakeState.process !== child) return;
+    if (child.pid != null) {
+      wakeState.error = String(error?.message || 'Mic listener process reported an error.').replace(/\0/g, '').slice(0, 220);
+      return;
+    }
+    if (!markWakeListenerSpawnFailure(wakeState, child, error)) return;
+    wakeState.commandCapture = normalizeWakeCapture({ state: 'idle' });
+    if (intentionalChildStop !== child) scheduleListenerRetry(revision, wakeState.error);
+  });
   return publicState();
 }
 

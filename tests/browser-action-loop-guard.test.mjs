@@ -40,7 +40,9 @@ test('warns on an exact alternating action pair and blocks after three cycles', 
   const first = () => guard.checkCall('jarvis_browser_navigate', { url: 'https://example.com/a' }, Date.now());
   const second = () => guard.checkCall('jarvis_browser_click', { ref: 'continue' }, Date.now());
   first(); second(); first();
-  assert.equal(second().warned, true);
+  const warning = second();
+  assert.equal(warning.warned, true);
+  assert.match(warning.reason, /same two-action browser cycle/);
   first();
   assert.equal(second().blocked, true);
 });
@@ -58,6 +60,23 @@ test('does not treat changing pages and controls as an alternating action loop',
   for (const [index, [name, args]] of actions.entries()) {
     assert.equal(guard.checkCall(name, args, index + 1).blocked, false);
   }
+});
+
+test('does not block an alternating action cycle spread across the full expiry window', () => {
+  const guard = new BrowserActionLoopGuard({ maxIdenticalCalls: 3, windowMs: 30_000 });
+  const actions = [
+    ['jarvis_browser_navigate', { url: 'https://example.com/a' }],
+    ['jarvis_browser_click', { ref: 'continue' }],
+    ['jarvis_browser_navigate', { url: 'https://example.com/a' }],
+    ['jarvis_browser_click', { ref: 'continue' }],
+    ['jarvis_browser_navigate', { url: 'https://example.com/a' }],
+    ['jarvis_browser_click', { ref: 'continue' }]
+  ];
+  let final;
+  for (const [index, [name, args]] of actions.entries()) {
+    final = guard.checkCall(name, args, index * 9_000 + 1);
+  }
+  assert.equal(final.blocked, false);
 });
 
 test('does not recurse through oversized or deeply nested tool arguments', () => {
