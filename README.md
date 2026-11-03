@@ -916,11 +916,13 @@ For a fast local readiness report before the longer smoke test, run:
 npm.cmd run doctor
 # Fail on every warning as well as every required check:
 npm.cmd run doctor -- --strict
+# Require the dashboard PIN gate for a deployment check:
+npm.cmd run doctor -- --require-auth
 # Make selected dependencies hard requirements for this run:
 npm.cmd run doctor -- --require-openjarvis --require-ollama --require-vision --require-camera --require-mic --require-stirling --require-printer --require-printer-camera
 ```
 
-`doctor` probes only the local dashboard session and its bounded local status endpoints. It reports Camoufox-only browser configuration, OpenJarvis/Ollama reachability, verified vision capability, Google OAuth availability, Stirling health, Moonraker printer reachability, same-host printer-camera discovery, and Pi ALSA/V4L2 devices when running on Linux. It never prints `.env` values, never calls a public API, and never changes services; optional Google, Stirling, printer, printer-camera, camera, and microphone warnings become failures only when explicitly required. On Windows, the camera and microphone checks remain browser-side; use the real Camoufox smoke test below for physical device evidence.
+`doctor` probes only the local dashboard session and its bounded local status endpoints. It reports the dashboard PIN gate, Camoufox-only browser configuration, OpenJarvis/Ollama reachability, verified vision capability, Google OAuth availability, Stirling health, Moonraker printer reachability, same-host printer-camera discovery, and Pi ALSA/V4L2 devices when running on Linux. It never prints `.env` values, never calls a public API, and never changes services; missing dashboard PIN protection and optional Google, Stirling, printer, printer-camera, camera, and microphone services are warnings by default and become failures when explicitly required (or when `--strict` is used). On Windows, the camera and microphone checks remain browser-side; use the real Camoufox smoke test below for physical device evidence.
 
 Fish Audio talkback is bounded by `FISH_AUDIO_TIMEOUT_MS` (30 seconds by default, with one bounded retry) so an unavailable provider cannot leave a normal reply hanging indefinitely. Wake acknowledgements use `FISH_AUDIO_WAKE_TIMEOUT_MS` (12 seconds by default, bounded to 4–60 seconds) so a slow provider cannot block the 15-second command window; JARVIS proceeds to listen and leaves the selected Fish voice unchanged. Settings shows both effective deadlines. Enable the browser voice fallback in Settings when you need local speech during an outage.
 

@@ -9,6 +9,7 @@ dotenv.config({ override: true, quiet: true });
 const args = new Set(process.argv.slice(2));
 const strict = args.has('--strict');
 const required = {
+  auth: args.has('--require-auth'),
   openJarvis: args.has('--require-openjarvis'),
   ollama: args.has('--require-ollama'),
   vision: args.has('--require-vision'),
@@ -24,6 +25,7 @@ export function doctorRequirements(argv = []) {
   const requested = new Set(argv);
   return {
     strict: requested.has('--strict'),
+    auth: requested.has('--require-auth'),
     openJarvis: requested.has('--require-openjarvis'),
     ollama: requested.has('--require-ollama'),
     vision: requested.has('--require-vision'),
@@ -74,7 +76,7 @@ export function evaluateDoctorSnapshot(snapshot, options = {}) {
   const checks = [];
   const add = (id, ok, detail, requiredCheck = false) => checks.push({ id, ok: Boolean(ok), detail: clean(detail), required: Boolean(requiredCheck) });
   add('dashboard', snapshot.dashboard?.ok, snapshot.dashboard?.detail || 'dashboard health', true);
-  add('auth', snapshot.auth?.ok, snapshot.auth?.detail || 'dashboard authentication', true);
+  add('auth', snapshot.auth?.ok, snapshot.auth?.detail || 'dashboard authentication', needs.auth);
   add('camoufox', snapshot.config?.browserEngine === 'camoufox', snapshot.config?.browserEngine ? `browser engine ${snapshot.config.browserEngine}` : 'Camoufox engine not reported', true);
   add('openjarvis', snapshot.services?.openjarvis?.online, `OpenJarvis ${statusLabel(snapshot.services?.openjarvis?.online)}`, needs.openJarvis);
   add('ollama', snapshot.services?.ollama?.online, `Ollama ${statusLabel(snapshot.services?.ollama?.online)}`, needs.ollama);
@@ -153,7 +155,7 @@ async function run() {
     const auth = await request(url, '/api/auth/status');
     const authRequired = Boolean(auth.body?.required);
     if (!authRequired) {
-      snapshot.auth = { ok: true, detail: 'dashboard PIN is not enabled' };
+      snapshot.auth = { ok: false, detail: 'dashboard PIN is not enabled' };
     } else if (!String(process.env.DASHBOARD_ACCESS_PIN || '').trim()) {
       snapshot.auth = { ok: false, detail: 'DASHBOARD_ACCESS_PIN is required for protected checks' };
     } else {

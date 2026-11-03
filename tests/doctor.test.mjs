@@ -3,12 +3,28 @@ import test from 'node:test';
 import { doctorRequirements, evaluateDoctorSnapshot } from '../scripts/doctor.mjs';
 
 test('doctor requirements keeps optional probes optional by default', () => {
-  assert.deepEqual(doctorRequirements([]), { strict: false, openJarvis: false, ollama: false, vision: false, google: false, stirling: false, printer: false, printerCamera: false, camera: false, microphone: false });
+  assert.deepEqual(doctorRequirements([]), { strict: false, auth: false, openJarvis: false, ollama: false, vision: false, google: false, stirling: false, printer: false, printerCamera: false, camera: false, microphone: false });
+  assert.equal(doctorRequirements(['--require-auth']).auth, true);
   assert.equal(doctorRequirements(['--require-mic']).microphone, true);
   assert.equal(doctorRequirements(['--require-microphone']).microphone, true);
   assert.equal(doctorRequirements(['--require-stirling']).stirling, true);
   assert.equal(doctorRequirements(['--require-printer']).printer, true);
   assert.equal(doctorRequirements(['--require-printer-camera']).printerCamera, true);
+});
+
+test('doctor warns about an unprotected dashboard and can require its PIN gate', () => {
+  const snapshot = {
+    dashboard: { ok: true }, auth: { ok: false, detail: 'dashboard PIN is not enabled' },
+    config: { browserEngine: 'camoufox' }
+  };
+  const optional = evaluateDoctorSnapshot(snapshot);
+  assert.equal(optional.fail, 0);
+  assert.equal(optional.checks.find((item) => item.id === 'auth')?.required, false);
+  assert.equal(optional.checks.find((item) => item.id === 'auth')?.ok, false);
+
+  const required = evaluateDoctorSnapshot(snapshot, { auth: true });
+  assert.equal(required.fail, 1);
+  assert.equal(required.checks.find((item) => item.id === 'auth')?.required, true);
 });
 
 test('doctor distinguishes local readiness from optional external connectors', () => {
