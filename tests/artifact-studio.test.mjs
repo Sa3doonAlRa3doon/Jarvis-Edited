@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import JSZip from 'jszip';
 import { ArtifactStudio, artifactIntent, parseArtifactPlan } from '../lib/artifact-studio.mjs';
 
 test('recognizes explicit Office artifact creation requests', () => {
@@ -27,6 +28,15 @@ test('creates real PPTX, DOCX, and XLSX zip-based files in a private directory',
       const artifact = await studio.create(plan); const resolved = await studio.resolve(artifact.id);
       assert.ok(resolved); assert.match(artifact.downloadUrl, new RegExp(artifact.id));
       const bytes = await fs.readFile(resolved.path); assert.equal(bytes.subarray(0, 2).toString('ascii'), 'PK'); assert.ok(bytes.length > 2_000);
+      if (type === 'xlsx') {
+        const archive = await JSZip.loadAsync(bytes);
+        assert.ok(archive.file('[Content_Types].xml'));
+        const sheet = await archive.file('xl/worksheets/sheet1.xml').async('text');
+        assert.match(sheet, /state="frozen"/);
+        assert.match(sheet, /autoFilter ref="A3:C\d+"/);
+        assert.match(sheet, /Test xlsx/);
+        assert.match(sheet, /First item/);
+      }
     }
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });

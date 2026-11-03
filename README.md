@@ -22,6 +22,9 @@
 - The isolated browser agent warns before blocking a repeated two-action loop;
   the full loop must fall inside the guard's expiry window, and changing pages
   or controls does not trigger it.
+- JARVIS creates its formatted XLSX briefing with a small local OpenXML writer
+  over JSZip, keeping frozen headers, filters, and styling while removing the
+  vulnerable legacy archiver/glob dependency chain.
 
 ### 3.35.2 retry dismissed screen pickers
 
