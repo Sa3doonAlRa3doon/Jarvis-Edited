@@ -149,3 +149,32 @@ test('pairs a Documents OAuth client with its local token instead of a token fro
   await bridge.getAccessToken();
   assert.equal(refreshToken, 'documents-refresh');
 });
+
+test('uses a complete private environment OAuth client without exposing it in Google status', async () => {
+  const tokenPath = path.join(TEST_HOME, 'jarvis-google', 'token.json');
+  const environment = { GOOGLE_CLIENT_ID: 'private-id', GOOGLE_CLIENT_SECRET: 'private-secret' };
+  let refreshBody;
+  const bridge = new GoogleWorkspaceBridge({
+    environment, home: TEST_HOME,
+    reader: async (file) => {
+      if (file !== tokenPath) throw new Error('no credentials JSON in this fixture');
+      return JSON.stringify({ refresh_token: 'private-refresh' });
+    },
+    fetchImpl: async (url, options = {}) => {
+      if (String(url).includes('oauth2.googleapis.com')) {
+        refreshBody = new URLSearchParams(options.body);
+        return response({ access_token: 'private-access', expires_in: 3600 });
+      }
+      return response({}, 404);
+    }
+  });
+
+  const status = await bridge.status();
+  await bridge.getAccessToken();
+  assert.equal(status.connected, true);
+  assert.equal(status.source, 'private-environment-and-token-file');
+  assert.equal(refreshBody.get('client_id'), 'private-id');
+  assert.equal(refreshBody.get('client_secret'), 'private-secret');
+  assert.equal(refreshBody.get('refresh_token'), 'private-refresh');
+  assert.doesNotMatch(JSON.stringify(status), /private-id|private-secret|private-refresh/);
+});

@@ -3,8 +3,17 @@ import assert from 'node:assert/strict';
 import {
   DEFAULT_GOOGLE_OAUTH_PORT,
   DEFAULT_SETTINGS_BACKEND_PORT,
+  googleOAuthClientFromEnvironment,
   resolveGoogleOAuthConfig
 } from '../lib/google-oauth-config.mjs';
+
+test('requires both private Google OAuth environment values before using them', () => {
+  assert.equal(googleOAuthClientFromEnvironment({ GOOGLE_CLIENT_ID: 'id-only' }), null);
+  assert.equal(googleOAuthClientFromEnvironment({ GOOGLE_CLIENT_SECRET: 'secret-only' }), null);
+  assert.deepEqual(googleOAuthClientFromEnvironment({ GOOGLE_CLIENT_ID: 'id', GOOGLE_CLIENT_SECRET: 'secret' }), {
+    client_id: 'id', client_secret: 'secret'
+  });
+});
 
 test('default Google callback uses a dedicated port separate from the settings service', () => {
   const config = resolveGoogleOAuthConfig({});

@@ -4,16 +4,19 @@ import fs from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { firstExistingPath, googleAuthFileCandidates, googleTokenCandidatesForCredentials } from '../lib/google-file-paths.mjs';
-import { resolveGoogleOAuthConfig } from '../lib/google-oauth-config.mjs';
+import { googleOAuthClientFromEnvironment, resolveGoogleOAuthConfig } from '../lib/google-oauth-config.mjs';
 
 const { redirectUri: safeRedirectUri, migratedFrom } = resolveGoogleOAuthConfig(process.env);
 const fileCandidates = googleAuthFileCandidates(process.env);
-const credentialsPath = await firstExistingPath(fileCandidates.credentials);
-if (!credentialsPath) throw new Error(`Google Desktop OAuth credentials were not found at ${fileCandidates.credentials[0]}.`);
+const environmentClient = googleOAuthClientFromEnvironment(process.env);
+const credentialsPath = environmentClient ? '' : await firstExistingPath(fileCandidates.credentials);
+if (!credentialsPath && !environmentClient) throw new Error(`Google OAuth client credentials were not found. Set both GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in the private .env, or add a credentials.json file at ${fileCandidates.credentials[0]}.`);
 const tokenPath = process.env.GOOGLE_TOKEN_PATH
   ? path.resolve(process.env.GOOGLE_TOKEN_PATH)
-  : await firstExistingPath(googleTokenCandidatesForCredentials(fileCandidates, credentialsPath, process.env))
-    || path.join(path.dirname(credentialsPath), 'token.json');
+  : await firstExistingPath(credentialsPath
+    ? googleTokenCandidatesForCredentials(fileCandidates, credentialsPath, process.env)
+    : fileCandidates.tokens)
+    || (credentialsPath ? path.join(path.dirname(credentialsPath), 'token.json') : fileCandidates.tokens[0]);
 const scopes = [
   'openid', 'https://www.googleapis.com/auth/userinfo.email',
   'https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.send',
@@ -23,8 +26,8 @@ const scopes = [
 
 const callbackUri = new URL(safeRedirectUri);
 
-const credentials = JSON.parse(await fs.readFile(credentialsPath, 'utf8'));
-const client = credentials.installed || credentials.web || credentials;
+const credentials = credentialsPath ? JSON.parse(await fs.readFile(credentialsPath, 'utf8')) : null;
+const client = environmentClient || credentials?.installed || credentials?.web || credentials || {};
 if (!client.client_id || !client.client_secret) throw new Error(`Desktop OAuth credentials are invalid: ${credentialsPath}`);
 
 const state = crypto.randomBytes(24).toString('base64url');

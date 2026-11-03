@@ -100,3 +100,26 @@ test('Google reauthorization honors an explicit new token destination before aut
   assert.equal(spawnedOptions.env.GOOGLE_TOKEN_PATH, explicitTokenPath);
   flow.stop();
 });
+
+test('Google reauthorization can use a complete private environment client without a credentials file', async () => {
+  const home = path.join(path.parse(process.cwd()).root, 'jarvis-google-env-client-home');
+  const expectedTokenPath = path.join(home, 'jarvis-google', 'token.json');
+  const child = childFixture();
+  let spawnedOptions;
+  const flow = new GoogleAuthFlow({
+    scriptPath: path.join(home, 'scripts', 'google-oauth-local.mjs'),
+    environment: { GOOGLE_CLIENT_ID: 'safe-client-id', GOOGLE_CLIENT_SECRET: 'private-client-secret' }, home,
+    accessImpl: async () => { throw new Error('no credential files'); },
+    spawnImpl: (_command, _args, options) => {
+      spawnedOptions = options;
+      queueMicrotask(() => child.stdout.emit('data', 'https://accounts.google.com/o/oauth2/v2/auth?client_id=fixture&state=abc\n'));
+      return child;
+    }
+  });
+
+  await flow.start();
+  assert.equal(spawnedOptions.env.GOOGLE_CREDENTIALS_PATH, '');
+  assert.equal(spawnedOptions.env.GOOGLE_TOKEN_PATH, expectedTokenPath);
+  assert.equal(spawnedOptions.env.GOOGLE_CLIENT_SECRET, 'private-client-secret');
+  flow.stop();
+});
