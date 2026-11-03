@@ -522,13 +522,20 @@ The 2.0 agent, monitoring, maintenance, sensor, wake-word, Google, and Pi teleme
 
 OpenJarvis documents `native_openhands` as a CodeAct agent that generates and executes Python, `deep_research` as multi-hop research with citations, and `monitor_operative` as a long-horizon agent with memory, compression, retrieval, and decomposition. This dashboard visualizes the official `/v1/traces`, `/v1/telemetry/stats`, and `/v1/memory/stats` data rather than simulating it. See the [OpenJarvis agent guide](https://github.com/open-jarvis/OpenJarvis/blob/main/docs/user-guide/agents.md) and [architecture overview](https://github.com/open-jarvis/OpenJarvis/blob/main/docs/architecture/overview.md).
 
+## Runtime process split
+
+- The Pi installer runs the dashboard UI as `openjarvis-dashboard.service` and the application API plus Pi voice listener as `openjarvis-core.service`.
+- The API binds to `API_HOST` / `API_PORT` (loopback by default); the dashboard serves `public/` and proxies API traffic through the same browser origin. This keeps cookies, microphone permissions, and server-sent status streams on one origin while preventing a direct LAN API port.
+- `npm start` keeps the simple combined server for development. Use `npm run start:split` to exercise separate front-end and back-end processes on a desktop.
+- `PORT` is the dashboard port (default `8787`); `API_PORT` is private (default `8788`). Keep `API_HOST=127.0.0.1` on Pi and use SSH or an HTTPS proxy to reach the dashboard.
+
 ## Security model
 
 - The Pi service can listen on the LAN, but every non-health API is protected by the generated dashboard PIN. Session cookies are `HttpOnly` and `SameSite=Strict`.
 - State-changing requests are same-origin checked.
 - The dashboard sends only a fixed action name to a root-owned helper. Service names and shell text are not accepted from the browser.
 - The root helper is limited by `/etc/sudoers.d/jarvis-command-center` to six exact commands.
-- The helper manages only `ollama.service`, `openjarvis-api.service`, and `hatclanker.service`. It deliberately leaves `openjarvis-dashboard.service`, SSH, networking, and the OS running so you can resume maintenance remotely.
+- The helper manages only `ollama.service`, `openjarvis-api.service`, and `hatclanker.service`. It deliberately leaves `openjarvis-core.service`, `openjarvis-dashboard.service`, SSH, networking, and the OS running so you can resume maintenance remotely.
 - “Stop until reboot” uses a lock in `/run`; Linux clears it on reboot.
 - “Persistent stop” uses a lock in `/var/lib/jarvis-command-center`; it survives reboot until **Resume** removes it.
 - Docker maintenance records the exact running container IDs before stopping them and resumes only those IDs.
@@ -598,7 +605,7 @@ runtime uses Node's current zlib/zstd bindings. It:
 3. Generates and prints a private six-digit dashboard/maintenance PIN if `.env` does not already contain one.
 4. Installs the fixed root helper and its exact sudoers rule.
 5. Adds maintenance-lock conditions to the three allow-listed services.
-6. Installs persistent `openjarvis-api.service` and `openjarvis-dashboard.service` units. Both bind only to loopback; OpenJarvis runs under the isolated `jarvis-agent` account with its browser profile and output under `/srv/jarvis-workspace`.
+6. Installs persistent `openjarvis-api.service`, `openjarvis-core.service`, and `openjarvis-dashboard.service` units. The application API binds only to loopback; the dashboard keeps the configured `HOST` / `PORT`. OpenJarvis runs under the isolated `jarvis-agent` account with its browser profile and output under `/srv/jarvis-workspace`.
 
 The installer does not silently download a multi-gigabyte vision model. After checking Pi storage and bandwidth, run `./install-pi.sh --vision` (or `./install-pi.sh --vision-model qwen2.5vl:3b`) to pull the selected Ollama tag and write `JARVIS_VISION_MODEL` into the private `.env`. Both the Node installer and the Pi shell installer independently check `ollama list` after the pull and refuse to write the vision setting if the exact tag is missing; the dashboard reports `VISION READY` only after its own local catalog check also succeeds.
 

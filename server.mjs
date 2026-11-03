@@ -60,8 +60,9 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const appVersion = '3.35.2';
-const host = process.env.HOST || '127.0.0.1';
-const port = Number(process.env.PORT || 8787);
+const apiOnly = process.env.JARVIS_API_ONLY === '1';
+const host = apiOnly ? (process.env.API_HOST || '127.0.0.1') : (process.env.HOST || '127.0.0.1');
+const port = Number(apiOnly ? (process.env.API_PORT || 8788) : (process.env.PORT || 8787));
 const openJarvisUrl = (process.env.OPENJARVIS_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
 const ollamaUrl = (process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').replace(/\/$/, '');
 const openJarvisChatTimeoutMs = safeNumber(process.env.OPENJARVIS_CHAT_TIMEOUT_MS, 45_000, 10_000, 180_000);
@@ -1958,9 +1959,11 @@ app.post('/api/tts', async (request, response) => {
   }
 });
 
-app.get('/settings', (_request, response) => response.sendFile(path.join(__dirname, 'public', 'settings.html')));
-app.get('/workspace', (_request, response) => response.sendFile(path.join(__dirname, 'public', 'workspace.html')));
-app.use(express.static(path.join(__dirname, 'public'), { etag: true, maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0 }));
+if (!apiOnly) {
+  app.get('/settings', (_request, response) => response.sendFile(path.join(__dirname, 'public', 'settings.html')));
+  app.get('/workspace', (_request, response) => response.sendFile(path.join(__dirname, 'public', 'workspace.html')));
+  app.use(express.static(path.join(__dirname, 'public'), { etag: true, maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0 }));
+}
 app.use((error, _request, response, _next) => { console.error('Dashboard request failed:', error.message); response.status(500).json({ error: 'Dashboard request failed.' }); });
 
 let knownTraceIds = new Set(); let traceInitialised = false; let lastHealthSignature = ''; let lastRepairAt = 0;

@@ -14,6 +14,7 @@ const [html, settingsHtml, client, settingsClient, authClient, css, server, help
   read('lib/artifact-studio.mjs'), read('lib/browser-control.mjs'), read('lib/news-tools.mjs'), read('lib/obs-client.mjs'), read('public/workspace.js'), read('public/workspace.html'), read('public/workspace-screen.css'), read('lib/desktop-apps.mjs'), read('lib/routine-engine.mjs'), read('lib/local-memory.mjs'), read('lib/event-store.mjs'), read('lib/media-deck.mjs'), read('scripts/install-vision-model.mjs'), read('scripts/restart-local-stack.ps1'), read('lib/local-response.mjs'), read('lib/read-only-fallback.mjs')
 ]);
 const packageJson = JSON.parse(packageRaw);
+const frontend = await read('frontend.mjs');
 const doctor = await read('scripts/doctor.mjs');
 const missionPlanner = await read('lib/mission-planner.mjs');
 const statsDeck = await read('lib/stats-deck.mjs');
@@ -614,6 +615,12 @@ assert.match(knowledgeIndex, /isSymbolicLink/);
 assert.match(css, /\.command-page\s*\{[^}]*overflow:\s*hidden/s);
 assert.match(css, /\.visual-only\.audio-locked #brain-canvas/);
 assert.match(helper, /SERVICES=\(ollama\.service openjarvis-api\.service hatclanker\.service\)/);
+assert.match(frontend, /express\.static\(publicDir/);
+assert.match(frontend, /http\.request\(/);
+assert.match(frontend, /JARVIS back end is unavailable/);
+assert.match(server, /JARVIS_API_ONLY/);
+assert.match(piInstaller, /openjarvis-core\.service/);
+assert.match(piInstaller, /frontend\.mjs/);
 assert.match(helper, /maintenance\.lock/);
 assert.doesNotMatch(helper, /\beval\b/);
 for (const item of ['client_secret*.json', 'credentials.json', 'token.json', 'data/', '.wake-venv/', 'hand_landmarker.task']) assert.match(gitignore, new RegExp(item.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));

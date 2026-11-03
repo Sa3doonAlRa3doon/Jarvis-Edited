@@ -235,6 +235,8 @@ set_env_value OLLAMA_HOST 127.0.0.1:11434
 set_env_value OLLAMA_NO_CLOUD 1
 set_env_value OLLAMA_MAX_LOADED_MODELS 1
 set_env_value HOST 127.0.0.1
+set_env_value API_HOST 127.0.0.1
+set_env_value API_PORT 8788
 if [[ "$INSTALL_VISION" == true ]]; then
   OLLAMA_BIN="$(command -v ollama || true)"
   if [[ -z "$OLLAMA_BIN" ]]; then
@@ -413,10 +415,10 @@ else
   echo "Isolated OpenJarvis was not found at $OPENJARVIS_DIR. Run scripts/setup-openjarvis-pi.sh first; the dashboard will use Ollama fallback meanwhile."
 fi
 
-SERVICE_FILE="/etc/systemd/system/openjarvis-dashboard.service"
-sudo tee "$SERVICE_FILE" >/dev/null <<EOF
+CORE_SERVICE_FILE="/etc/systemd/system/openjarvis-core.service"
+sudo tee "$CORE_SERVICE_FILE" >/dev/null <<EOF
 [Unit]
-Description=OpenJarvis Pi Command Center
+Description=JARVIS private API and voice back end
 After=network-online.target ollama.service openjarvis-api.service
 Wants=network-online.target
 
@@ -426,11 +428,11 @@ User=$APP_USER
 WorkingDirectory=$APP_DIR
 EnvironmentFile=$APP_DIR/.env
 Environment=NODE_ENV=production
+Environment=JARVIS_API_ONLY=1
 ExecStart=$NODE_BIN $APP_DIR/server.mjs
 Restart=on-failure
 RestartSec=4
-# sudo is restricted to the exact root-owned helper actions in
-# /etc/sudoers.d/jarvis-command-center. This service cannot sudo anything else.
+# The wake worker needs the narrow sudo helper for approved host operations only.
 NoNewPrivileges=false
 PrivateTmp=true
 ProtectSystem=full
@@ -441,14 +443,44 @@ ReadWritePaths=$APP_DIR/data
 WantedBy=multi-user.target
 EOF
 
+SERVICE_FILE="/etc/systemd/system/openjarvis-dashboard.service"
+sudo tee "$SERVICE_FILE" >/dev/null <<EOF
+[Unit]
+Description=JARVIS dashboard front end
+After=network-online.target openjarvis-core.service
+Wants=network-online.target
+Wants=openjarvis-core.service
+
+[Service]
+Type=simple
+User=$APP_USER
+WorkingDirectory=$APP_DIR
+EnvironmentFile=$APP_DIR/.env
+Environment=NODE_ENV=production
+ExecStart=$NODE_BIN $APP_DIR/frontend.mjs
+Restart=on-failure
+RestartSec=4
+# Static UI process has no host-control privilege and cannot write project data.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 sudo systemctl daemon-reload
 if systemctl list-unit-files ollama.service >/dev/null 2>&1; then
   sudo systemctl try-restart ollama.service || true
 fi
-sudo systemctl enable --now openjarvis-dashboard
+sudo systemctl enable openjarvis-core openjarvis-dashboard
+sudo systemctl restart openjarvis-core || sudo systemctl start openjarvis-core
+sudo systemctl restart openjarvis-dashboard || sudo systemctl start openjarvis-dashboard
 if [[ -n "$JARVIS_BIN" ]]; then
   sudo systemctl status openjarvis-api --no-pager -l || true
 fi
+sudo systemctl status openjarvis-core --no-pager -l
 sudo systemctl status openjarvis-dashboard --no-pager -l
 
 echo
