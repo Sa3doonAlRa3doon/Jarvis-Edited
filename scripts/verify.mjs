@@ -629,7 +629,9 @@ assert.match(helper, /SERVICES=\(ollama\.service openjarvis-api\.service openjar
 assert.match(frontend, /express\.static\(publicDir/);
 assert.match(frontend, /http\.request\(/);
 assert.match(frontend, /'x-jarvis-client-address': trustedProxyClientAddress/);
+assert.match(frontend, /trustedProxyHttpsState/);
 assert.match(frontend, /TRUSTED_DASHBOARD_PROXY_IPS/);
+assert.match(frontend, /\.\.\.request\.headers,[\s\S]*'x-jarvis-client-address': trustedProxyClientAddress/);
 assert.match(frontend, /JARVIS back end is unavailable/);
 assert.match(server, /JARVIS_API_ONLY/);
 assert.match(server, /JARVIS settings backend unavailable at startup/);

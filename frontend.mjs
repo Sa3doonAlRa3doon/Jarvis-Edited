@@ -3,7 +3,7 @@ import express from 'express';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { trustedProxyClientAddress } from './lib/request-security.mjs';
+import { trustedProxyClientAddress, trustedProxyHttpsState } from './lib/request-security.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -35,7 +35,12 @@ app.use(express.static(publicDir, { etag: true, maxAge: process.env.NODE_ENV ===
 // Keep the browser on one same-origin URL while the API stays private on Pi loopback.
 // Streaming API responses (SSE) and audio/file bodies are piped without buffering.
 app.use((request, response) => {
-  const forwardedProto = request.get('X-Forwarded-Proto') === 'https' || request.secure ? 'https' : 'http';
+  const forwardedProto = trustedProxyHttpsState({
+    secure: request.secure,
+    remoteAddress: request.socket.remoteAddress,
+    forwardedProto: request.get('X-Forwarded-Proto'),
+    trustedProxyAddresses
+  }) ? 'https' : 'http';
   const headers = {
     ...request.headers,
     host: request.get('host'),

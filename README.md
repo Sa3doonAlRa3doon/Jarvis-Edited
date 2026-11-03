@@ -391,7 +391,7 @@ A private, Pi-first JARVIS visualization for OpenJarvis, Ollama, Docker, Google 
 - **Draft first, always visible** — ask `Draft an email to name@example.com saying ...`. JARVIS creates a local draft and opens an editable To/Subject/Body preview. Drafting sends nothing.
 - **Explicit Gmail sending** — one visible draft can be sent only when Gmail sending is enabled, the dashboard session is unlocked, the operations PIN is correct, and `SEND EMAIL` is typed exactly. Draft IDs expire after 15 minutes and work once.
 - **Separate agent account** — OpenJarvis runs as `jarvis-agent`, not the dashboard owner. Optional shell/code/Git tools are restricted to `/srv/jarvis-workspace`; the agent has no sudo rule, dashboard `.env`, OAuth files, SSH keys, private home, or Docker socket.
-- **Secure transport boundary** — the dashboard now binds to `127.0.0.1`. Use an SSH tunnel or Tailscale Serve HTTPS; private APIs reject remote plain HTTP, and forwarded HTTPS is trusted only from a loopback proxy.
+- **Secure transport boundary** — the dashboard now binds to `127.0.0.1`. Use an SSH tunnel or Tailscale Serve HTTPS; private APIs reject remote plain HTTP. Forwarded HTTPS and client addresses are trusted only when the reverse proxy's exact connecting IP is listed in `TRUSTED_DASHBOARD_PROXY_IPS`.
 - **Stronger voice acceptance** — wake phrases and captured command transcripts both require recent physical microphone energy when the audio analyser is available, rejecting silent speech-provider guesses.
 - **Speech-shaped VAD hysteresis** — the microphone gate now requires sustained energy with a peak-to-RMS speech shape, then uses separate attack/release windows. Continuous fans, keyboard rumble, and isolated spikes no longer keep a command capture open or authorize a wake transcript.
 - **Wake troubleshooting is visible** — first-run microphone permission can start from the main page, delayed final wake transcripts are accepted within a bounded six-second physical-voice window, and unsupported speech-recognition browsers report an actionable error instead of appearing silently armed.
@@ -678,7 +678,7 @@ Then use:
 - Command screen: `http://127.0.0.1:8787/`
 - Hidden settings: `http://127.0.0.1:8787/settings`
 
-Enter the installer-generated PIN when the private-console lock appears. For a permanent phone-friendly URL, put a TLS reverse proxy such as Tailscale Serve in front of `127.0.0.1:8787`; do not bind the dashboard directly to LAN HTTP.
+Enter the installer-generated PIN when the private-console lock appears. For a permanent phone-friendly URL, put a TLS reverse proxy such as Tailscale Serve in front of `127.0.0.1:8787`; add the proxy's exact connecting IP to `TRUSTED_DASHBOARD_PROXY_IPS` so its forwarded HTTPS and client address headers can be trusted. Leave the list empty for direct localhost or SSH-tunnel use, and do not bind the dashboard directly to LAN HTTP.
 
 The tunnel is optional for viewing the Pi dashboard and selecting Pi-attached devices, but required for reliable laptop `getUserMedia()` testing unless you add HTTPS.
 
