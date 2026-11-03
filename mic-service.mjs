@@ -9,6 +9,7 @@ import { appendWakeStderr, markWakeListenerSpawnFailure, wakeListenerExitError }
 import { requireInternalServiceAuth } from './lib/local-service-auth.mjs';
 import { binaryAvailable, linuxMicrophones } from './lib/system-probe.mjs';
 import { piWakeEnergyFloor, piWakeListenerEnabled } from './lib/pi-wake-profile.mjs';
+import { wakeListenerRetryDelayMs } from './lib/wake-retry.mjs';
 import { normalizeWakeCapture } from './public/wake-state.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
@@ -48,7 +49,7 @@ function listenerWanted() {
 function scheduleListenerRetry(revision, detail = 'Mic listener stopped unexpectedly.') {
   if (shuttingDown || !listenerWanted() || !desiredConfiguration || revision !== configurationRevision) return;
   restartAttempts = Math.min(6, restartAttempts + 1);
-  const delayMs = Math.min(30_000, 1_000 * (2 ** (restartAttempts - 1)));
+  const delayMs = wakeListenerRetryDelayMs(restartAttempts);
   const message = String(detail || 'Mic listener stopped unexpectedly.').replace(/ Retrying in \d+s\.$/, '');
   wakeState.error = `${message.slice(0, 160)} Retrying in ${Math.ceil(delayMs / 1000)}s.`.slice(0, 220);
   restartTimer = setTimeout(() => {
@@ -116,7 +117,11 @@ async function configureListenerNow(input = {}) {
   }
   const python = process.env.WAKE_PYTHON || path.join(root, '.wake-venv', 'bin', 'python');
   try { await fs.access(python); }
-  catch { wakeState.error = 'Wake-listener Python is missing. Run the local Pi installer.'; return publicState(); }
+  catch {
+    wakeState.error = 'Wake-listener Python is missing. Run the local Pi installer.';
+    scheduleListenerRetry(revision, wakeState.error);
+    return publicState();
+  }
 
   const args = [path.join(root, 'lib', 'wake-listener.py'), '--device', settings.piMicrophone,
     '--callback', callbackUrl,

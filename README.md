@@ -16,6 +16,9 @@
   disable, and a failed listener spawn clears stale readiness and retries with
   bounded backoff. Errors from a child that already has a PID do not make the
   backend forget a process that could still be alive.
+- If the Pi wake Python environment is missing, the mic backend retries with
+  bounded backoff so installing its dependencies can recover without manually
+  re-saving settings or restarting the service.
 - The isolated browser agent warns before blocking a repeated two-action loop;
   the full loop must fall inside the guard's expiry window, and changing pages
   or controls does not trigger it.
