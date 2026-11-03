@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
-import { firstExistingPath, googleAuthFileCandidates, googleTokenCandidatesForCredentials } from '../lib/google-file-paths.mjs';
+import { firstExistingPath, googleAuthFileCandidates, googleTokenCandidatesForCredentials, resolveGoogleAuthPath } from '../lib/google-file-paths.mjs';
 import { googleOAuthClientFromEnvironment, resolveGoogleOAuthConfig } from '../lib/google-oauth-config.mjs';
 
 const { redirectUri: safeRedirectUri, migratedFrom } = resolveGoogleOAuthConfig(process.env);
@@ -12,7 +12,7 @@ const environmentClient = googleOAuthClientFromEnvironment(process.env);
 const credentialsPath = environmentClient ? '' : await firstExistingPath(fileCandidates.credentials);
 if (!credentialsPath && !environmentClient) throw new Error(`Google OAuth client credentials were not found. Set both GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in the private .env, or add a credentials.json file at ${fileCandidates.credentials[0]}.`);
 const tokenPath = process.env.GOOGLE_TOKEN_PATH
-  ? path.resolve(process.env.GOOGLE_TOKEN_PATH)
+  ? resolveGoogleAuthPath(process.env.GOOGLE_TOKEN_PATH)
   : await firstExistingPath(credentialsPath
     ? googleTokenCandidatesForCredentials(fileCandidates, credentialsPath, process.env)
     : fileCandidates.tokens)

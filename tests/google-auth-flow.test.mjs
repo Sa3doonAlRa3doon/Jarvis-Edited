@@ -3,6 +3,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { GoogleAuthFlow } from '../lib/google-auth-flow.mjs';
+import { resolveGoogleAuthPath } from '../lib/google-file-paths.mjs';
+
+test('keeps absolute Windows OAuth paths absolute on non-Windows hosts', () => {
+  const windowsPath = String.raw`C:\jarvis\private-token\token.json`;
+  assert.equal(resolveGoogleAuthPath(windowsPath), path.win32.normalize(windowsPath));
+});
 
 function childFixture() {
   const child = new EventEmitter();
