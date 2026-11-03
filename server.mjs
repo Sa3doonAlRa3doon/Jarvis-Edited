@@ -33,7 +33,7 @@ import { internalServiceHeaders } from './lib/local-service-auth.mjs';
 import { RoutineEngine, routineCatalog } from './lib/routine-engine.mjs';
 import { StirlingPdfClient, parseStirlingPrompt, stirlingCatalog } from './lib/stirling-pdf.mjs';
 import { buildSyntheticPdf, documentSignature } from './lib/stirling-fixture.mjs';
-import { isLoopbackAddress, privateApiTransportAllowed, trustedHttpsState } from './lib/request-security.mjs';
+import { isLoopbackAddress, privateApiTransportAllowed, rateLimitClientAddress, rateLimitWindow, trustedHttpsState } from './lib/request-security.mjs';
 import { isGoogleNewsPrompt, searchGoogleNews } from './lib/news-tools.mjs';
 import { publicServiceCatalog, runPublicService } from './lib/public-services.mjs';
 import { summarizePublicResult } from './lib/public-response.mjs';
@@ -731,11 +731,14 @@ function verifyPin(input) {
   return crypto.timingSafeEqual(left, right);
 }
 const operationAttempts = new Map();
+function requestRateLimitAddress(request) {
+  return rateLimitClientAddress({
+    remoteAddress: request.socket.remoteAddress || request.ip,
+    proxiedClientAddress: request.get('X-Jarvis-Client-Address')
+  });
+}
 function operationRateLimited(key) {
-  const now = Date.now();
-  const recent = (operationAttempts.get(key) || []).filter((timestamp) => now - timestamp < 60_000);
-  recent.push(now); operationAttempts.set(key, recent);
-  return recent.length > 8;
+  return rateLimitWindow(operationAttempts, key, { maxAttempts: 8, windowMs: 60_000 });
 }
 
 const dashboardLoginAttempts = new Map();
@@ -760,10 +763,7 @@ function verifyDashboardPin(input) {
   return crypto.timingSafeEqual(left, right);
 }
 function loginRateLimited(key) {
-  const now = Date.now();
-  const recent = (dashboardLoginAttempts.get(key) || []).filter((timestamp) => now - timestamp < 10 * 60_000);
-  recent.push(now); dashboardLoginAttempts.set(key, recent);
-  return recent.length > 10;
+  return rateLimitWindow(dashboardLoginAttempts, key, { maxAttempts: 10, windowMs: 10 * 60_000 });
 }
 function requireDashboardAuth(request, response, next) {
   if (dashboardAuthenticated(request)) return next();
@@ -865,7 +865,7 @@ app.get('/api/health', async (_request, response) => response.json({ status: 'ok
 app.get('/api/auth/status', (request, response) => response.json({ required: Boolean(dashboardAccessPin), authenticated: dashboardAuthenticated(request) }));
 app.post('/api/auth/login', (request, response) => {
   if (!dashboardAccessPin) { response.json({ ok: true, required: false }); return; }
-  if (loginRateLimited(request.ip)) { response.status(429).json({ error: 'Too many login attempts. Wait ten minutes.' }); return; }
+  if (loginRateLimited(requestRateLimitAddress(request))) { response.status(429).json({ error: 'Too many login attempts. Wait ten minutes.' }); return; }
   if (!verifyDashboardPin(request.body?.pin)) { response.status(403).json({ error: 'Dashboard PIN is incorrect.' }); return; }
   const token = issueDashboardSession(dashboardSessionSecret);
   const secure = requestUsesTrustedHttps(request);
@@ -962,7 +962,7 @@ app.get('/api/engineering/pipeline/:id', (request, response) => {
 });
 
 app.post('/api/engineering/pipeline', async (request, response) => {
-  if (operationRateLimited(`engineering:${request.ip}`)) { response.status(429).json({ error: 'Too many engineering pipeline runs. Wait one minute.' }); return; }
+  if (operationRateLimited(`engineering:${requestRateLimitAddress(request)}`)) { response.status(429).json({ error: 'Too many engineering pipeline runs. Wait one minute.' }); return; }
   if (engineeringState.active) { response.status(409).json({ error: 'An engineering pipeline run is already active.', run: redactRun(engineeringState.active) }); return; }
   try {
     const normalized = normalizePipelineRequest(request.body || {}, __dirname);
@@ -1052,7 +1052,7 @@ app.patch('/api/routines/:id', async (request, response) => {
   } catch (error) { response.status(400).json({ error: cleanText(error.message, 280) }); }
 });
 app.post('/api/routines/:id/run', async (request, response) => {
-  if (operationRateLimited(`routine:${request.ip}`)) { response.status(429).json({ error: 'Too many routine runs. Wait one minute.' }); return; }
+  if (operationRateLimited(`routine:${requestRateLimitAddress(request)}`)) { response.status(429).json({ error: 'Too many routine runs. Wait one minute.' }); return; }
   try {
     const routine = await routineEngine.runNow(request.params.id);
     response.json({ ok: true, routine });
@@ -1145,7 +1145,7 @@ app.get('/api/media/state', (_request, response) => {
   response.json(mediaDeck.snapshot());
 });
 app.post('/api/media/action', async (request, response) => {
-  if (operationRateLimited(`media:${request.ip}`)) { response.status(429).json({ error: 'Too many media actions. Wait one minute.' }); return; }
+  if (operationRateLimited(`media:${requestRateLimitAddress(request)}`)) { response.status(429).json({ error: 'Too many media actions. Wait one minute.' }); return; }
   try {
     const result = await mediaDeck.applyAction(request.body || {});
     response.json({ ok: true, ...result, state: mediaDeck.snapshot() });
@@ -1156,7 +1156,7 @@ app.get('/api/analytics', async (_request, response) => {
   response.json(await analyticsSnapshot());
 });
 app.post('/api/broadcast/action', async (request, response) => {
-  if (operationRateLimited(`broadcast:${request.ip}`)) { response.status(429).json({ error: 'Too many Broadcast Kit actions. Wait one minute.' }); return; }
+  if (operationRateLimited(`broadcast:${requestRateLimitAddress(request)}`)) { response.status(429).json({ error: 'Too many Broadcast Kit actions. Wait one minute.' }); return; }
   try {
     const result = await broadcastHub.applyAction(request.body || {});
     response.json({ ok: true, ...result, state: broadcastHub.snapshot() });
@@ -1171,7 +1171,7 @@ app.get('/api/stirling/status', async (_request, response) => {
   response.json(await stirlingPdf.status());
 });
 app.post('/api/stirling/smoke', async (request, response) => {
-  if (operationRateLimited(`stirling-smoke:${request.ip}`)) { response.status(429).json({ error: 'Too many Stirling synthetic checks. Wait one minute.' }); return; }
+  if (operationRateLimited(`stirling-smoke:${requestRateLimitAddress(request)}`)) { response.status(429).json({ error: 'Too many Stirling synthetic checks. Wait one minute.' }); return; }
   const operation = cleanText(request.body?.operation || 'compress', 80);
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'jarvis-stirling-ui-'));
   const inputRoot = path.join(tempRoot, 'input');
@@ -1192,7 +1192,7 @@ app.post('/api/stirling/smoke', async (request, response) => {
   }
 });
 app.post('/api/stirling/process', async (request, response) => {
-  if (operationRateLimited(`stirling:${request.ip}`)) { response.status(429).json({ error: 'Too many Stirling PDF requests. Wait one minute.' }); return; }
+  if (operationRateLimited(`stirling:${requestRateLimitAddress(request)}`)) { response.status(429).json({ error: 'Too many Stirling PDF requests. Wait one minute.' }); return; }
   const operation = cleanText(request.body?.operation, 80);
   const inputPath = cleanText(request.body?.inputPath, 1200);
   const supplied = request.body?.options && typeof request.body.options === 'object' ? request.body.options : {};
@@ -1228,7 +1228,7 @@ app.get('/api/agent/live-frame', (_request, response) => {
 });
 app.post('/api/browser/preview', async (request, response) => {
   if (!browserPreviewEnabled) { response.status(503).json({ error: 'Read-only browser previews are disabled on this host.' }); return; }
-  if (operationRateLimited(`browser-preview:${request.ip}`)) { response.status(429).json({ error: 'Too many browser preview refreshes. Wait one minute.' }); return; }
+  if (operationRateLimited(`browser-preview:${requestRateLimitAddress(request)}`)) { response.status(429).json({ error: 'Too many browser preview refreshes. Wait one minute.' }); return; }
   const active = openJarvisLive.status();
   const target = cleanText(request.body?.url || active.previewUrl, 1000);
   if (!target) { response.status(400).json({ error: 'Open a public website first, then refresh its preview.' }); return; }
@@ -1303,7 +1303,7 @@ app.post('/api/google/query', async (request, response) => {
 });
 app.post('/api/google/email/send', async (request, response) => {
   if (!googleEmailSendEnabled) { response.status(503).json({ error: 'Approved Gmail sending is disabled. Re-authorize OAuth with gmail.send, then set GOOGLE_EMAIL_SEND_ENABLED=true.' }); return; }
-  if (operationRateLimited(`email:${request.ip}`)) { response.status(429).json({ error: 'Too many email-send attempts. Wait one minute.' }); return; }
+  if (operationRateLimited(`email:${requestRateLimitAddress(request)}`)) { response.status(429).json({ error: 'Too many email-send attempts. Wait one minute.' }); return; }
   if (!verifyPin(request.body?.pin)) { response.status(403).json({ error: 'Control PIN is incorrect or not configured.' }); return; }
   if (String(request.body?.confirmation || '').trim().toUpperCase() !== 'SEND EMAIL') { response.status(400).json({ error: 'Type SEND EMAIL exactly to confirm.' }); return; }
   let fields;
@@ -1324,7 +1324,7 @@ app.post('/api/google/email/send', async (request, response) => {
 });
 app.post('/api/browser/control/approve', async (request, response) => {
   if (!browserControlEnabled) { response.status(503).json({ error: 'Interactive browser control is disabled on this host.' }); return; }
-  if (operationRateLimited(`browser:${request.ip}`)) { response.status(429).json({ error: 'Too many browser-control attempts. Wait one minute.' }); return; }
+  if (operationRateLimited(`browser:${requestRateLimitAddress(request)}`)) { response.status(429).json({ error: 'Too many browser-control attempts. Wait one minute.' }); return; }
   if (!verifyPin(request.body?.pin)) { response.status(403).json({ error: 'Control PIN is incorrect or not configured.' }); return; }
   if (String(request.body?.confirmation || '').trim().toUpperCase() !== 'ALLOW BROWSER CONTROL') { response.status(400).json({ error: 'Type ALLOW BROWSER CONTROL exactly to approve this one task.' }); return; }
   try {
@@ -1452,7 +1452,7 @@ app.post('/api/operations/action', async (request, response) => {
   const actions = { 'restart-all': 'RESTART ALL', 'stop-until-reboot': 'STOP UNTIL REBOOT', 'maintenance-on': 'ENTER MAINTENANCE', resume: 'RESUME SERVICES', repair: 'REPAIR SERVICES' };
   const action = String(request.body?.action || '');
   if (!actions[action]) { response.status(400).json({ error: 'Unknown operation.' }); return; }
-  if (operationRateLimited(request.ip)) { response.status(429).json({ error: 'Too many control attempts. Wait one minute.' }); return; }
+  if (operationRateLimited(requestRateLimitAddress(request))) { response.status(429).json({ error: 'Too many control attempts. Wait one minute.' }); return; }
   if (!verifyPin(request.body?.pin)) { response.status(403).json({ error: 'Control PIN is incorrect or not configured.' }); return; }
   if (String(request.body?.confirmation || '').trim().toUpperCase() !== actions[action]) { response.status(400).json({ error: `Type ${actions[action]} exactly to confirm.` }); return; }
   if (process.platform !== 'linux') { response.status(501).json({ error: 'Service controls only run on the Raspberry Pi Linux host.' }); return; }
@@ -1470,7 +1470,7 @@ app.post('/api/printer/action', async (request, response) => {
   const confirmations = { pause: 'PAUSE PRINT', resume: 'RESUME PRINT', cancel: 'CANCEL PRINT' };
   const action = String(request.body?.action || '');
   if (!confirmations[action]) { response.status(400).json({ error: 'Unknown printer operation.' }); return; }
-  if (operationRateLimited(`printer:${request.ip}`)) { response.status(429).json({ error: 'Too many control attempts. Wait one minute.' }); return; }
+  if (operationRateLimited(`printer:${requestRateLimitAddress(request)}`)) { response.status(429).json({ error: 'Too many control attempts. Wait one minute.' }); return; }
   if (!verifyPin(request.body?.pin)) { response.status(403).json({ error: 'Control PIN is incorrect or not configured.' }); return; }
   if (String(request.body?.confirmation || '').trim().toUpperCase() !== confirmations[action]) { response.status(400).json({ error: `Type ${confirmations[action]} exactly to confirm.` }); return; }
   if (!printerClient.configured) { response.status(503).json({ error: 'Set PRINTER_URL on the Pi first.' }); return; }
@@ -1497,7 +1497,7 @@ app.post('/api/obs/action', async (request, response) => {
   };
   if (!confirmations[action]) { response.status(400).json({ error: 'Unknown OBS operation.' }); return; }
   if (!obsClient.configured) { response.status(503).json({ error: 'OBS WebSocket is not configured on this host.' }); return; }
-  if (operationRateLimited(`obs:${request.ip}`)) { response.status(429).json({ error: 'Too many OBS control attempts. Wait one minute.' }); return; }
+  if (operationRateLimited(`obs:${requestRateLimitAddress(request)}`)) { response.status(429).json({ error: 'Too many OBS control attempts. Wait one minute.' }); return; }
   if (!verifyPin(request.body?.pin)) { response.status(403).json({ error: 'Control PIN is incorrect or not configured.' }); return; }
   if (String(request.body?.confirmation || '').trim().toUpperCase() !== confirmations[action]) { response.status(400).json({ error: `Type ${confirmations[action]} exactly to confirm.` }); return; }
   try {
@@ -1518,7 +1518,7 @@ app.post('/api/obs/action', async (request, response) => {
 });
 
 app.post('/api/desktop/launch', async (request, response) => {
-  if (operationRateLimited(`desktop:${request.ip}`)) { response.status(429).json({ error: 'Too many desktop-app launch attempts. Wait one minute.' }); return; }
+  if (operationRateLimited(`desktop:${requestRateLimitAddress(request)}`)) { response.status(429).json({ error: 'Too many desktop-app launch attempts. Wait one minute.' }); return; }
   if (!verifyPin(request.body?.pin)) { response.status(403).json({ error: 'Control PIN is incorrect or not configured.' }); return; }
   if (String(request.body?.confirmation || '').trim().toUpperCase() !== 'LAUNCH APP') { response.status(400).json({ error: 'Type LAUNCH APP exactly to confirm.' }); return; }
   try {

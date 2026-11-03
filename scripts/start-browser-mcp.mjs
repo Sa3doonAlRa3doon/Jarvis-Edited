@@ -5,7 +5,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import { browserRequestToUpstream, browserResponseToClient, MCP_TOOL_PREFIX } from './mcp-prefix.mjs';
+import { browserRequestToUpstream, browserResponseToClient, guardBrowserNavigationRequest, MCP_TOOL_PREFIX } from './mcp-prefix.mjs';
 import { BrowserActionLoopGuard, guardBrowserToolRequest } from '../lib/browser-action-loop-guard.mjs';
 import { createPublicNetworkProxy } from '../lib/public-network-proxy.mjs';
 import { listInstalled } from 'camoufox';
@@ -105,6 +105,11 @@ function handleClientLine(line) {
   try {
     payload = JSON.parse(line);
   } catch { return { forwarded: browserRequestToUpstream(line) }; }
+  const navigationResult = guardBrowserNavigationRequest(payload);
+  if (navigationResult?.blocked) {
+    process.stderr.write('[JARVIS] Browser navigation rejected an unsupported URL scheme.\n');
+    return { localResponse: JSON.stringify(navigationResult.localResponse) };
+  }
   const guardResult = guardBrowserToolRequest(payload, browserActionLoopGuard, materialTools);
   if (guardResult?.blocked) {
     process.stderr.write('[JARVIS] Browser loop guard stopped a repeated action pattern.\n');

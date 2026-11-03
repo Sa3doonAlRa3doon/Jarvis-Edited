@@ -3,6 +3,7 @@ import express from 'express';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { trustedProxyClientAddress } from './lib/request-security.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -10,6 +11,7 @@ const host = process.env.HOST || '127.0.0.1';
 const port = Number(process.env.PORT || 8787);
 const apiHost = process.env.API_HOST || '127.0.0.1';
 const apiPort = Number(process.env.API_PORT || 8788);
+const trustedProxyAddresses = String(process.env.TRUSTED_DASHBOARD_PROXY_IPS || '').split(',').map((value) => value.trim()).filter(Boolean);
 const publicDir = path.join(root, 'public');
 
 app.disable('x-powered-by');
@@ -34,7 +36,17 @@ app.use(express.static(publicDir, { etag: true, maxAge: process.env.NODE_ENV ===
 // Streaming API responses (SSE) and audio/file bodies are piped without buffering.
 app.use((request, response) => {
   const forwardedProto = request.get('X-Forwarded-Proto') === 'https' || request.secure ? 'https' : 'http';
-  const headers = { ...request.headers, host: request.get('host'), 'x-forwarded-proto': forwardedProto };
+  const headers = {
+    ...request.headers,
+    host: request.get('host'),
+    'x-forwarded-proto': forwardedProto,
+    // Replace caller input; the API only trusts this from its loopback peer.
+    'x-jarvis-client-address': trustedProxyClientAddress({
+      remoteAddress: request.socket.remoteAddress,
+      forwardedFor: request.get('X-Forwarded-For'),
+      trustedProxyAddresses
+    })
+  };
   const proxy = http.request({ hostname: apiHost, port: apiPort, method: request.method, path: request.originalUrl, headers });
   proxy.on('response', (upstream) => {
     response.writeHead(upstream.statusCode || 502, upstream.headers);
