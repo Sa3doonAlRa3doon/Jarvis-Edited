@@ -1,6 +1,5 @@
 import 'dotenv/config';
 import crypto from 'node:crypto';
-import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -22,7 +21,6 @@ import { buildKnowledgeIndex } from './lib/knowledge-index.mjs';
 import { LocalMemoryStore, parseNotePrompt, parseReminderPrompt } from './lib/local-memory.mjs';
 import { buildMorningBriefing, isMorningBriefingPrompt } from './lib/morning-briefing.mjs';
 import { OpenJarvisLiveBridge } from './lib/openjarvis-live.mjs';
-import { appendWakeStderr, wakeListenerExitError } from './lib/wake-stderr.mjs';
 import { ObsClient } from './lib/obs-client.mjs';
 import { buildObsOverlaySnapshot, normalizeOverlayTheme } from './lib/obs-overlay.mjs';
 import { BroadcastHub, parseBroadcastPrompt } from './lib/broadcast-hub.mjs';
@@ -31,7 +29,7 @@ import { issueDashboardSession, loadDashboardSessionSecret, verifyDashboardSessi
 import { PrinterClient } from './lib/printer-client.mjs';
 import { PrinterCameraClient } from './lib/printer-camera.mjs';
 import { normalizeWakeCapture } from './public/wake-state.js';
-import { piWakeEnergyFloor } from './lib/pi-wake-profile.mjs';
+import { internalServiceHeaders } from './lib/local-service-auth.mjs';
 import { RoutineEngine, routineCatalog } from './lib/routine-engine.mjs';
 import { StirlingPdfClient, parseStirlingPrompt, stirlingCatalog } from './lib/stirling-pdf.mjs';
 import { buildSyntheticPdf, documentSignature } from './lib/stirling-fixture.mjs';
@@ -53,13 +51,12 @@ import { selectVisionModel } from './lib/vision-model-profile.mjs';
 import { createPipelineRun, normalizePipelineRequest, redactRun } from './lib/engineering-pipeline.mjs';
 import { runEngineeringPipeline } from './scripts/engineering-pipeline.mjs';
 import {
-  audioRms, clamp, dockerSummary, linuxCameras, linuxMicrophones,
-  mediaDevices, runBinary, storageDevices, systemMetrics
+  clamp, dockerSummary, runBinary, storageDevices, systemMetrics
 } from './lib/system-probe.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const appVersion = '3.35.2';
+const appVersion = '3.36.0';
 const apiOnly = process.env.JARVIS_API_ONLY === '1';
 const host = apiOnly ? (process.env.API_HOST || '127.0.0.1') : (process.env.HOST || '127.0.0.1');
 const port = Number(apiOnly ? (process.env.API_PORT || 8788) : (process.env.PORT || 8787));
@@ -69,8 +66,11 @@ const openJarvisChatTimeoutMs = safeNumber(process.env.OPENJARVIS_CHAT_TIMEOUT_M
 const ollamaChatTimeoutMs = safeNumber(process.env.OLLAMA_CHAT_TIMEOUT_MS, 45_000, 5_000, 180_000);
 const multiPurposeOllamaTimeoutMs = safeNumber(process.env.MULTI_PURPOSE_OLLAMA_TIMEOUT_MS, 18_000, 5_000, 120_000);
 const ollamaStructuredTimeoutMs = safeNumber(process.env.OLLAMA_STRUCTURED_TIMEOUT_MS, 30_000, 8_000, 120_000);
-const dataDirectory = path.join(__dirname, 'data');
-const settingsPath = path.join(dataDirectory, 'settings.json');
+const dataDirectory = path.resolve(process.env.JARVIS_DATA_DIR || path.join(__dirname, 'data'));
+const internalServiceToken = String(process.env.JARVIS_INTERNAL_SERVICE_TOKEN || '');
+const settingsBackendUrl = String(process.env.JARVIS_SETTINGS_BACKEND_URL || 'http://127.0.0.1:8789').replace(/\/$/, '');
+const cameraBackendUrl = String(process.env.JARVIS_CAMERA_BACKEND_URL || 'http://127.0.0.1:8790').replace(/\/$/, '');
+const micBackendUrl = String(process.env.JARVIS_MIC_BACKEND_URL || 'http://127.0.0.1:8791').replace(/\/$/, '');
 const obsOverlayTokenPath = path.join(dataDirectory, '.obs-overlay-token');
 const eventStore = new EventStore(dataDirectory);
 const broadcastHub = new BroadcastHub(path.join(dataDirectory, 'broadcast.json'), {
@@ -136,7 +136,7 @@ const routineEngine = new RoutineEngine(path.join(dataDirectory, 'routines.json'
 let printerSnapshot = { configured: printerClient.configured, online: false, ready: false, state: printerClient.configured ? 'checking' : 'unconfigured', checkedAt: new Date().toISOString() };
 const printerSubscribers = new Set();
 let knowledgeCache = null;
-const wakeEventToken = crypto.randomBytes(32).toString('hex');
+const wakeEventToken = internalServiceToken;
 const dashboardAccessPin = String(process.env.DASHBOARD_ACCESS_PIN || process.env.OPS_CONTROL_PIN || '');
 const operationsControlPin = String(process.env.OPS_CONTROL_PIN || dashboardAccessPin || '');
 let dashboardSessionSecret = null;
@@ -269,8 +269,16 @@ function validateSettings(input = {}) {
 }
 async function loadSettings() {
   await fs.mkdir(dataDirectory, { recursive: true });
-  try { settings = validateSettings(JSON.parse(await fs.readFile(settingsPath, 'utf8'))); }
-  catch { settings = { ...defaultSettings }; }
+  try {
+    const saved = await localBackendJson(settingsBackendUrl, '/settings');
+    settings = validateSettings(saved);
+    if (!Object.keys(saved || {}).length) await saveSettings(settings);
+  } catch (error) {
+    // The settings service owns the settings document. If it is offline, keep a
+    // safe in-memory default and let the health panel show the degraded backend.
+    settings = { ...defaultSettings };
+    console.error(`JARVIS settings backend unavailable at startup: ${cleanText(error.message, 180)}`);
+  }
 }
 function openJarvisHeaders(extra = {}) {
   const headers = { ...extra };
@@ -281,6 +289,56 @@ async function fetchJson(url, options = {}, timeoutMs = 3000) {
   const response = await fetch(url, { ...options, signal: AbortSignal.timeout(timeoutMs) });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return response.json();
+}
+
+function internalHeaders(extra = {}) {
+  return internalServiceHeaders(internalServiceToken, extra);
+}
+
+async function localBackendResponse(baseUrl, pathname, options = {}, timeoutMs = 5000) {
+  if (!internalServiceToken) throw new Error('Local backend token is not configured.');
+  const headers = internalHeaders(options.headers || {});
+  const response = await fetch(`${baseUrl}${pathname}`, { ...options, headers, signal: AbortSignal.timeout(timeoutMs) });
+  return response;
+}
+
+async function localBackendJson(baseUrl, pathname, options = {}, timeoutMs = 5000) {
+  const response = await localBackendResponse(baseUrl, pathname, options, timeoutMs);
+  if (!response.ok) {
+    let detail = '';
+    try { detail = String((await response.json()).error || ''); } catch {}
+    throw new Error(detail || `Local backend returned HTTP ${response.status}.`);
+  }
+  return response.json();
+}
+
+async function cameraDeviceList() {
+  try { return (await localBackendJson(cameraBackendUrl, '/devices')).cameras || []; }
+  catch { return []; }
+}
+
+async function backendHealth() {
+  const services = [
+    ['settings', settingsBackendUrl], ['camera', cameraBackendUrl], ['microphone', micBackendUrl]
+  ];
+  const entries = await Promise.all(services.map(async ([name, baseUrl]) => {
+    try {
+      const value = await fetchJson(`${baseUrl}/health`, {}, 1200);
+      return [name, {
+        status: value.status === 'ok' ? 'ok' : 'degraded', service: value.service || name, localOnly: value.localOnly === true,
+        ...(typeof value.listenerExpected === 'boolean' ? { listenerExpected: value.listenerExpected, listenerRunning: Boolean(value.listenerRunning), listenerReady: Boolean(value.listenerReady), error: cleanText(value.error, 180) } : {})
+      }];
+    } catch (error) {
+      return [name, { status: 'offline', error: cleanText(error.message || 'unavailable', 120) }];
+    }
+  }));
+  return Object.fromEntries(entries);
+}
+
+async function saveSettings(value) {
+  return localBackendJson(settingsBackendUrl, '/settings', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value)
+  });
 }
 
 async function serviceStatus() {
@@ -713,79 +771,43 @@ function requireDashboardAuth(request, response, next) {
 }
 
 const wakeState = { process: null, running: false, ready: false, model: false, sttModel: false, captureBackend: null, captureTarget: null, lastEvent: null, diagnostics: null, commandCapture: normalizeWakeCapture({ state: 'idle' }), error: null };
-async function stopWakeListener() {
-  if (wakeState.process && !wakeState.process.killed) wakeState.process.kill('SIGTERM');
-  wakeState.process = null; wakeState.running = false; wakeState.ready = false; wakeState.model = false; wakeState.sttModel = false; wakeState.captureBackend = null; wakeState.captureTarget = null; wakeState.diagnostics = null; wakeState.commandCapture = normalizeWakeCapture({ state: 'idle' });
+function applyWakeBackendState(value = {}) {
+  for (const key of ['running', 'ready', 'model', 'sttModel', 'captureBackend', 'captureTarget', 'lastEvent', 'diagnostics', 'error']) {
+    if (Object.prototype.hasOwnProperty.call(value, key)) wakeState[key] = value[key];
+  }
+  if (value.commandCapture) wakeState.commandCapture = normalizeWakeCapture(value.commandCapture);
+  wakeState.process = null;
+}
+async function refreshWakeBackendState() {
+  try { applyWakeBackendState(await localBackendJson(micBackendUrl, '/status', {}, 2500)); }
+  catch (error) { wakeState.running = false; wakeState.ready = false; wakeState.error = cleanText(error.message || 'Local mic backend unavailable.', 220); }
+  return wakeState;
 }
 async function startWakeListener() {
-  await stopWakeListener(); wakeState.error = null;
-  if (process.platform !== 'linux' || !asBool(process.env.ENABLE_PI_WAKE_LISTENER, true)) return;
-  if (settings.source !== 'pi' || !settings.piMicrophone || (!settings.wakeWord && !settings.doubleClap)) return;
-  const microphones = await linuxMicrophones();
-  if (!microphones.some((item) => item.id === settings.piMicrophone)) { wakeState.error = 'Selected Pi microphone is not available.'; return; }
-  const python = process.env.WAKE_PYTHON || path.join(__dirname, '.wake-venv', 'bin', 'python');
-  try { await fs.access(python); } catch { wakeState.error = `Wake listener Python was not found at ${python}. Run install-pi.sh.`; return; }
-  const args = [path.join(__dirname, 'lib', 'wake-listener.py'), '--device', settings.piMicrophone,
-    '--callback', `http://127.0.0.1:${port}/api/wake-event`, '--token', wakeEventToken,
-    '--wake-threshold', String(settings.wakeSensitivity), '--clap-threshold', String(settings.clapSensitivity),
-    '--double-clap-ms', String(settings.doubleClapWindow),
-    '--wake-energy-floor', String(piWakeEnergyFloor(settings.micSensitivity, safeNumber(process.env.PI_WAKE_ENERGY_FLOOR, 0.0035, 0.0005, 0.05))),
-    '--wake-noise-multiplier', String(safeNumber(process.env.PI_WAKE_NOISE_MULTIPLIER, 1.6, 1.05, 8)),
-    '--wake-peak-floor', String(safeNumber(process.env.PI_WAKE_PEAK_FLOOR, 0.004, 0.0005, 0.25)),
-    '--wake-peak-ratio', String(safeNumber(process.env.PI_WAKE_PEAK_RATIO, 1.12, 1, 3))];
-  const configuredSttModel = String(process.env.JARVIS_STT_MODEL_DIR || '').trim();
-  const sttModel = configuredSttModel && path.isAbsolute(configuredSttModel) ? configuredSttModel : configuredSttModel ? path.resolve(__dirname, configuredSttModel) : '';
-  if (sttModel) {
-    args.push('--stt-model', sttModel,
-      '--command-timeout-ms', String(safeNumber(process.env.JARVIS_STT_COMMAND_TIMEOUT_MS, 15_000, 5_000, 30_000)),
-      '--command-silence-ms', String(safeNumber(process.env.JARVIS_STT_COMMAND_SILENCE_MS, 900, 350, 2_000)),
-      '--command-warmup-ms', String(safeNumber(process.env.JARVIS_STT_COMMAND_WARMUP_MS, 1_200, 0, 5_000)));
+  wakeState.error = null;
+  try {
+    const result = await localBackendJson(micBackendUrl, '/configure', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settings, callbackUrl: 'http://127.0.0.1:' + port + '/api/wake-event' })
+    }, 8000);
+    applyWakeBackendState(result);
+  } catch (error) {
+    wakeState.running = false;
+    wakeState.ready = false;
+    wakeState.error = cleanText(error.message || 'Local mic backend unavailable.', 220);
   }
-  if (settings.wakeWord) args.push('--wake-enabled');
-  if (settings.doubleClap) args.push('--clap-enabled');
-  const wakeEnv = { ...process.env, PYTHONUNBUFFERED: '1' };
-  if (!wakeEnv.XDG_RUNTIME_DIR && typeof process.getuid === 'function') {
-    const runtimeDir = `/run/user/${process.getuid()}`;
-    try { await fs.access(runtimeDir); wakeEnv.XDG_RUNTIME_DIR = runtimeDir; } catch {}
+}
+
+async function stopWakeListener() {
+  try {
+    const result = await localBackendJson(micBackendUrl, '/configure', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settings: { ...settings, wakeWord: false, doubleClap: false }, callbackUrl: 'http://127.0.0.1:' + port + '/api/wake-event' })
+    }, 4000);
+    applyWakeBackendState(result);
+  } catch {
+    // The dedicated mic unit also stops its capture process when systemd stops it.
   }
-  const child = spawn(python, args, { stdio: ['ignore', 'pipe', 'pipe'], env: wakeEnv });
-  wakeState.process = child; wakeState.running = true;
-  let stderrTail = '';
-  let buffer = '';
-  child.stdout.setEncoding('utf8');
-  child.stdout.on('data', (chunk) => {
-    buffer += chunk; const lines = buffer.split(/\r?\n/); buffer = lines.pop() || '';
-    for (const line of lines) {
-      try {
-        const message = JSON.parse(line);
-        if (message.type === 'ready') { wakeState.ready = true; wakeState.model = Boolean(message.wake_model); wakeState.sttModel = Boolean(message.stt_model); wakeState.captureBackend = cleanText(message.capture_backend, 24) || null; wakeState.captureTarget = cleanText(message.capture_target, 48) || null; wakeState.commandCapture = normalizeWakeCapture({ state: 'idle' }); }
-        else if (message.type === 'diagnostic') wakeState.diagnostics = {
-          micLevel: safeNumber(message.mic_level, 0, 0, 1),
-          micPeak: safeNumber(message.mic_peak, 0, 0, 1),
-          noiseFloor: safeNumber(message.noise_floor, 0, 0, 1),
-          signalToNoiseDb: safeNumber(message.signal_to_noise_db, 0, -120, 120),
-          physicalGate: Boolean(message.physical_gate),
-          wakeScore: safeNumber(message.wake_score, 0, 0, 1),
-          wakeScoreHits: safeNumber(message.wake_score_hits, 0, 0, 3),
-          wakeScoreReady: Boolean(message.wake_score_ready),
-          source: 'pi',
-          at: new Date().toISOString()
-        };
-        else if (message.type === 'activation') wakeState.lastEvent = { ...message, at: new Date().toISOString() };
-        else if (message.type === 'command_capture') wakeState.commandCapture = normalizeWakeCapture(message);
-        else if (message.type === 'command') wakeState.commandCapture = normalizeWakeCapture({ state: 'complete' });
-        else if (message.type.endsWith('error')) wakeState.error = cleanText(message.message, 220);
-      } catch {}
-    }
-  });
-  // Python runtimes such as ONNX Runtime can write normal provider notices
-  // and UserWarnings to stderr while the listener remains healthy. Keep a
-  // bounded tail for crash diagnosis, but only surface it if the child exits
-  // abnormally; structured listener errors arrive on stdout above.
-  child.stderr.setEncoding('utf8'); child.stderr.on('data', (chunk) => { stderrTail = appendWakeStderr(stderrTail, chunk); });
-  child.on('exit', (code) => {
-    if (wakeState.process === child) { wakeState.process = null; wakeState.running = false; wakeState.ready = false; wakeState.model = false; wakeState.sttModel = false; wakeState.captureBackend = null; wakeState.captureTarget = null; wakeState.commandCapture = normalizeWakeCapture({ state: 'idle' }); const exitError = wakeListenerExitError(code, wakeState.error, stderrTail); if (exitError) wakeState.error = cleanText(exitError, 220); }
-  });
 }
 
 app.disable('x-powered-by');
@@ -810,7 +832,7 @@ app.use('/api', (request, response, next) => {
 
 app.post('/api/wake-event', async (request, response) => {
   const token = String(request.get('X-Wake-Token') || '');
-  if (token.length !== wakeEventToken.length || !crypto.timingSafeEqual(Buffer.from(token), Buffer.from(wakeEventToken))) { response.status(403).json({ error: 'Forbidden' }); return; }
+  if (!wakeEventToken || token.length !== wakeEventToken.length || !crypto.timingSafeEqual(Buffer.from(token), Buffer.from(wakeEventToken))) { response.status(403).json({ error: 'Forbidden' }); return; }
   const kind = request.body?.kind === 'double_clap' ? 'double_clap' : 'wake_word';
   const command = cleanText(request.body?.command, 600);
   const detail = {
@@ -839,7 +861,7 @@ function enforceSameOrigin(request, response, next) {
   response.status(403).json({ error: 'Cross-origin mutation blocked.' });
 }
 app.use('/api', enforceSameOrigin);
-app.get('/api/health', (_request, response) => response.json({ status: 'ok', version: appVersion }));
+app.get('/api/health', async (_request, response) => response.json({ status: 'ok', version: appVersion, backends: await backendHealth() }));
 app.get('/api/auth/status', (request, response) => response.json({ required: Boolean(dashboardAccessPin), authenticated: dashboardAuthenticated(request) }));
 app.post('/api/auth/login', (request, response) => {
   if (!dashboardAccessPin) { response.json({ ok: true, required: false }); return; }
@@ -966,7 +988,7 @@ app.get('/api/workspace/status', async (_request, response) => {
   try { desktopApps = await desktopAppBridge.list(); } catch {}
   const obsStatus = await obsClient.readStatus().catch(() => ({ online: false, configured: obsClient.configured }));
   const installed = await installedOllamaModels();
-  const piCameras = await linuxCameras();
+  const piCameras = await cameraDeviceList();
   const selectedPiCamera = settings.source === 'pi' ? settings.piCamera : '';
   const stirlingSnapshot = stirlingPdf.snapshot();
   const broadcastState = broadcastHub.snapshot();
@@ -1082,7 +1104,7 @@ app.delete('/api/reminders/:id', async (request, response) => {
   catch (error) { response.status(404).json({ error: cleanText(error.message, 260) }); }
 });
 app.get('/api/capabilities', async (_request, response) => {
-  const [services, google, operations, desktop, stirling, cameras] = await Promise.all([serviceStatus(), googleConnectorStatus(), operationStatus(), desktopAppBridge.list(), stirlingPdf.status(), linuxCameras()]);
+  const [services, google, operations, desktop, stirling, cameras] = await Promise.all([serviceStatus(), googleConnectorStatus(), operationStatus(), desktopAppBridge.list(), stirlingPdf.status(), cameraDeviceList()]);
   response.set('Cache-Control', 'no-store');
   response.json(buildCapabilitySnapshot({ services, google, printer: printerSnapshot, operations, stirling, settings: { ...settings, piCameraAvailable: Boolean(settings.piCamera && cameras.some((item) => item.id === settings.piCamera)), routineCount: routineEngine.list().length, obsConfigured: obsClient.configured, obsOverlayAvailable: Boolean(obsOverlayToken), broadcastKitAvailable: true, analyticsAvailable: true, mediaDeckAvailable: true, knowledgeAvailable: true, engineeringAvailable: true, morningBriefingAvailable: true, mapsWeatherAvailable: true, desktopAppsAvailable: desktop.apps.length > 0, desktopAppCount: desktop.apps.length, desktopAppsPlatform: desktop.platform }, browserControlEnabled, googleEmailSendEnabled, models, installedModels: services.ollama?.models }));
 });
@@ -1220,7 +1242,10 @@ app.post('/api/browser/preview', async (request, response) => {
 app.get('/api/obs/status', async (_request, response) => { response.set('Cache-Control', 'no-store'); response.json(await obsClient.readStatus({ force: true })); });
 app.get('/api/events/history', (_request, response) => response.json(eventStore.snapshot()));
 app.get('/api/operations/status', async (_request, response) => response.json(await operationStatus()));
-app.get('/api/wake/status', (_request, response) => response.json({ ...wakeState, process: undefined, configured: settings.source === 'pi' && Boolean(settings.piMicrophone) }));
+app.get('/api/wake/status', async (_request, response) => {
+  await refreshWakeBackendState();
+  response.set('Cache-Control', 'no-store').json({ ...wakeState, process: undefined, configured: settings.source === 'pi' && Boolean(settings.piMicrophone) });
+});
 app.get('/api/knowledge', async (_request, response) => {
   if (!knowledgeCache || Date.now() - knowledgeCache.createdAt > 30_000) {
     const value = await buildKnowledgeIndex({ projectRoot: __dirname, roots: process.env.KNOWLEDGE_ROOTS || '', maxDepth: 4, maxNodes: 180 });
@@ -1356,10 +1381,21 @@ app.post('/api/screen/analyze', async (request, response) => {
 app.get('/api/settings', (_request, response) => response.json(settings));
 app.put('/api/settings', async (request, response) => {
   const next = validateSettings({ ...settings, ...request.body });
-  if (next.piCamera && process.platform === 'linux' && !(await linuxCameras()).some((item) => item.id === next.piCamera)) { response.status(400).json({ error: 'Selected Pi camera is not currently available.' }); return; }
-  if (next.printerPiCamera && process.platform === 'linux' && !(await linuxCameras()).some((item) => item.id === next.printerPiCamera)) { response.status(400).json({ error: 'Selected Pi printer camera is not currently available.' }); return; }
-  if (next.piMicrophone && process.platform === 'linux' && !(await linuxMicrophones()).some((item) => item.id === next.piMicrophone)) { response.status(400).json({ error: 'Selected Pi microphone is not currently available.' }); return; }
-  settings = next; await fs.writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
+  if (process.platform === 'linux') {
+    let cameraDevices;
+    let microphoneDevices;
+    try {
+      [cameraDevices, microphoneDevices] = await Promise.all([
+        localBackendJson(cameraBackendUrl, '/devices'), localBackendJson(micBackendUrl, '/devices')
+      ]);
+    } catch (error) { response.status(503).json({ error: 'Local camera or mic backend is unavailable: ' + cleanText(error.message, 180) }); return; }
+    if (next.piCamera && !(cameraDevices.cameras || []).some((item) => item.id === next.piCamera)) { response.status(400).json({ error: 'Selected Pi camera is not currently available.' }); return; }
+    if (next.printerPiCamera && !(cameraDevices.cameras || []).some((item) => item.id === next.printerPiCamera)) { response.status(400).json({ error: 'Selected Pi printer camera is not currently available.' }); return; }
+    if (next.piMicrophone && !(microphoneDevices.microphones || []).some((item) => item.id === next.piMicrophone)) { response.status(400).json({ error: 'Selected Pi microphone is not currently available.' }); return; }
+  }
+  try { await saveSettings(next); }
+  catch (error) { response.status(503).json({ error: 'Local settings backend is unavailable: ' + cleanText(error.message, 180) }); return; }
+  settings = next;
   await startWakeListener(); await eventStore.append('settings', 'Perception settings updated', { source: settings.source, wakeWord: settings.wakeWord, doubleClap: settings.doubleClap });
   response.json(settings);
 });
@@ -1367,21 +1403,30 @@ app.post('/api/wake/test', async (_request, response) => {
   const event = await eventStore.append('wake', 'Wake signal test', { kind: 'wake_word', source: 'test', score: 1 });
   response.json({ ok: true, event });
 });
-app.get('/api/media/devices', async (_request, response) => { response.set('Cache-Control', 'no-store'); response.json(await mediaDevices()); });
+app.get('/api/media/devices', async (_request, response) => {
+  try {
+    const [cameraDevices, microphoneDevices] = await Promise.all([
+      localBackendJson(cameraBackendUrl, '/devices'), localBackendJson(micBackendUrl, '/devices')
+    ]);
+    response.set('Cache-Control', 'no-store').json({ platform: process.platform, cameras: cameraDevices.cameras || [], microphones: microphoneDevices.microphones || [], tools: { ffmpeg: Boolean(cameraDevices.tools?.ffmpeg), arecord: Boolean(microphoneDevices.tools?.arecord) } });
+  } catch (error) { response.status(503).json({ error: 'Local media backends are unavailable: ' + cleanText(error.message, 180) }); }
+});
 app.get('/api/media/pi-camera/frame.jpg', async (request, response) => {
   const requestedDevice = String(request.query.device || '');
-  if (!(await linuxCameras()).some((item) => item.id === requestedDevice)) { response.status(400).json({ error: 'Choose a camera returned by /api/media/devices.' }); return; }
   try {
-    const frame = await runBinary('ffmpeg', ['-nostdin', '-hide_banner', '-loglevel', 'error', '-f', 'v4l2', '-i', requestedDevice, '-frames:v', '1', '-vf', 'scale=960:-2', '-f', 'image2pipe', '-vcodec', 'mjpeg', 'pipe:1'], { encoding: 'buffer', timeout: 9000, maxBuffer: 8 * 1024 * 1024 });
-    response.set({ 'Cache-Control': 'no-store, max-age=0', 'Content-Type': 'image/jpeg', 'Content-Length': frame.length }); response.send(frame);
-  } catch (error) { response.status(503).json({ error: `Pi camera capture failed: ${error.message}` }); }
+    const frame = await localBackendResponse(cameraBackendUrl, '/frame?device=' + encodeURIComponent(requestedDevice), {}, 12_000);
+    if (!frame.ok) { let body = {}; try { body = await frame.json(); } catch {} response.status(frame.status).json(body); return; }
+    const bytes = Buffer.from(await frame.arrayBuffer());
+    response.set({ 'Cache-Control': 'no-store, max-age=0', 'Content-Type': 'image/jpeg', 'Content-Length': bytes.length }).send(bytes);
+  } catch (error) { response.status(503).json({ error: 'Pi camera backend failed: ' + cleanText(error.message, 240) }); }
 });
 app.get('/api/media/printer-camera/frame.jpg', async (_request, response) => {
   try {
     if (settings.printerPiCamera) {
-      if (!(await linuxCameras()).some((item) => item.id === settings.printerPiCamera)) { response.status(503).json({ error: 'The selected Pi printer camera is no longer available.' }); return; }
-      const frame = await runBinary('ffmpeg', ['-nostdin', '-hide_banner', '-loglevel', 'error', '-f', 'v4l2', '-i', settings.printerPiCamera, '-frames:v', '1', '-vf', 'scale=960:-2', '-f', 'image2pipe', '-vcodec', 'mjpeg', 'pipe:1'], { encoding: 'buffer', timeout: 9000, maxBuffer: 8 * 1024 * 1024 });
-      response.set({ 'Cache-Control': 'no-store, max-age=0', 'Content-Type': 'image/jpeg', 'Content-Length': frame.length }); response.send(frame); return;
+      const frame = await localBackendResponse(cameraBackendUrl, '/frame?device=' + encodeURIComponent(settings.printerPiCamera), {}, 12_000);
+      if (!frame.ok) { let body = {}; try { body = await frame.json(); } catch {} response.status(frame.status).json(body); return; }
+      const bytes = Buffer.from(await frame.arrayBuffer());
+      response.set({ 'Cache-Control': 'no-store, max-age=0', 'Content-Type': 'image/jpeg', 'Content-Length': bytes.length }).send(bytes); return;
     }
     const frame = await printerCamera.frame();
     response.set({ 'Cache-Control': 'no-store, max-age=0', 'Content-Type': frame.contentType, 'Content-Length': frame.buffer.length });
@@ -1396,11 +1441,11 @@ app.get('/api/media/printer-camera/discover', async (request, response) => {
 });
 app.get('/api/media/pi-microphone/level', async (request, response) => {
   const requestedDevice = String(request.query.device || '');
-  if (!(await linuxMicrophones()).some((item) => item.id === requestedDevice)) { response.status(400).json({ error: 'Choose a microphone returned by /api/media/devices.' }); return; }
+  if (process.platform === 'linux' && requestedDevice !== settings.piMicrophone) { response.status(400).json({ error: 'Choose the active microphone selected in Vision & Voice.' }); return; }
   try {
-    const audio = await runBinary('arecord', ['-D', requestedDevice, '-q', '-d', '1', '-f', 'S16_LE', '-r', '16000', '-c', '1', '-t', 'raw'], { encoding: 'buffer', timeout: 5000, maxBuffer: 2 * 1024 * 1024 });
-    response.set('Cache-Control', 'no-store'); response.json({ level: clamp(audioRms(audio), 0, 1), device: requestedDevice });
-  } catch (error) { response.status(503).json({ error: `Pi microphone sample failed: ${error.message}` }); }
+    const sample = await localBackendJson(micBackendUrl, '/level?device=' + encodeURIComponent(requestedDevice));
+    response.set('Cache-Control', 'no-store').json(sample);
+  } catch (error) { response.status(503).json({ error: 'Live microphone backend failed: ' + cleanText(error.message, 220) }); }
 });
 
 app.post('/api/operations/action', async (request, response) => {

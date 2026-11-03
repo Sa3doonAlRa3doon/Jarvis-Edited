@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import select
 import subprocess
@@ -239,7 +240,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", required=True)
     parser.add_argument("--callback", required=True)
-    parser.add_argument("--token", required=True)
+    parser.add_argument("--token", default=os.environ.get("JARVIS_WAKE_EVENT_TOKEN", ""))
     parser.add_argument("--wake-threshold", type=float, default=0.55)
     parser.add_argument("--wake-energy-floor", type=float, default=0.0035)
     parser.add_argument("--wake-noise-multiplier", type=float, default=1.6)
@@ -255,6 +256,8 @@ def main() -> int:
     parser.add_argument("--wake-enabled", action="store_true")
     parser.add_argument("--clap-enabled", action="store_true")
     args = parser.parse_args()
+    if not args.token:
+        parser.error("Set JARVIS_WAKE_EVENT_TOKEN or pass --token.")
 
     wake_model = None
     if args.wake_enabled:

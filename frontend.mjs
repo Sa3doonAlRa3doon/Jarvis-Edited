@@ -13,6 +13,7 @@ const apiPort = Number(process.env.API_PORT || 8788);
 const publicDir = path.join(root, 'public');
 
 app.disable('x-powered-by');
+app.get('/health', (_request, response) => response.json({ status: 'ok', service: 'dashboard', localOnly: true }));
 app.use((request, response, next) => {
   const scriptPolicy = request.path === '/settings' ? "'self' 'unsafe-eval' 'wasm-unsafe-eval'" : "'self' 'wasm-unsafe-eval'";
   response.set({

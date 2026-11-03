@@ -28,7 +28,7 @@ function Wait-Http {
   while ((Get-Date) -lt $deadline) {
     try {
       $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 5
-      if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500) { return $true }
+      if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 300) { return $true }
     } catch {}
     Start-Sleep -Milliseconds 500
   }
@@ -39,6 +39,9 @@ $node = Get-Command node -ErrorAction SilentlyContinue
 if (-not $node) { throw 'Node.js is required and was not found in PATH.' }
 
 $dashboardPort = [int](Read-DotEnvValue 'PORT' '8787')
+$settingsPort = [int](Read-DotEnvValue 'JARVIS_SETTINGS_BACKEND_PORT' '8789')
+$cameraPort = [int](Read-DotEnvValue 'JARVIS_CAMERA_BACKEND_PORT' '8790')
+$microphonePort = [int](Read-DotEnvValue 'JARVIS_MIC_BACKEND_PORT' '8791')
 $ollamaUrl = [uri](Read-DotEnvValue 'OLLAMA_BASE_URL' 'http://127.0.0.1:11434')
 $openJarvisUrl = [uri](Read-DotEnvValue 'OPENJARVIS_BASE_URL' 'http://127.0.0.1:8000')
 $openJarvisInstall = Read-DotEnvValue 'OPENJARVIS_INSTALL_DIR' (Join-Path $env:LOCALAPPDATA 'OpenJarvis\src')
@@ -69,17 +72,28 @@ if (-not $openJarvisPid) {
 
 $dashboardPid = ListeningPid $dashboardPort
 if (-not $dashboardPid) {
-  Start-Process -FilePath $node.Source -ArgumentList @('server.mjs') -WorkingDirectory $ProjectRoot -RedirectStandardOutput (Join-Path $LogRoot 'server-windows.log') -RedirectStandardError (Join-Path $LogRoot 'server-windows.error.log') -WindowStyle Hidden | Out-Null
+  $stackEntry = Join-Path $ProjectRoot 'scripts\start-split-stack.mjs'
+  $quotedStackEntry = '"' + $stackEntry + '"'
+  Start-Process -FilePath $node.Source -ArgumentList $quotedStackEntry -WorkingDirectory $ProjectRoot -RedirectStandardOutput (Join-Path $LogRoot 'stack-windows.log') -RedirectStandardError (Join-Path $LogRoot 'stack-windows.error.log') -WindowStyle Hidden | Out-Null
 }
 
 $dashboardReady = Wait-Http "http://127.0.0.1:$dashboardPort/api/health"
+$dashboardFrontendReady = Wait-Http "http://127.0.0.1:$dashboardPort/health" 15
+$settingsReady = Wait-Http "http://127.0.0.1:$settingsPort/health" 15
+$cameraReady = Wait-Http "http://127.0.0.1:$cameraPort/health" 15
+$microphoneReady = Wait-Http "http://127.0.0.1:$microphonePort/health" 15
 $openJarvisReady = Wait-Http "$($openJarvisUrl.AbsoluteUri.TrimEnd('/'))/health"
 $ollamaReady = Wait-Http "$($ollamaUrl.AbsoluteUri.TrimEnd('/'))/api/tags"
-if (-not $dashboardReady) { throw "Dashboard did not become healthy at http://127.0.0.1:$dashboardPort." }
+if (-not ($dashboardReady -and $dashboardFrontendReady)) { throw "Dashboard front end or API did not become healthy at http://127.0.0.1:$dashboardPort." }
+if (-not ($settingsReady -and $cameraReady -and $microphoneReady)) { throw 'One or more local JARVIS backends did not become healthy. If an older JARVIS is already running, run npm.cmd run restart:local, then check runtime-logs/stack-windows.error.log.' }
+$health = Invoke-RestMethod "http://127.0.0.1:$dashboardPort/api/health" -TimeoutSec 5
+$backendStatuses = @($health.backends.settings.status, $health.backends.camera.status, $health.backends.microphone.status)
+if ($health.version -eq '3.36.0' -and ($backendStatuses -contains 'offline' -or $backendStatuses -contains 'degraded')) { throw 'The split stack is running, but at least one internal backend is degraded. See runtime-logs/stack-windows.error.log.' }
 
 Write-Host "JARVIS dashboard: http://127.0.0.1:$dashboardPort/"
 Write-Host "JARVIS settings:  http://127.0.0.1:$dashboardPort/settings"
 Write-Host "JARVIS workspace: http://127.0.0.1:$dashboardPort/workspace"
+Write-Host "Local backends:   settings :$settingsPort | camera :$cameraPort | microphone :$microphonePort | core API :$(Read-DotEnvValue 'API_PORT' '8788')"
 Write-Host ("OpenJarvis:      " + ($(if ($openJarvisReady) { 'ONLINE' } else { 'OFFLINE' })))
 Write-Host ("Ollama:           " + ($(if ($ollamaReady) { 'ONLINE' } else { 'OFFLINE' })))
 Write-Host 'Interactive browser actions remain isolated and require one exact dashboard approval.'

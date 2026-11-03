@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP_USER="$(id -un)"
+APP_USER="${SUDO_USER:-$(id -un)}"
 APP_HOME="$(getent passwd "$APP_USER" | cut -d: -f6)"
 AGENT_USER="jarvis-agent"
 AGENT_HOME="/var/lib/jarvis-agent"
@@ -200,6 +200,18 @@ grep -q '^PRINTER_API_KEY=' .env || set_env_value PRINTER_API_KEY ''
 grep -q '^PRINTER_TIMEOUT_MS=' .env || set_env_value PRINTER_TIMEOUT_MS 2800
 grep -q '^KNOWLEDGE_ROOTS=' .env || set_env_value KNOWLEDGE_ROOTS ''
 
+if ! grep -q '^JARVIS_INTERNAL_SERVICE_TOKEN=.' .env; then
+  INTERNAL_SERVICE_TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+  set_env_value JARVIS_INTERNAL_SERVICE_TOKEN "$INTERNAL_SERVICE_TOKEN"
+  unset INTERNAL_SERVICE_TOKEN
+fi
+set_env_value JARVIS_SETTINGS_BACKEND_PORT 8789
+set_env_value JARVIS_CAMERA_BACKEND_PORT 8790
+set_env_value JARVIS_MIC_BACKEND_PORT 8791
+set_env_value JARVIS_SETTINGS_BACKEND_URL http://127.0.0.1:8789
+set_env_value JARVIS_CAMERA_BACKEND_URL http://127.0.0.1:8790
+set_env_value JARVIS_MIC_BACKEND_URL http://127.0.0.1:8791
+
 if ! grep -q '^OPS_CONTROL_PIN=.' .env; then
   GENERATED_PIN="$(python3 -c 'import secrets; print(f"{secrets.randbelow(1000000):06d}")')"
   set_env_value OPS_CONTROL_PIN "$GENERATED_PIN"
@@ -335,6 +347,12 @@ else
   echo "Local command transcription skipped. When ready, run: $0 --stt"
 fi
 install -d -m 0700 "$APP_DIR/data"
+if [[ "$EUID" -eq 0 ]]; then
+  sudo chown "$APP_USER:$APP_USER" "$APP_DIR/.env"
+  sudo chown -R "$APP_USER:$APP_USER" "$APP_DIR/data"
+  [[ ! -d "$APP_DIR/models" ]] || sudo chown -R "$APP_USER:$APP_USER" "$APP_DIR/models"
+  sudo chmod 0600 "$APP_DIR/.env"
+fi
 
 sudo install -m 0750 "$APP_DIR/scripts/jarvis-service-control.sh" /usr/local/sbin/jarvis-service-control
 sudo tee /etc/sudoers.d/jarvis-command-center >/dev/null <<EOF
@@ -343,7 +361,7 @@ EOF
 sudo chmod 0440 /etc/sudoers.d/jarvis-command-center
 sudo visudo -cf /etc/sudoers.d/jarvis-command-center >/dev/null
 
-for GUARDED_SERVICE in ollama.service openjarvis-api.service hatclanker.service; do
+for GUARDED_SERVICE in ollama.service openjarvis-api.service openjarvis-settings.service openjarvis-camera.service openjarvis-mic.service hatclanker.service; do
   sudo install -d -m 0755 "/etc/systemd/system/${GUARDED_SERVICE}.d"
   sudo tee "/etc/systemd/system/${GUARDED_SERVICE}.d/90-jarvis-maintenance.conf" >/dev/null <<'EOF'
 [Unit]
@@ -415,11 +433,11 @@ else
   echo "Isolated OpenJarvis was not found at $OPENJARVIS_DIR. Run scripts/setup-openjarvis-pi.sh first; the dashboard will use Ollama fallback meanwhile."
 fi
 
-CORE_SERVICE_FILE="/etc/systemd/system/openjarvis-core.service"
-sudo tee "$CORE_SERVICE_FILE" >/dev/null <<EOF
+SETTINGS_SERVICE_FILE="/etc/systemd/system/openjarvis-settings.service"
+sudo tee "$SETTINGS_SERVICE_FILE" >/dev/null <<EOF
 [Unit]
-Description=JARVIS private API and voice back end
-After=network-online.target ollama.service openjarvis-api.service
+Description=JARVIS local settings backend
+After=network-online.target
 Wants=network-online.target
 
 [Service]
@@ -428,7 +446,85 @@ User=$APP_USER
 WorkingDirectory=$APP_DIR
 EnvironmentFile=$APP_DIR/.env
 Environment=NODE_ENV=production
+Environment=JARVIS_DATA_DIR=$APP_DIR/data
+ExecStart=$NODE_BIN $APP_DIR/settings-service.mjs
+Restart=on-failure
+RestartSec=4
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=$APP_DIR/data
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+CAMERA_SERVICE_FILE="/etc/systemd/system/openjarvis-camera.service"
+sudo tee "$CAMERA_SERVICE_FILE" >/dev/null <<EOF
+[Unit]
+Description=JARVIS local camera backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$APP_USER
+WorkingDirectory=$APP_DIR
+EnvironmentFile=$APP_DIR/.env
+Environment=NODE_ENV=production
+ExecStart=$NODE_BIN $APP_DIR/camera-service.mjs
+Restart=on-failure
+RestartSec=4
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+MIC_SERVICE_FILE="/etc/systemd/system/openjarvis-mic.service"
+sudo tee "$MIC_SERVICE_FILE" >/dev/null <<EOF
+[Unit]
+Description=JARVIS local microphone and wake-word backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$APP_USER
+WorkingDirectory=$APP_DIR
+EnvironmentFile=$APP_DIR/.env
+Environment=NODE_ENV=production
+ExecStart=$NODE_BIN $APP_DIR/mic-service.mjs
+Restart=on-failure
+RestartSec=4
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+CORE_SERVICE_FILE="/etc/systemd/system/openjarvis-core.service"
+sudo tee "$CORE_SERVICE_FILE" >/dev/null <<EOF
+[Unit]
+Description=JARVIS private API and voice back end
+After=network-online.target ollama.service openjarvis-api.service openjarvis-settings.service openjarvis-camera.service openjarvis-mic.service
+Wants=network-online.target ollama.service openjarvis-api.service openjarvis-settings.service openjarvis-camera.service openjarvis-mic.service
+
+[Service]
+Type=simple
+User=$APP_USER
+WorkingDirectory=$APP_DIR
+EnvironmentFile=$APP_DIR/.env
+Environment=NODE_ENV=production
 Environment=JARVIS_API_ONLY=1
+Environment=JARVIS_DATA_DIR=$APP_DIR/data
 ExecStart=$NODE_BIN $APP_DIR/server.mjs
 Restart=on-failure
 RestartSec=4
@@ -474,13 +570,15 @@ sudo systemctl daemon-reload
 if systemctl list-unit-files ollama.service >/dev/null 2>&1; then
   sudo systemctl try-restart ollama.service || true
 fi
-sudo systemctl enable openjarvis-core openjarvis-dashboard
+sudo systemctl enable openjarvis-settings openjarvis-camera openjarvis-mic openjarvis-core openjarvis-dashboard
+sudo systemctl restart openjarvis-settings openjarvis-camera openjarvis-mic || sudo systemctl start openjarvis-settings openjarvis-camera openjarvis-mic
 sudo systemctl restart openjarvis-core || sudo systemctl start openjarvis-core
 sudo systemctl restart openjarvis-dashboard || sudo systemctl start openjarvis-dashboard
 if [[ -n "$JARVIS_BIN" ]]; then
   sudo systemctl status openjarvis-api --no-pager -l || true
 fi
 sudo systemctl status openjarvis-core --no-pager -l
+sudo systemctl status openjarvis-settings openjarvis-camera openjarvis-mic --no-pager -l
 sudo systemctl status openjarvis-dashboard --no-pager -l
 
 echo

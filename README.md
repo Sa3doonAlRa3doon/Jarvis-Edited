@@ -1,4 +1,17 @@
-# OpenJarvis Pi Command Center 3.35.2
+# OpenJarvis Pi Command Center 3.36.0
+
+### 3.36.0 separate local backends
+
+- The dashboard, core API, settings storage, camera capture, and microphone/wake
+  listener now run as five independent local processes. Each private backend
+  listens only on `127.0.0.1`; internal calls use a random local bearer token.
+- On Pi, settings, camera, and mic backends have separate systemd units. The
+  microphone backend is the only process that opens the selected ALSA device;
+  camera capture stays in the camera unit and settings writes stay in the
+  settings unit.
+- The installer resolves the service user from `SUDO_USER` when run with sudo,
+  then starts the mic backend as that account so its `audio` group membership
+  applies.
 
 ### 3.35.2 retry dismissed screen pickers
 
@@ -524,10 +537,13 @@ OpenJarvis documents `native_openhands` as a CodeAct agent that generates and ex
 
 ## Runtime process split
 
-- The Pi installer runs the dashboard UI as `openjarvis-dashboard.service` and the application API plus Pi voice listener as `openjarvis-core.service`.
+External projects used for design research and their code-reuse terms are listed in [docs/REFERENCE-SOURCES.md](docs/REFERENCE-SOURCES.md).
+
+- The Pi installer runs five processes as separate systemd units: `openjarvis-dashboard.service` (front end), `openjarvis-core.service` (application API), `openjarvis-settings.service` (settings file owner), `openjarvis-camera.service` (Pi camera enumeration/capture), and `openjarvis-mic.service` (selected ALSA microphone and wake listener).
 - The API binds to `API_HOST` / `API_PORT` (loopback by default); the dashboard serves `public/` and proxies API traffic through the same browser origin. This keeps cookies, microphone permissions, and server-sent status streams on one origin while preventing a direct LAN API port.
-- `npm start` keeps the simple combined server for development. Use `npm run start:split` to exercise separate front-end and back-end processes on a desktop.
-- `PORT` is the dashboard port (default `8787`); `API_PORT` is private (default `8788`). Keep `API_HOST=127.0.0.1` on Pi and use SSH or an HTTPS proxy to reach the dashboard.
+- `npm start` or `npm run start:split` starts all five processes locally and waits for each health endpoint before announcing readiness. On Windows, camera/mic devices selected in the dashboard still use browser permissions; the Pi-only ALSA and V4L2 adapters stay inactive.
+- `npm run smoke:split` starts an isolated temporary stack on loopback and checks process health, internal service authentication, settings persistence, and API-to-backend routing. It does not replace a physical Pi camera or microphone test.
+- `PORT` is the dashboard port (`8787`); `API_PORT` is private (`8788`). The local settings, camera, and mic backends use ports `8789`, `8790`, and `8791`. Keep all backend addresses on `127.0.0.1`.
 
 ## Security model
 
@@ -535,7 +551,7 @@ OpenJarvis documents `native_openhands` as a CodeAct agent that generates and ex
 - State-changing requests are same-origin checked.
 - The dashboard sends only a fixed action name to a root-owned helper. Service names and shell text are not accepted from the browser.
 - The root helper is limited by `/etc/sudoers.d/jarvis-command-center` to six exact commands.
-- The helper manages only `ollama.service`, `openjarvis-api.service`, and `hatclanker.service`. It deliberately leaves `openjarvis-core.service`, `openjarvis-dashboard.service`, SSH, networking, and the OS running so you can resume maintenance remotely.
+- The helper can stop/restart Ollama, the isolated OpenJarvis API, the settings/camera/mic backends, and Hatclanker. It deliberately leaves `openjarvis-core.service`, `openjarvis-dashboard.service`, SSH, networking, and the OS running so you can resume maintenance remotely.
 - “Stop until reboot” uses a lock in `/run`; Linux clears it on reboot.
 - “Persistent stop” uses a lock in `/var/lib/jarvis-command-center`; it survives reboot until **Resume** removes it.
 - Docker maintenance records the exact running container IDs before stopping them and resumes only those IDs.
@@ -559,6 +575,7 @@ chmod +x install-pi.sh scripts/setup-openjarvis-pi.sh
 # OR, for the requested user-level Pi control:
 ./scripts/setup-openjarvis-pi.sh --host-control
 ./install-pi.sh
+# This installs/restarts the new settings, camera, and mic units too.
 # Optional, explicit 3.2 GB local vision download:
 # ./install-pi.sh --vision
 ```
@@ -571,7 +588,7 @@ To update an existing GitHub installation later:
 cd ~/openjarvis-pi-command-center
 git pull --ff-only origin main
 npm install --omit=dev
-sudo systemctl restart openjarvis-dashboard
+./install-pi.sh
 ```
 
 Your local `.env`, OAuth files, logs, and wake environment remain untracked during updates.
@@ -603,9 +620,9 @@ runtime uses Node's current zlib/zstd bindings. It:
 1. Installs production Node packages, the paired Camoufox browser, the root-owned Playwright MCP bridge, and FFmpeg/ALSA/V4L2 tools.
 2. Creates `.wake-venv`, installs openWakeWord/ONNX Runtime, and downloads the official pretrained wake models once.
 3. Generates and prints a private six-digit dashboard/maintenance PIN if `.env` does not already contain one.
-4. Installs the fixed root helper and its exact sudoers rule.
-5. Adds maintenance-lock conditions to the three allow-listed services.
-6. Installs persistent `openjarvis-api.service`, `openjarvis-core.service`, and `openjarvis-dashboard.service` units. The application API binds only to loopback; the dashboard keeps the configured `HOST` / `PORT`. OpenJarvis runs under the isolated `jarvis-agent` account with its browser profile and output under `/srv/jarvis-workspace`.
+4. Generates a random private token shared only by the loopback backends, then installs the fixed root helper and its exact sudoers rule.
+5. Adds maintenance-lock conditions to the allow-listed services, including the three hardware/settings backends.
+6. Installs persistent `openjarvis-api.service`, `openjarvis-settings.service`, `openjarvis-camera.service`, `openjarvis-mic.service`, `openjarvis-core.service`, and `openjarvis-dashboard.service` units. Internal JARVIS backends bind only to loopback; the dashboard keeps the configured `HOST` / `PORT`. OpenJarvis runs under the isolated `jarvis-agent` account with its browser profile and output under `/srv/jarvis-workspace`.
 
 The installer does not silently download a multi-gigabyte vision model. After checking Pi storage and bandwidth, run `./install-pi.sh --vision` (or `./install-pi.sh --vision-model qwen2.5vl:3b`) to pull the selected Ollama tag and write `JARVIS_VISION_MODEL` into the private `.env`. Both the Node installer and the Pi shell installer independently check `ollama list` after the pull and refuse to write the vision setting if the exact tag is missing; the dashboard reports `VISION READY` only after its own local catalog check also succeeds.
 
@@ -623,7 +640,7 @@ node .\scripts\start-browser-mcp.mjs --check
 npm.cmd run start:local
 ```
 
-`start:local` starts Ollama, the configured OpenJarvis virtual environment, and the dashboard with hidden local processes. It prints only the three loopback URLs and service health; credentials stay in `.env` and are never printed.
+`start:local` starts Ollama, the configured OpenJarvis virtual environment, and the five JARVIS processes with hidden local processes. It checks front-end, API, settings, camera, and microphone health; credentials stay in `.env` and are never printed.
 
 After changing server code, reload only this project safely with:
 
@@ -631,7 +648,7 @@ After changing server code, reload only this project safely with:
 npm.cmd run restart:local
 ```
 
-The restart helper stops a listener only when its command line is verified to be this project's `server.mjs`; it refuses to touch an unrelated process on the configured port. Ollama and OpenJarvis are left running.
+The restart helper stops a listener only when its command line or JARVIS health version identifies this project; it refuses to touch an unrelated process on the configured port. Ollama and OpenJarvis are left running.
 
 On non-Pi Linux, use the same Node project and `scripts/start-browser-mcp.mjs`; run `npx camoufox fetch` and `npm run browser:patch` when the paired browser is not installed. The `--check` command validates the Camoufox executable, private profile, output directory, and headless mode without launching an agent session.
 
@@ -921,5 +938,10 @@ cd "$env:USERPROFILE\Documents\Codex\2026-10-17\new-bot-im-working-on-called\out
 npm.cmd install
 npm.cmd start
 ```
+
+`npm start` launches the dashboard, core API, settings service, camera service,
+and microphone service on loopback. Check each backend in the response from
+`http://127.0.0.1:8787/api/health`; camera/mic capture from the Windows browser
+continues to use the browser's selected devices.
 
 Open the command screen and `/settings`. Pi-only maintenance and openWakeWord controls correctly stay unavailable on Windows; system telemetry, the UI, live preview, browser camera/person detection, browser microphone level, local double-clap detection, and any reachable OpenJarvis/Ollama services can still be tested.
