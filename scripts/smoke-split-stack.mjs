@@ -28,6 +28,7 @@ for (const key of ['dashboard', 'api', 'settings', 'camera', 'mic']) {
 }
 
 const token = crypto.randomBytes(32).toString('hex');
+const dashboardPin = crypto.randomBytes(24).toString('base64url');
 const dataDirectory = path.join(temporaryRoot, 'data');
 const inheritedEnvKeys = ['PATH', 'Path', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE', 'HOME', 'ComSpec', 'PATHEXT'];
 const childEnv = Object.fromEntries(inheritedEnvKeys.filter((key) => process.env[key]).map((key) => [key, process.env[key]]));
@@ -42,6 +43,8 @@ Object.assign(childEnv, {
   JARVIS_CAMERA_BACKEND_PORT: String(ports.camera),
   JARVIS_MIC_BACKEND_PORT: String(ports.mic),
   JARVIS_INTERNAL_SERVICE_TOKEN: token,
+  DASHBOARD_ACCESS_PIN: dashboardPin,
+  TRUSTED_DASHBOARD_PROXY_IPS: '',
   JARVIS_DATA_DIR: dataDirectory,
   ENABLE_PI_WAKE_LISTENER: 'false',
   OPENJARVIS_BASE_URL: 'http://127.0.0.1:1',
@@ -60,13 +63,13 @@ stack.stdout.on('data', keepTail);
 stack.stderr.on('data', keepTail);
 const exited = new Promise((resolve) => stack.once('exit', (code, signal) => resolve({ code, signal })));
 
-async function waitForJson(url, timeoutMs = 25_000) {
+async function waitForJson(url, timeoutMs = 25_000, options = {}) {
   const deadline = Date.now() + timeoutMs;
   let lastError = 'not ready';
   while (Date.now() < deadline) {
     if (stack.exitCode !== null || stack.signalCode) throw new Error(`Stack exited before readiness (${stack.signalCode || stack.exitCode}).\n${output}`);
     try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(900) });
+      const response = await fetch(url, { ...options, signal: AbortSignal.timeout(900) });
       const body = await response.json();
       if (response.ok && body.status === 'ok') return body;
       lastError = `HTTP ${response.status}: ${JSON.stringify(body)}`;
@@ -108,7 +111,20 @@ try {
 
   await waitForJson(`${frontendUrl}/health`);
   for (const [name, url] of Object.entries(backendUrls)) await waitForJson(`${url}/health`);
-  const apiHealth = await waitForJson(`${apiUrl}/api/health`);
+  const login = await getJson(`${frontendUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Forwarded-Proto': 'https' },
+    body: JSON.stringify({ pin: dashboardPin })
+  });
+  assert.equal(login.response.status, 200, 'dashboard login must work through the front-end proxy');
+  const setCookie = login.response.headers.get('set-cookie') || '';
+  const dashboardCookie = setCookie.split(';')[0];
+  assert.match(setCookie, /HttpOnly/i, 'dashboard session cookie must remain HttpOnly');
+  assert.doesNotMatch(setCookie, /;\s*Secure(?:;|$)/i, 'untrusted forwarded HTTPS must not set the Secure cookie flag');
+  assert.ok(dashboardCookie.startsWith('jarvis_session='), 'front end must preserve the dashboard session cookie');
+  const sessionHeaders = { Cookie: dashboardCookie };
+
+  const apiHealth = await waitForJson(`${apiUrl}/api/health`, 25_000, { headers: sessionHeaders });
   assert.equal(apiHealth.backends.settings.status, 'ok');
   assert.equal(apiHealth.backends.camera.status, 'ok');
   assert.equal(apiHealth.backends.microphone.status, 'ok');
@@ -130,20 +146,20 @@ try {
   stored = await getJson(settingsPath, { headers: authorization });
   assert.equal(stored.body.smokeCheck, 'settings-write-read');
 
-  const media = await getJson(`${apiUrl}/api/media/devices`);
+  const media = await getJson(`${apiUrl}/api/media/devices`, { headers: sessionHeaders });
   assert.equal(media.response.status, 200, `core API must proxy local device inventories: ${JSON.stringify(media.body)}`);
-  const apiSettings = await getJson(`${apiUrl}/api/settings`);
+  const apiSettings = await getJson(`${apiUrl}/api/settings`, { headers: sessionHeaders });
   assert.equal(apiSettings.response.status, 200);
   const savedThroughApi = await getJson(`${apiUrl}/api/settings`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { ...sessionHeaders, 'Content-Type': 'application/json' },
     body: JSON.stringify({ wakeResponse: 'split backend smoke check' })
   });
   assert.equal(savedThroughApi.response.status, 200, `core API must persist settings through its backend: ${JSON.stringify(savedThroughApi.body)}`);
   stored = await getJson(settingsPath, { headers: authorization });
   assert.equal(stored.body.wakeResponse, 'split backend smoke check');
 
-  console.log('Split-stack smoke passed: 5 processes ready; all backends are local; settings auth, persistence, media proxy, and core settings round-trip succeeded.');
+  console.log('Split-stack smoke passed: 5 processes ready; dashboard login/session cookies, forwarded-HTTPS spoof rejection, local backends, settings persistence, media proxy, and core settings round-trip all succeeded.');
 } finally {
   await stopStack();
   const resolvedTemp = path.resolve(temporaryRoot);
