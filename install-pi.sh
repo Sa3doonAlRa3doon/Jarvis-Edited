@@ -225,6 +225,39 @@ elif [[ -z "$GOOGLE_OAUTH_REDIRECT_URI_VALUE" ]]; then
   set_env_value GOOGLE_OAUTH_REDIRECT_URI "http://127.0.0.1:${GOOGLE_OAUTH_PORT_VALUE}/"
 fi
 
+# Keep OAuth files writable by the sandboxed core service without granting it
+# write access to the user's home. Preserve existing private files on upgrade.
+GOOGLE_AUTH_STORAGE="/var/lib/openjarvis-google"
+GOOGLE_AUTH_SOURCE_DIR="$(sed -n 's/^GOOGLE_AUTH_DIRECTORY=//p' .env | tr -d '\r' | tail -n 1)"
+GOOGLE_CREDENTIALS_SOURCE="$(sed -n 's/^GOOGLE_CREDENTIALS_PATH=//p' .env | tr -d '\r' | tail -n 1)"
+GOOGLE_TOKEN_SOURCE="$(sed -n 's/^GOOGLE_TOKEN_PATH=//p' .env | tr -d '\r' | tail -n 1)"
+sudo install -d -o "$APP_USER" -g "$APP_USER" -m 0700 "$GOOGLE_AUTH_STORAGE"
+migrate_google_auth_file() {
+  local filename="$1"
+  local configured_source="$2"
+  local target="$GOOGLE_AUTH_STORAGE/$filename"
+  local source
+  local candidates=()
+  [[ -e "$target" ]] && return 0
+  [[ -z "$configured_source" ]] || candidates+=("$configured_source")
+  [[ -z "$GOOGLE_AUTH_SOURCE_DIR" ]] || candidates+=("$GOOGLE_AUTH_SOURCE_DIR/$filename")
+  candidates+=("$APP_HOME/jarvis-google/$filename" "$APP_HOME/Documents/Jarvis-Google-Auth/$filename")
+  for source in "${candidates[@]}"; do
+    if [[ "$source" != "$target" && -f "$source" && -r "$source" ]]; then
+      sudo install -o "$APP_USER" -g "$APP_USER" -m 0600 -- "$source" "$target"
+      echo "Migrated private Google OAuth material into $GOOGLE_AUTH_STORAGE."
+      return 0
+    fi
+  done
+  return 0
+}
+migrate_google_auth_file credentials.json "$GOOGLE_CREDENTIALS_SOURCE"
+migrate_google_auth_file token.json "$GOOGLE_TOKEN_SOURCE"
+set_env_value GOOGLE_AUTH_DIRECTORY "$GOOGLE_AUTH_STORAGE"
+set_env_value GOOGLE_CREDENTIALS_PATH "$GOOGLE_AUTH_STORAGE/credentials.json"
+set_env_value GOOGLE_TOKEN_PATH "$GOOGLE_AUTH_STORAGE/token.json"
+grep -q '^GOOGLE_CLIENT_SECRET=' .env || set_env_value GOOGLE_CLIENT_SECRET ''
+
 if ! grep -q '^OPS_CONTROL_PIN=.' .env; then
   GENERATED_PIN="$(python3 -c 'import secrets; print(f"{secrets.randbelow(1000000):06d}")')"
   set_env_value OPS_CONTROL_PIN "$GENERATED_PIN"
@@ -467,7 +500,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=read-only
-ReadWritePaths=$APP_DIR/data
+ReadWritePaths=$APP_DIR/data $GOOGLE_AUTH_STORAGE
 
 [Install]
 WantedBy=multi-user.target
