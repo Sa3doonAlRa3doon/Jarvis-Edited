@@ -4,6 +4,8 @@ set -euo pipefail
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_USER="${SUDO_USER:-$(id -un)}"
 APP_HOME="$(getent passwd "$APP_USER" | cut -d: -f6)"
+APP_UID="$(id -u "$APP_USER")"
+APP_GROUP="$(id -gn "$APP_USER")"
 AGENT_USER="jarvis-agent"
 AGENT_HOME="/var/lib/jarvis-agent"
 AGENT_GROUP="jarvis-workspace"
@@ -231,20 +233,39 @@ GOOGLE_AUTH_STORAGE="/var/lib/openjarvis-google"
 GOOGLE_AUTH_SOURCE_DIR="$(sed -n 's/^GOOGLE_AUTH_DIRECTORY=//p' .env | tr -d '\r' | tail -n 1)"
 GOOGLE_CREDENTIALS_SOURCE="$(sed -n 's/^GOOGLE_CREDENTIALS_PATH=//p' .env | tr -d '\r' | tail -n 1)"
 GOOGLE_TOKEN_SOURCE="$(sed -n 's/^GOOGLE_TOKEN_PATH=//p' .env | tr -d '\r' | tail -n 1)"
-sudo install -d -o "$APP_USER" -g "$APP_USER" -m 0700 "$GOOGLE_AUTH_STORAGE"
+sudo install -d -o "$APP_USER" -g "$APP_GROUP" -m 0700 "$GOOGLE_AUTH_STORAGE"
+run_as_app_user() {
+  if [[ "$(id -u)" == "$APP_UID" ]]; then
+    "$@"
+  else
+    sudo -u "$APP_USER" "$@"
+  fi
+}
 migrate_google_auth_file() {
   local filename="$1"
   local configured_source="$2"
   local target="$GOOGLE_AUTH_STORAGE/$filename"
   local source
+  local source_owner
   local candidates=()
-  [[ -e "$target" ]] && return 0
+  if [[ -L "$target" ]]; then
+    echo "Refusing unsafe symlink in private Google OAuth storage: $target" >&2
+    return 1
+  fi
+  if [[ -e "$target" ]]; then
+    [[ -f "$target" ]] || { echo "Refusing non-file in private Google OAuth storage: $target" >&2; return 1; }
+    sudo chown "$APP_USER:$APP_GROUP" -- "$target"
+    sudo chmod 0600 -- "$target"
+    return 0
+  fi
   [[ -z "$configured_source" ]] || candidates+=("$configured_source")
   [[ -z "$GOOGLE_AUTH_SOURCE_DIR" ]] || candidates+=("$GOOGLE_AUTH_SOURCE_DIR/$filename")
   candidates+=("$APP_HOME/jarvis-google/$filename" "$APP_HOME/Documents/Jarvis-Google-Auth/$filename")
   for source in "${candidates[@]}"; do
-    if [[ "$source" != "$target" && -f "$source" && -r "$source" ]]; then
-      sudo install -o "$APP_USER" -g "$APP_USER" -m 0600 -- "$source" "$target"
+    if [[ "$source" != "$target" && -f "$source" && ! -L "$source" && -r "$source" ]]; then
+      source_owner="$(stat -c '%u' -- "$source" 2>/dev/null || true)"
+      [[ "$source_owner" == "$APP_UID" ]] || continue
+      run_as_app_user install -m 0600 -- "$source" "$target"
       echo "Migrated private Google OAuth material into $GOOGLE_AUTH_STORAGE."
       return 0
     fi
