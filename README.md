@@ -557,6 +557,7 @@ External projects used for design research and their code-reuse terms are listed
 - `npm start` or `npm run start:split` starts all five processes locally and waits for each health endpoint before announcing readiness. On Windows, camera/mic devices selected in the dashboard still use browser permissions; the Pi-only ALSA and V4L2 adapters stay inactive.
 - `npm run smoke:split` starts an isolated temporary stack on loopback and checks all five process health endpoints, internal service authentication, dashboard login/cookie behavior, rejection of a forged forwarded-HTTPS header, settings persistence, and API-to-backend routing. CI runs it after the unit suite. It does not replace a physical Pi camera or microphone test.
 - `PORT` is the dashboard port (`8787`); `API_PORT` is private (`8788`). The local settings, camera, and mic backends use ports `8789`, `8790`, and `8791`. Keep all backend addresses on `127.0.0.1`.
+- Dashboard, routine, and chat Docker reads share a five-second container sample. The heavier daemon-wide disk scan refreshes once per minute. Concurrent callers share the same in-flight collection, and both sample timestamps are returned. Failed listings remain unavailable rather than appearing as an empty healthy engine.
 
 ## Security model
 

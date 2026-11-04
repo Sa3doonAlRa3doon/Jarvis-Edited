@@ -647,7 +647,7 @@ function renderOperationStatus(operations) {
 
 function renderDocker(payload) {
   state.docker = payload;
-  if (!payload.available) { ui.dockerSummary.textContent = 'UNAVAILABLE'; ui.dockerList.innerHTML = '<p class="empty-state">Docker engine is not available on this host.</p>'; refreshSearchIfOpen(); return; }
+  if (!payload.available) { ui.dockerSummary.textContent = 'UNAVAILABLE'; ui.dockerList.innerHTML = '<p class="empty-state">Docker status is unavailable on this host.</p>'; refreshSearchIfOpen(); return; }
   const running = payload.containers.filter((item) => String(item.state).toLowerCase() === 'running').length;
   ui.dockerSummary.textContent = `${running}/${payload.containers.length} RUNNING`;
   ui.dockerList.innerHTML = payload.containers.length ? payload.containers.slice(0, 8).map((item) => `<article class="docker-item"><i class="${String(item.state).toLowerCase() === 'running' ? 'ok' : ''}"></i><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.cpu || item.state)}</span><b>${escapeHtml(item.memoryPercent || item.status)}</b></article>`).join('') : '<p class="empty-state">Docker is online with no containers.</p>';
