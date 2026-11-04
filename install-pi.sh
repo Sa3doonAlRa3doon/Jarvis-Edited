@@ -190,6 +190,7 @@ set_env_value() {
   if grep -q "^${key}=" .env; then
     sed -i "s|^${key}=.*|${key}=${value}|" .env
   else
+    if [[ -s .env && -n "$(tail -c 1 .env)" ]]; then printf '\n' >> .env; fi
     printf '%s=%s\n' "$key" "$value" >> .env
   fi
 }
