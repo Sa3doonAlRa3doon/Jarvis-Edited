@@ -32,7 +32,14 @@ app.use((request, response, next) => {
 
 app.get('/settings', (_request, response) => response.sendFile(path.join(publicDir, 'settings.html')));
 app.get('/workspace', (_request, response) => response.sendFile(path.join(publicDir, 'workspace.html')));
-app.use(express.static(publicDir, { etag: true, maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0 }));
+app.use(express.static(publicDir, {
+  etag: true, maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0,
+  setHeaders: (response, file) => {
+    // Revalidate application code after a deployment; retain the longer cache
+    // for large, unchanged local model assets on the Pi.
+    if (/\.(?:html|js|css)$/i.test(file)) response.setHeader('Cache-Control', 'no-cache');
+  }
+}));
 
 // Keep the browser on one same-origin URL while the API stays private on Pi loopback.
 // Streaming API responses (SSE) and audio/file bodies are piped without buffering.

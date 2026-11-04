@@ -2002,7 +2002,12 @@ app.post('/api/tts', async (request, response) => {
 if (!apiOnly) {
   app.get('/settings', (_request, response) => response.sendFile(path.join(__dirname, 'public', 'settings.html')));
   app.get('/workspace', (_request, response) => response.sendFile(path.join(__dirname, 'public', 'workspace.html')));
-  app.use(express.static(path.join(__dirname, 'public'), { etag: true, maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0 }));
+  app.use(express.static(path.join(__dirname, 'public'), {
+    etag: true, maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0,
+    setHeaders: (response, file) => {
+      if (/\.(?:html|js|css)$/i.test(file)) response.setHeader('Cache-Control', 'no-cache');
+    }
+  }));
 }
 app.use((error, _request, response, _next) => { console.error('Dashboard request failed:', error.message); response.status(500).json({ error: 'Dashboard request failed.' }); });
 

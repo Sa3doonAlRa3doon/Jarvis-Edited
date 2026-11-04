@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -123,6 +124,20 @@ try {
   assert.doesNotMatch(setCookie, /;\s*Secure(?:;|$)/i, 'untrusted forwarded HTTPS must not set the Secure cookie flag');
   assert.ok(dashboardCookie.startsWith('jarvis_session='), 'front end must preserve the dashboard session cookie');
   const sessionHeaders = { Cookie: dashboardCookie };
+  for (const asset of ['/app.js', '/styles.css']) {
+    const fresh = await fetch(frontendUrl + asset);
+    assert.equal(fresh.status, 200); assert.equal(fresh.headers.get('cache-control'), 'no-cache');
+    const etag = fresh.headers.get('etag'); assert.ok(etag, 'unchanged application assets keep ETag validation');
+    await fresh.arrayBuffer();
+    // fetch adds a request no-cache directive to conditional requests; use a
+    // plain HTTP client here to exercise the browser cache-validator exchange.
+    const unchanged = await new Promise((resolve, reject) => {
+      http.get(frontendUrl + asset, { headers: { 'If-None-Match': etag }, signal: AbortSignal.timeout(3000) }, (response) => {
+        response.resume(); response.once('end', () => resolve({ status: response.statusCode, cache: response.headers['cache-control'] }));
+      }).once('error', reject);
+    });
+    assert.equal(unchanged.status, 304); assert.equal(unchanged.cache, 'no-cache');
+  }
 
   const apiHealth = await waitForJson(`${apiUrl}/api/health`, 25_000, { headers: sessionHeaders });
   assert.equal(apiHealth.backends.settings.status, 'ok');
