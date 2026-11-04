@@ -58,6 +58,23 @@ test('Google OAuth flow refuses to start without private credentials', async () 
   assert.equal(flow.snapshot().status, 'idle');
 });
 
+test('simultaneous Google reauthorization requests share one callback helper', async () => {
+  const child = childFixture();
+  let spawns = 0;
+  const flow = new GoogleAuthFlow({
+    environment: { GOOGLE_CLIENT_ID: 'fixture-id', GOOGLE_CLIENT_SECRET: 'fixture-secret' },
+    accessImpl: async () => { await new Promise((resolve) => setTimeout(resolve, 5)); },
+    spawnImpl: () => {
+      spawns += 1;
+      queueMicrotask(() => child.stdout.emit('data', 'https://accounts.google.com/o/oauth2/v2/auth?client_id=fixture\n'));
+      return child;
+    }
+  });
+  await Promise.all(Array.from({ length: 6 }, () => flow.start()));
+  assert.equal(spawns, 1);
+  flow.stop();
+});
+
 test('Google reauthorization finds Documents credentials and keeps their matching token together', async () => {
   const home = path.join(path.parse(process.cwd()).root, 'jarvis-google-auth-flow-home');
   const authDirectory = path.join(home, 'Documents', 'Jarvis-Google-Auth');

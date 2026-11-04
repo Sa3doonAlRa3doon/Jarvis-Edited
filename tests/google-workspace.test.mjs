@@ -158,7 +158,7 @@ test('uses a complete private environment OAuth client without exposing it in Go
     environment, home: TEST_HOME,
     reader: async (file) => {
       if (file !== tokenPath) throw new Error('no credentials JSON in this fixture');
-      return JSON.stringify({ refresh_token: 'private-refresh' });
+      return JSON.stringify({ client_id: 'private-id', refresh_token: 'private-refresh' });
     },
     fetchImpl: async (url, options = {}) => {
       if (String(url).includes('oauth2.googleapis.com')) {
@@ -177,4 +177,86 @@ test('uses a complete private environment OAuth client without exposing it in Go
   assert.equal(refreshBody.get('client_secret'), 'private-secret');
   assert.equal(refreshBody.get('refresh_token'), 'private-refresh');
   assert.doesNotMatch(JSON.stringify(status), /private-id|private-secret|private-refresh/);
+});
+
+test('changing Google clients requires consent before an old token can be reused', async () => {
+  for (const tokenClient of ['older-client', undefined]) {
+    const tokenPath = path.join(TEST_HOME, 'jarvis-google', 'token.json');
+    let calls = 0;
+    const bridge = new GoogleWorkspaceBridge({
+      environment: { GOOGLE_CLIENT_ID: 'new-client', GOOGLE_CLIENT_SECRET: 'new-private-secret' }, home: TEST_HOME,
+      reader: async (file) => {
+        if (file !== tokenPath) throw new Error('missing');
+        return JSON.stringify({ client_id: tokenClient, refresh_token: 'older-private-refresh', access_token: 'older-access', expiry_date: Date.now() + 3600_000 });
+      },
+      fetchImpl: async () => { calls += 1; throw new Error('a mismatched token must not leave this host'); }
+    });
+    const status = await bridge.status({ probe: true });
+    assert.equal(status.connected, false);
+    assert.equal(status.needsReauthorization, true);
+    await assert.rejects(() => bridge.getAccessToken(), /reauthorize Google/i);
+    assert.equal(calls, 0);
+    assert.doesNotMatch(JSON.stringify(status), /new-client|new-private-secret|older-private-refresh|older-access/);
+  }
+});
+
+test('a token file cannot override a replacement credentials client', async () => {
+  const files = credentialFiles();
+  files.set(TOKEN_PATH, JSON.stringify({ client_id: 'old-client', client_secret: 'old-secret', refresh_token: 'refresh' }));
+  const bridge = new GoogleWorkspaceBridge({ environment: credentialEnvironment(), reader: async (file) => files.get(file) });
+  const configuration = await bridge.loadConfiguration();
+  assert.equal(configuration.client.clientId, 'client');
+  assert.equal(configuration.needsReauthorization, true);
+  assert.equal((await bridge.status()).connected, false);
+});
+
+test('a revoked unexpired access token forces one refresh before retrying the API', async () => {
+  const files = credentialFiles();
+  files.set(TOKEN_PATH, JSON.stringify({ access_token: 'revoked', expiry_date: Date.now() + 3600_000, refresh_token: 'refresh' }));
+  let refreshes = 0;
+  const used = [];
+  const bridge = new GoogleWorkspaceBridge({
+    environment: credentialEnvironment(), reader: async (file) => files.get(file),
+    fetchImpl: async (url, options) => {
+      if (String(url).includes('oauth2.googleapis.com/token')) { refreshes += 1; return response({ access_token: 'fresh', expires_in: 3600 }); }
+      used.push(options.headers.Authorization);
+      return options.headers.Authorization === 'Bearer fresh' ? response({ ok: true }) : response({}, 401);
+    }
+  });
+  assert.deepEqual(await bridge.request('https://gmail.googleapis.com/gmail/v1/users/me/profile'), { ok: true });
+  assert.equal(refreshes, 1);
+  assert.deepEqual(used, ['Bearer revoked', 'Bearer fresh']);
+});
+
+test('Google API setup failures are distinguished from expired authorization', async () => {
+  const files = credentialFiles();
+  const bridge = new GoogleWorkspaceBridge({
+    environment: credentialEnvironment(), reader: async (file) => files.get(file),
+    fetchImpl: async (url) => String(url).includes('oauth2.googleapis.com/token')
+      ? response({ access_token: 'fixture-access', expires_in: 3600 })
+      : response({ error: { message: 'This API has not been enabled in the project.' } }, 403)
+  });
+  const status = await bridge.status({ probe: true });
+  assert.equal(status.connected, false);
+  assert.equal(status.needsReauthorization, false);
+  assert.equal(Object.keys(status.errors).length, 5);
+  assert.match(status.errors.gmail, /not been enabled/);
+});
+
+test('invalid client credentials request reauthorization without claiming the client was deleted', async () => {
+  const files = credentialFiles();
+  const bridge = new GoogleWorkspaceBridge({
+    environment: credentialEnvironment(), reader: async (file) => files.get(file),
+    fetchImpl: async () => response({ error: 'invalid_client', error_description: 'fixture-provider-secret' }, 400)
+  });
+  const status = await bridge.status({ probe: true });
+  assert.equal(status.needsReauthorization, true);
+  assert.match(status.errors.gmail, /client ID or secret/);
+  assert.doesNotMatch(JSON.stringify(status), /was deleted|fixture-provider-secret/);
+});
+
+test('a configured client without a private token asks for initial authorization', async () => {
+  const files = credentialFiles(); files.delete(TOKEN_PATH);
+  const bridge = new GoogleWorkspaceBridge({ environment: credentialEnvironment(), reader: async (file) => files.get(file) });
+  assert.equal((await bridge.status()).needsReauthorization, true);
 });

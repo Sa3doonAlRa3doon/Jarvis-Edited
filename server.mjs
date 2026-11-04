@@ -502,10 +502,11 @@ async function googleConnectorStatus({ probe = false } = {}) {
   // A normal status refresh reports that OAuth material exists. The explicit
   // probe endpoint is the only place that claims live Google access, so an
   // expired refresh token cannot look healthy after a failed verification.
-  const connected = probe ? native.liveVerified === true : configured;
+  const needsReauthorization = native.needsReauthorization === true;
+  const connected = !needsReauthorization && (probe ? native.liveVerified === true : configured);
   return {
     connected, configured, sharedOAuth: shared,
-    nativeBridge: native.configured === true, liveVerified: native.liveVerified === true, needsReauthorization: Boolean(probe && native.liveVerified !== true && Object.keys(errors).length), mode: googleEmailSendEnabled ? 'read-plus-approved-send' : 'read-only', emailSendEnabled: googleEmailSendEnabled, connectors,
+    nativeBridge: native.configured === true, liveVerified: native.liveVerified === true, needsReauthorization, mode: googleEmailSendEnabled ? 'read-plus-approved-send' : 'read-only', emailSendEnabled: googleEmailSendEnabled && !needsReauthorization, connectors,
     errors,
     scopesNote: googleEmailSendEnabled
       ? 'Private Google reads plus separately approved Gmail sending run on the JARVIS host. OAuth files and tokens never enter the browser, model prompt, logs, or repository.'

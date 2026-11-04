@@ -43,15 +43,17 @@ test('supports an explicitly registered loopback callback on a separate custom p
   const config = resolveGoogleOAuthConfig({
     JARVIS_SETTINGS_BACKEND_PORT: '8800',
     GOOGLE_OAUTH_PORT: '9000',
-    GOOGLE_OAUTH_REDIRECT_URI: 'http://localhost:9000/consent?ignored=yes#fragment'
+    GOOGLE_OAUTH_REDIRECT_URI: 'http://localhost:9000/consent'
   });
   assert.equal(config.port, 9000);
-  assert.equal(config.redirectUri, 'http://localhost:9000/');
+  assert.equal(config.redirectUri, 'http://localhost:9000/consent');
 });
 
 test('rejects public hosts, invalid ports, and mismatched explicit callback ports', () => {
   assert.throws(() => resolveGoogleOAuthConfig({ GOOGLE_OAUTH_REDIRECT_URI: 'https://example.com/callback' }), /stays local/i);
   assert.throws(() => resolveGoogleOAuthConfig({ GOOGLE_OAUTH_PORT: '80' }), /integer port/i);
+  assert.throws(() => resolveGoogleOAuthConfig({ GOOGLE_OAUTH_REDIRECT_URI: 'http://localhost:8792/callback?ignored=yes' }), /must not contain query/i);
+  assert.throws(() => resolveGoogleOAuthConfig({ GOOGLE_OAUTH_REDIRECT_URI: 'http://localhost:8792/callback#fragment' }), /must not contain query/i);
   assert.throws(() => resolveGoogleOAuthConfig({
     GOOGLE_OAUTH_PORT: '8792',
     GOOGLE_OAUTH_REDIRECT_URI: 'http://127.0.0.1:9000/'

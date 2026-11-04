@@ -581,10 +581,10 @@ async function loadDeviceLists(selections = currentSettings(), { requestBrowserP
 function renderGoogle(status) {
   const names = { gdrive: ['DRIVE', 'FILES'], gmail: ['GMAIL', 'MAIL'], gmail_imap: ['GMAIL IMAP', 'INBOX'], gcalendar: ['CALENDAR', 'EVENTS'], gtasks: ['TASKS', 'ACTIONS'], gcontacts: ['CONTACTS', 'PEOPLE'] };
   const errors = Object.values(status.errors || {}).map((value) => String(value || '').trim()).filter(Boolean);
-  const reauthorizationNeeded = !status.liveVerified && errors.length > 0;
+  const reauthorizationNeeded = status.needsReauthorization === true;
   let connected = 0;
   ui.googleGrid.replaceChildren(...Object.entries(names).map(([key, [name, detail]]) => {
-    const active = Boolean(status.connectors?.[key]);
+    const active = !reauthorizationNeeded && Boolean(status.connectors?.[key]);
     if (active) connected += 1;
     const item = document.createElement('div');
     item.className = `google-item ${active ? 'connected' : ''}`;
@@ -592,7 +592,7 @@ function renderGoogle(status) {
     return item;
   }));
   const sendState = status.emailSendEnabled ? ' // SEND APPROVAL ARMED' : ' // SEND OFF';
-  const stateLabel = status.liveVerified ? `${connected}/6 VERIFIED` : reauthorizationNeeded ? 'REAUTH REQUIRED' : `${connected}/6 LINKED`;
+  const stateLabel = status.liveVerified ? `${connected}/6 VERIFIED` : reauthorizationNeeded ? 'REAUTH REQUIRED' : errors.length ? 'API CHECK FAILED' : status.configured ? `${connected}/6 LINKED` : 'SETUP REQUIRED';
   ui.googleState.textContent = `${stateLabel}${sendState}`;
   ui.googleState.classList.toggle('active', status.liveVerified === true || connected > 0);
   ui.googleState.classList.toggle('warning', reauthorizationNeeded);
