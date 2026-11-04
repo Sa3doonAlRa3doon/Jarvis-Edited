@@ -35,4 +35,11 @@ export function wakeCaptureLabel(value = {}) {
   }[state] || '';
 }
 
+// A wake signal can reach the UI even when the Pi never begins a command
+// capture. Expire that startup wait independently of the native recognizer's
+// sentence timer; a listening/hearing session must retain its own deadline.
+export function piCaptureStartupExpired({ source, phase, deadline, now = Date.now() } = {}) {
+  return source === 'pi' && phase === 'warming' && Number.isFinite(deadline) && deadline > 0 && now >= deadline;
+}
+
 export { CAPTURE_STATES };

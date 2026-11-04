@@ -4,7 +4,7 @@ import { VoiceController } from './voice-controller.js';
 import { isIntegratedBrowserName, searchCatalog } from './search-utils.js';
 import { shouldApplyTranscriptToInput } from './voice-utils.js';
 import { hasWakeCommand, normalizeWakeCommand } from './wake-command.js';
-import { wakeCaptureLabel } from './wake-state.js';
+import { piCaptureStartupExpired, wakeCaptureLabel } from './wake-state.js';
 import { requiresBrowserTtsGesture } from './tts-autoplay-policy.js';
 import { playSpeechAudio, requestPiSpeech, usesPiSpeech } from './local-speech.js';
 
@@ -337,6 +337,7 @@ function startVoiceCaptureCountdown(timeoutMs = VOICE_COMMAND_TIMEOUT_MS) {
     if (!state.voiceCapture.active || !state.voiceCapture.deadline) return;
     const remaining = Math.max(0, state.voiceCapture.deadline - Date.now());
     ui.searchCount.textContent = `${(remaining / 1000).toFixed(1)}S`;
+    if (piCaptureStartupExpired(state.voiceCapture)) updateVoiceCapture({ state: 'error', reason: 'pi-start-timeout' });
   };
   render(); state.voiceCapture.ticker = window.setInterval(render, 100);
 }
@@ -383,6 +384,17 @@ function updateVoiceCapture(detail = {}) {
   }
   if (phase === 'complete') {
     stopVoiceCaptureTimers(); ui.voiceCaptureState.textContent = 'SENDING'; ui.searchMode.textContent = 'VOICE SESSION // ROUTING'; ui.searchCount.textContent = 'READY'; return;
+  }
+  if (phase === 'error') {
+    stopVoiceCaptureTimers(); state.voiceCapture.source = '';
+    ui.voiceCaptureState.textContent = detail.reason === 'pi-start-timeout' ? 'PI CAPTURE DID NOT START' : 'MICROPHONE ERROR';
+    ui.voiceCaptureTranscript.textContent = detail.reason === 'pi-start-timeout'
+      ? 'The Pi did not begin listening. Check local speech status, then say “Hey Jarvis” to retry.'
+      : 'Command capture failed. Check the microphone and local speech status, then retry.';
+    ui.searchInput.placeholder = 'Capture unavailable'; ui.searchMode.textContent = 'VOICE SESSION // ERROR'; ui.searchCount.textContent = 'ERROR';
+    const session = state.wakeSession;
+    state.voiceCapture.closeTimer = window.setTimeout(() => { if (session === state.wakeSession) closeSearch({ cancelVoice: false }); }, 3000);
+    return;
   }
   if (phase === 'timeout') {
     stopVoiceCaptureTimers(); ui.voiceCaptureState.textContent = 'NO SPEECH DETECTED'; ui.voiceCaptureTranscript.textContent = 'Command capture stopped. Say “Hey Jarvis” to try again.';
@@ -605,11 +617,13 @@ function renderStatus(payload) {
     if (capture?.state === 'warming') {
       state.voiceCapture.phase = 'warming';
       ui.voiceCaptureState.textContent = 'PI MIC WARMING';
+      ui.searchInput.placeholder = 'Preparing Pi microphone…';
       ui.voiceCaptureTranscript.textContent = 'Wake detected. Speak your question after the acknowledgement.';
       ui.searchMode.textContent = 'VOICE SESSION // PI MIC';
     } else if (capture?.state === 'listening') {
       state.voiceCapture.phase = 'listening';
       ui.voiceCaptureState.textContent = 'PI MIC LISTENING';
+      ui.searchInput.placeholder = 'Speak now…';
       ui.voiceCaptureTranscript.textContent = 'JARVIS is listening through the Raspberry Pi microphone.';
       ui.searchMode.textContent = 'VOICE SESSION // PI MIC LIVE';
     } else if (capture?.state === 'timeout') {
@@ -985,6 +999,7 @@ async function beginWakeCommandCapture(session, initialCommand = '', source = ''
     state.voiceCapture.source = 'pi';
     state.voiceCapture.phase = 'warming';
     ui.voiceCaptureState.textContent = 'PI MIC WARMING';
+    ui.searchInput.placeholder = 'Preparing Pi microphone…';
     ui.voiceCaptureTranscript.textContent = 'Wake detected. Speak your question after the acknowledgement.';
     ui.searchMode.textContent = 'VOICE SESSION // PI MIC';
     startVoiceCaptureCountdown(Number(state.status?.wake?.commandCapture?.timeoutMs) || VOICE_COMMAND_TIMEOUT_MS);
