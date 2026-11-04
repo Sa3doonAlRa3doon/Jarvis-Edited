@@ -1,6 +1,8 @@
 import dotenv from 'dotenv';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { DEFAULT_LOCAL_PORTS } from '../lib/local-ports.mjs';
+import { freshPiWakeDiagnostic } from '../lib/wake-diagnostics.mjs';
 
 // Local-only readiness check. It authenticates to the dashboard when the
 // configured PIN is available, but never prints the PIN or any other secret.
@@ -42,10 +44,10 @@ function clean(value, limit = 220) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, limit);
 }
 
-function baseUrl() {
-  const configured = String(process.env.JARVIS_BASE_URL || '').trim();
+export function doctorBaseUrl(environment = process.env) {
+  const configured = String(environment.JARVIS_BASE_URL || '').trim();
   if (configured) return configured.replace(/\/$/, '');
-  const port = Number(process.env.PORT) || 8788;
+  const port = Number(environment.PORT) || DEFAULT_LOCAL_PORTS.dashboard;
   return `http://127.0.0.1:${port}`;
 }
 
@@ -75,7 +77,11 @@ export function evaluateDoctorSnapshot(snapshot, options = {}) {
   const needs = { ...required, ...options };
   const checks = [];
   const add = (id, ok, detail, requiredCheck = false) => checks.push({ id, ok: Boolean(ok), detail: clean(detail), required: Boolean(requiredCheck) });
+  add('frontend', snapshot.frontend?.ok, snapshot.frontend?.detail || 'dashboard front end unavailable', true);
   add('dashboard', snapshot.dashboard?.ok, snapshot.dashboard?.detail || 'dashboard health', true);
+  for (const [key, label] of [['settings', 'settings'], ['camera', 'camera'], ['microphone', 'microphone']]) {
+    if (snapshot.backends) add(`${key}-backend`, snapshot.backends[key]?.status === 'ok', `${label} backend ${snapshot.backends[key]?.status === 'ok' ? 'healthy' : 'unavailable'}`, true);
+  }
   add('auth', snapshot.auth?.ok, snapshot.auth?.detail || 'dashboard authentication', needs.auth);
   add('camoufox', snapshot.config?.browserEngine === 'camoufox', snapshot.config?.browserEngine ? `browser engine ${snapshot.config.browserEngine}` : 'Camoufox engine not reported', true);
   add('openjarvis', snapshot.services?.openjarvis?.online, `OpenJarvis ${statusLabel(snapshot.services?.openjarvis?.online)}`, needs.openJarvis);
@@ -86,7 +92,7 @@ export function evaluateDoctorSnapshot(snapshot, options = {}) {
     ? snapshot.capabilities.capabilities.find((item) => item?.id === 'google')
     : null;
   const googleReady = Boolean(googleCapability?.status?.available);
-  add('google', googleReady, googleReady ? 'Google OAuth live' : 'Google OAuth unavailable; create/authorize a replacement Desktop client', needs.google);
+  add('google', googleReady, googleReady ? 'Google OAuth live' : 'Google OAuth unavailable; review Google authorization in Settings', needs.google);
   const stirling = snapshot.integrations?.stirling || {};
   const processingState = String(stirling.processing?.state || 'not-verified');
   const stirlingReady = Boolean(stirling.online && processingState === 'verified');
@@ -129,7 +135,47 @@ export function evaluateDoctorSnapshot(snapshot, options = {}) {
   const linux = snapshot.platform === 'linux';
   add('camera', Array.isArray(media.cameras) && media.cameras.length > 0, linux ? `${media.cameras?.length || 0} V4L2 camera(s)` : 'camera enumeration is browser-side on this host', needs.camera && linux);
   add('microphone', Array.isArray(media.microphones) && media.microphones.length > 0, linux ? `${media.microphones?.length || 0} ALSA capture device(s)` : 'microphone enumeration is browser-side on this host', needs.microphone && linux);
+  const settings = snapshot.settings || {};
+  if (linux && settings.source === 'pi' && (settings.wakeWord || settings.doubleClap)) {
+    const wake = snapshot.wake || {};
+    const ready = wake.running && wake.ready && !wake.error && (!settings.wakeWord || wake.model);
+    add('wake-listener', ready, ready ? `listener ready // ${clean(wake.captureBackend || 'capture', 24)}` : 'listener not ready; inspect microphone service', true);
+    add('transcription', wake.sttModel, wake.sttModel ? 'local transcription model loaded' : 'local transcription model unavailable', needs.microphone);
+    const diagnostic = freshPiWakeDiagnostic(wake.diagnostics, options.now ?? snapshot.wakeObservedAt ?? Date.now());
+    add('mic-stream', Boolean(ready && diagnostic), diagnostic && ready ? `recent audio telemetry // level ${diagnostic.micLevel.toFixed(4)}` : 'no recent microphone telemetry', true);
+  }
   return { checks, pass: checks.filter((item) => item.ok).length, warn: checks.filter((item) => !item.ok && !item.required).length, fail: checks.filter((item) => !item.ok && item.required).length };
+}
+
+// Optional endpoints fail independently, so a printer/vision timeout cannot
+// erase healthy model, Google, or microphone results from the same inspection.
+export async function collectDoctorProbes(read, { platform = process.platform, now = Date.now } = {}) {
+  const paths = {
+    status: '/api/status', config: '/api/config', vision: '/api/vision/status',
+    capabilities: '/api/capabilities', stirling: '/api/stirling/status',
+    printer: '/api/printer/status', printerCamera: '/api/media/printer-camera/discover',
+    media: '/api/media/devices', settings: '/api/settings', wake: '/api/wake/status'
+  };
+  if (platform === 'linux') paths.printerFrame = '/api/media/printer-camera/frame.jpg';
+  const keys = Object.keys(paths);
+  const results = await Promise.allSettled(keys.map(async (key) => ({ ...await read(paths[key]), observedAt: now() })));
+  const responses = {};
+  const probeErrors = [];
+  results.forEach((result, index) => {
+    const key = keys[index];
+    if (result.status === 'fulfilled') responses[key] = result.value;
+    if (result.status !== 'fulfilled' || result.value.status !== 200) probeErrors.push(`${key}: ${result.status === 'fulfilled' ? `HTTP ${Number(result.value.status) || 0}` : 'request failed or timed out'}`);
+  });
+  const body = (key) => responses[key]?.status === 200 ? responses[key].body || {} : {};
+  const frame = responses.printerFrame;
+  return {
+    services: body('status').services || {}, wake: body('wake'), wakeObservedAt: responses.wake?.observedAt,
+    config: body('config'), vision: body('vision'), capabilities: body('capabilities'),
+    integrations: { stirling: body('stirling'), printerCamera: body('printerCamera') },
+    printer: body('printer'), media: body('media'), settings: body('settings').settings || body('settings'),
+    printerCameraFrame: { ok: Boolean(frame?.status === 200 && Number(frame.body?.bytes) > 100), status: frame?.status || 0, bytes: frame?.status === 200 ? Number(frame.body?.bytes) || 0 : 0, contentType: clean(frame?.contentType, 80) },
+    probeErrors
+  };
 }
 
 function printCheck(check) {
@@ -138,14 +184,22 @@ function printCheck(check) {
 }
 
 async function run() {
-  const url = baseUrl();
-  const snapshot = { platform: process.platform, dashboard: {}, auth: {}, services: {}, config: {}, vision: {}, capabilities: {}, integrations: {}, printer: {}, media: {} };
+  const url = doctorBaseUrl();
+  const snapshot = { platform: process.platform, frontend: {}, dashboard: {}, auth: {}, services: {}, config: {}, vision: {}, capabilities: {}, integrations: {}, printer: {}, media: {} };
   process.stdout.write(`JARVIS DOCTOR // local readiness // ${new Date().toISOString()}\n`);
   process.stdout.write(`TARGET // ${new URL(url).host}\n`);
 
   try {
+    const frontend = await request(url, '/health');
+    const frontendReady = frontend.status === 200 && frontend.body?.status === 'ok' && frontend.body?.service === 'dashboard';
+    snapshot.frontend = { ok: frontendReady, detail: frontendReady ? 'dashboard front end healthy' : `front end health failed (HTTP ${frontend.status})` };
+  } catch {
+    snapshot.frontend = { ok: false, detail: 'dashboard front end unavailable' };
+  }
+  try {
     const health = await request(url, '/api/health');
     snapshot.dashboard = { ok: health.status === 200 && health.body?.status === 'ok', detail: health.status === 200 ? `dashboard ${health.body?.version || 'healthy'}` : `HTTP ${health.status}` };
+    snapshot.backends = health.body?.backends || {};
   } catch (error) {
     snapshot.dashboard = { ok: false, detail: `dashboard unavailable (${clean(error.message, 120)})` };
   }
@@ -169,40 +223,11 @@ async function run() {
 
   const headers = cookie ? { cookie } : {};
   const protectedProbe = async (path) => request(url, path, { headers });
-  try {
-    const [status, config, vision, capabilities, stirling, printer, printerCamera, media, printerFrame] = await Promise.all([
-      protectedProbe('/api/status'), protectedProbe('/api/config'), protectedProbe('/api/vision/status'),
-      protectedProbe('/api/capabilities'), protectedProbe('/api/stirling/status'), protectedProbe('/api/printer/status'), protectedProbe('/api/media/printer-camera/discover'), protectedProbe('/api/media/devices'),
-      process.platform === 'linux' ? protectedProbe('/api/media/printer-camera/frame.jpg') : Promise.resolve({ status: 0, body: { bytes: 0 }, contentType: '' })
-    ]);
-    snapshot.services = status.body?.services || {};
-    snapshot.config = config.body || {};
-    snapshot.vision = vision.body || {};
-    snapshot.capabilities = capabilities.body || {};
-    snapshot.integrations = { stirling: stirling.body || {}, printerCamera: printerCamera.body || {} };
-    snapshot.printer = printer.body || {};
-    snapshot.media = media.body || {};
-    snapshot.printerCameraFrame = {
-      ok: printerFrame.status === 200 && Number(printerFrame.body?.bytes) > 100,
-      status: printerFrame.status,
-      bytes: Number(printerFrame.body?.bytes) || 0,
-      contentType: clean(printerFrame.contentType, 80)
-    };
-    if (status.status !== 200) snapshot.services = {};
-  } catch (error) {
-    snapshot.config = { browserEngine: '' };
-    snapshot.vision = {};
-    snapshot.media = {};
-    snapshot.capabilities = {};
-    snapshot.integrations = {};
-    snapshot.printer = {};
-    snapshot.services = {};
-    snapshot.probeError = clean(error.message, 160);
-  }
+  Object.assign(snapshot, await collectDoctorProbes(protectedProbe));
 
   const report = evaluateDoctorSnapshot(snapshot, required);
   for (const check of report.checks) printCheck(check);
-  if (snapshot.probeError) process.stdout.write(`WARN  PROBE // ${snapshot.probeError}\n`);
+  for (const error of snapshot.probeErrors || []) process.stdout.write(`WARN  PROBE // ${error}\n`);
   process.stdout.write(`SUMMARY // pass=${report.pass} warn=${report.warn} fail=${report.fail}\n`);
   const shouldFail = report.fail > 0 || (strict && report.warn > 0);
   process.exitCode = shouldFail ? 2 : 0;
