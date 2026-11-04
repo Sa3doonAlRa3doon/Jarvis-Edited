@@ -51,6 +51,7 @@ import { selectVisionModel } from './lib/vision-model-profile.mjs';
 import { DEFAULT_LOCAL_PORTS } from './lib/local-ports.mjs';
 import { createPipelineRun, normalizePipelineRequest, redactRun } from './lib/engineering-pipeline.mjs';
 import { askLocalModelCascade } from './lib/ollama-cascade.mjs';
+import { LocalSpeech } from './lib/local-speech.mjs';
 import { runEngineeringPipeline } from './scripts/engineering-pipeline.mjs';
 import {
   clamp, dockerSummary, runBinary, storageDevices, systemMetrics
@@ -98,6 +99,7 @@ const browserPreviewTimeoutMs = safeNumber(process.env.JARVIS_BROWSER_PREVIEW_TI
 // fallback when enabled in Settings.
 const fishAudioTimeoutMs = safeNumber(process.env.FISH_AUDIO_TIMEOUT_MS, 30_000, 5_000, 120_000);
 const fishAudioWakeTimeoutMs = safeNumber(process.env.FISH_AUDIO_WAKE_TIMEOUT_MS, 12_000, 4_000, 60_000);
+const localSpeech = new LocalSpeech();
 const googleAuthFlow = new GoogleAuthFlow({
   scriptPath: path.join(__dirname, 'scripts', 'google-oauth-local.mjs'),
   onComplete: () => googleWorkspace.invalidate()
@@ -961,7 +963,7 @@ app.get('/api/config', async (_request, response) => {
   const vision = await visionRuntimeStatus(installed);
   const sttConfigured = Boolean(String(process.env.JARVIS_STT_MODEL_DIR || '').trim());
   const stt = { configured: sttConfigured, localOnly: true, commandTimeoutMs: safeNumber(process.env.JARVIS_STT_COMMAND_TIMEOUT_MS, 15_000, 5_000, 30_000), commandSilenceMs: safeNumber(process.env.JARVIS_STT_COMMAND_SILENCE_MS, 900, 350, 2_000), commandWarmupMs: safeNumber(process.env.JARVIS_STT_COMMAND_WARMUP_MS, 1_200, 0, 5_000) };
-  response.json({ name: 'JARVIS', version: appVersion, ttsMode: process.env.TTS_MODE || 'local', fishVoiceId: process.env.FISH_AUDIO_VOICE_ID || '', fishModel: process.env.FISH_AUDIO_MODEL || 's2.1-pro-free', fishConfigured: Boolean(process.env.FISH_AUDIO_API_KEY && process.env.FISH_AUDIO_VOICE_ID), fishRetryPolicy: { maxAttempts: 2, retryableStatusCodes: [500, 502, 503, 504], backoffMs: 350 }, fishReplyTimeoutMs: fishAudioTimeoutMs, fishWakeTimeoutMs: fishAudioWakeTimeoutMs, allowBrowserTtsFallback: asBool(process.env.ALLOW_BROWSER_TTS_FALLBACK, false), allowBrowserTtsAutoplay: asBool(process.env.ALLOW_BROWSER_TTS_AUTOPLAY, false), model: primaryModel, models, visionModel, visionConfigured: vision.configured, visionInstalled: vision.installed, visionRuntime: vision.runtime, visionCapabilityVerified: vision.capabilityVerified, stt, emailSendEnabled: googleEmailSendEnabled, browserEngine: camoufoxEngine(), browserControlEnabled, browserPreviewEnabled, stirling: { ...stirlingPdf.snapshot(), operations: stirlingCatalog() }, printerCamera: printerCamera.snapshot(), tools: { google: true, emailDraft: true, emailSend: googleEmailSendEnabled, web: true, googleNews: true, publicApis: true, screen: true, screenExplain: true, compactLocalView: true, websiteLiveView: true, websitePreview: browserPreviewEnabled, piCameraView: true, printerCameraView: printerCamera.configured || Boolean(settings.printerPiCamera), hostBrowser: true, browserControl: browserControlEnabled, officeArtifacts: true, stirlingPdf: true, liveAgentView: true, roleRouting: true, localPiCommandTranscription: sttConfigured, obs: true, obsOverlay: Boolean(obsOverlayToken), broadcastKit: true, analytics: true, mediaDeck: true, desktopApps: true, routines: true, memory: true, notes: true, reminders: true }, routineCatalog, publicApiServices: publicServiceCatalog(), agents: Object.fromEntries(Object.entries(agentRoles).map(([route, role]) => [route, role.name])), timezone: 'Asia/Dubai', piOnly: true, operationsEnabled: Boolean(operationsControlPin), printerConfigured: printerClient.configured, printerCameraConfigured: printerCamera.configured || Boolean(settings.printerPiCamera), obsConfigured: obsClient.configured });
+  response.json({ name: 'JARVIS', version: appVersion, ttsMode: process.env.TTS_MODE || 'local', localSpeech: await localSpeech.status(), fishVoiceId: process.env.FISH_AUDIO_VOICE_ID || '', fishModel: process.env.FISH_AUDIO_MODEL || 's2.1-pro-free', fishConfigured: Boolean(process.env.FISH_AUDIO_API_KEY && process.env.FISH_AUDIO_VOICE_ID), fishRetryPolicy: { maxAttempts: 2, retryableStatusCodes: [500, 502, 503, 504], backoffMs: 350 }, fishReplyTimeoutMs: fishAudioTimeoutMs, fishWakeTimeoutMs: fishAudioWakeTimeoutMs, allowBrowserTtsFallback: asBool(process.env.ALLOW_BROWSER_TTS_FALLBACK, false), allowBrowserTtsAutoplay: asBool(process.env.ALLOW_BROWSER_TTS_AUTOPLAY, false), model: primaryModel, models, visionModel, visionConfigured: vision.configured, visionInstalled: vision.installed, visionRuntime: vision.runtime, visionCapabilityVerified: vision.capabilityVerified, stt, emailSendEnabled: googleEmailSendEnabled, browserEngine: camoufoxEngine(), browserControlEnabled, browserPreviewEnabled, stirling: { ...stirlingPdf.snapshot(), operations: stirlingCatalog() }, printerCamera: printerCamera.snapshot(), tools: { google: true, emailDraft: true, emailSend: googleEmailSendEnabled, web: true, googleNews: true, publicApis: true, screen: true, screenExplain: true, compactLocalView: true, websiteLiveView: true, websitePreview: browserPreviewEnabled, piCameraView: true, printerCameraView: printerCamera.configured || Boolean(settings.printerPiCamera), hostBrowser: true, browserControl: browserControlEnabled, officeArtifacts: true, stirlingPdf: true, liveAgentView: true, roleRouting: true, localPiCommandTranscription: sttConfigured, obs: true, obsOverlay: Boolean(obsOverlayToken), broadcastKit: true, analytics: true, mediaDeck: true, desktopApps: true, routines: true, memory: true, notes: true, reminders: true }, routineCatalog, publicApiServices: publicServiceCatalog(), agents: Object.fromEntries(Object.entries(agentRoles).map(([route, role]) => [route, role.name])), timezone: 'Asia/Dubai', piOnly: true, operationsEnabled: Boolean(operationsControlPin), printerConfigured: printerClient.configured, printerCameraConfigured: printerCamera.configured || Boolean(settings.printerPiCamera), obsConfigured: obsClient.configured });
 });
 app.get('/api/vision/status', async (_request, response) => {
   const installed = await installedOllamaModels();
@@ -1941,7 +1943,14 @@ app.post('/api/chat', async (request, response) => {
 app.post('/api/tts', async (request, response) => {
   const text = cleanText(request.body?.text, 2500); const requestedMode = request.body?.mode === 'fish' ? 'fish' : 'local';
   if (!text) { response.status(400).json({ error: 'Speech text is empty.' }); return; }
-  if (requestedMode !== 'fish') { response.status(409).json({ error: 'Fish Audio mode was not requested.' }); return; }
+  if (requestedMode === 'local') {
+    try {
+      const audio = await localSpeech.synthesize(text, { language: request.body?.language, rate: request.body?.rate, pitch: request.body?.pitch });
+      response.set({ 'Cache-Control': 'private, no-store', 'X-Jarvis-TTS-Provider': 'espeak', 'X-Jarvis-Voice-ID': 'pi:offline' });
+      response.type('audio/wav').send(audio);
+    } catch (error) { response.status([400, 429, 503, 504].includes(error.status) ? error.status : 503).json({ error: error.message }); }
+    return;
+  }
   const apiKey = process.env.FISH_AUDIO_API_KEY; const voiceId = process.env.FISH_AUDIO_VOICE_ID;
   if (!apiKey || !voiceId) { response.status(503).json({ error: 'Fish Audio is not configured.' }); return; }
   try {

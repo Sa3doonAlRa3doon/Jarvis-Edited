@@ -6,6 +6,7 @@ import { shouldApplyTranscriptToInput } from './voice-utils.js';
 import { hasWakeCommand, normalizeWakeCommand } from './wake-command.js';
 import { wakeCaptureLabel } from './wake-state.js';
 import { requiresBrowserTtsGesture } from './tts-autoplay-policy.js';
+import { playSpeechAudio, requestPiSpeech, usesPiSpeech } from './local-speech.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -906,6 +907,22 @@ async function speak(text, { pendingContext = null, onPlaybackStart = null, fish
         document.body.dataset.ttsState = error?.name === 'TimeoutError' ? 'timeout' : 'error';
         console.warn(`Fish Audio playback failed without changing voices: ${error?.message || error}`);
         if (!state.config?.allowBrowserTtsFallback) { onPlaybackStart?.(); state.galaxy?.setActivity('error', 1); return false; }
+      }
+    }
+    if (usesPiSpeech(state.config, state.settings)) {
+      document.body.dataset.ttsProvider = 'espeak'; document.body.dataset.ttsVoice = 'pi:offline'; document.body.dataset.ttsState = 'requesting';
+      try {
+        const result = await requestPiSpeech(text, state.settings);
+        onPlaybackStart?.(); document.body.dataset.ttsState = 'playing';
+        if (state.voice?.playAudio) await state.voice.playAudio(result.bytes, Number(state.settings?.ttsVolume ?? 1));
+        else await playSpeechAudio(result.bytes, { contentType: result.contentType, volume: state.settings?.ttsVolume ?? 1 });
+        state.pendingSpeech = null; document.body.classList.remove('audio-locked'); document.body.dataset.ttsState = 'complete'; return true;
+      } catch (error) {
+        onPlaybackStart?.();
+        if (error?.name === 'NotAllowedError') {
+          state.pendingSpeech = { text, context: pendingContext }; document.body.classList.add('audio-locked'); document.body.dataset.ttsState = 'blocked'; state.galaxy?.setActivity('armed', 1);
+        } else { document.body.dataset.ttsState = 'error'; console.warn(`Offline Pi speech failed: ${error?.message || 'audio unavailable'}`); }
+        return false;
       }
     }
     if ('speechSynthesis' in window) {

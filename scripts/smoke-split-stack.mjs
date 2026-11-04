@@ -159,6 +159,21 @@ try {
   stored = await getJson(settingsPath, { headers: authorization });
   assert.equal(stored.body.wakeResponse, 'split backend smoke check');
 
+  const config = await getJson(`${frontendUrl}/api/config`, { headers: sessionHeaders });
+  assert.equal(config.response.status, 200);
+  const ttsRequest = { method: 'POST', headers: { ...sessionHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Split stack speech check.', mode: 'local' }) };
+  const anonymousSpeech = await fetch(`${frontendUrl}/api/tts`, { ...ttsRequest, headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(3000) });
+  assert.equal(anonymousSpeech.status, 401, 'speech generation requires a dashboard session');
+  const speech = await fetch(`${frontendUrl}/api/tts`, { ...ttsRequest, signal: AbortSignal.timeout(20_000) });
+  if (config.body.localSpeech?.available) {
+    assert.equal(speech.status, 200); assert.match(speech.headers.get('content-type') || '', /^audio\/wav/);
+    assert.equal(speech.headers.get('x-jarvis-tts-provider'), 'espeak');
+    assert.match(speech.headers.get('cache-control') || '', /no-store/);
+    const wav = Buffer.from(await speech.arrayBuffer()); assert.equal(wav.toString('ascii', 0, 4), 'RIFF'); assert.ok(wav.length > 44);
+  } else {
+    assert.equal(speech.status, 503); assert.match((await speech.json()).error, /Offline Pi speech is unavailable/);
+  }
+
   const directLogin = await getJson(`${apiUrl}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Forwarded-Proto': 'https', 'X-Jarvis-Proxy-Token': 'caller-spoof', 'X-Jarvis-Client-Address': '203.0.113.8' },
@@ -184,7 +199,7 @@ try {
   }
   assert.equal(lastStatus, 429, 'rotating unauthenticated local proxy headers must not reset PIN attempt limits');
 
-  console.log('Split-stack smoke passed: 5 processes ready; dashboard login/session cookies, authenticated proxy identity/HTTPS, local PIN throttling, local backends, settings persistence, media proxy, and core settings round-trip all succeeded.');
+  console.log('Split-stack smoke passed: 5 processes ready; dashboard login/session cookies, authenticated proxy identity/HTTPS, local PIN throttling, local backends, settings persistence, media proxy, core settings round-trip, and session-protected local speech all succeeded.');
 } finally {
   await stopStack();
   const resolvedTemp = path.resolve(temporaryRoot);

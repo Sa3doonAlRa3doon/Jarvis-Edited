@@ -4,6 +4,7 @@ import {
 import { analyzeVoiceFrame, analyzeVoiceSpectrum, clearVoiceProfile, configureRecognitionCapabilities, isSpeechBandEligible, loadVoiceProfile, saveVoiceProfile, stabilizeNoiseFloor, startRecognitionWithTrack } from './voice-controller.js';
 import { deviceIdConstraint, deviceSelectionAvailability, friendlyMediaError, getUserMediaWithFallback, normalizeDeviceId, reconcileDeviceSelection } from './media-utils.js';
 import { SCREEN_RETRY_DELAY_MS, canScheduleScreenRetry, isRetryableScreenPickerDismissal, screenRetryStatus, secondsUntilScreenRetry } from './screen-retry-policy.js';
+import { playSpeechAudio, requestPiSpeech, usesPiSpeech } from './local-speech.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -281,8 +282,11 @@ function queueBrowserDeviceRefresh() {
 }
 
 function loadSpeechVoices(selected = ui.ttsVoice.value) {
-  if (!('speechSynthesis' in window)) { ui.ttsVoice.disabled = true; ui.testTalkback.disabled = true; return; }
-  const voices = speechSynthesis.getVoices(); const items = voices.map((voice) => ({ id: voice.voiceURI, label: `${voice.name} // ${voice.lang}${voice.localService ? ' // LOCAL' : ''}` }));
+  const voices = 'speechSynthesis' in window ? speechSynthesis.getVoices() : [];
+  const items = voices.map((voice) => ({ id: voice.voiceURI, label: `${voice.name} // ${voice.lang}${voice.localService ? ' // LOCAL' : ''}` }));
+  if (state.config.localSpeech?.available) items.unshift({ id: 'pi:offline', label: 'Pi offline voice // eSpeak' });
+  ui.ttsVoice.disabled = items.length === 0;
+  ui.testTalkback.disabled = !state.config.localSpeech?.available && state.config.ttsMode !== 'fish' && !('speechSynthesis' in window);
   fillSelect(ui.ttsVoice, items, 'System default voice', selected);
 }
 
@@ -518,6 +522,15 @@ async function testTalkback() {
       ui.voiceConfidence.textContent = `${error?.message || 'Voice request failed.'} // VOICE NOT SUBSTITUTED`;
       if (!state.config.allowBrowserTtsFallback) return;
     }
+  }
+  if (usesPiSpeech(state.config, currentSettings())) {
+    ui.voiceTranscript.textContent = 'OFFLINE PI VOICE REQUEST';
+    try {
+      const result = await requestPiSpeech(text, currentSettings());
+      await playSpeechAudio(result.bytes, { context: state.talkbackContext, contentType: result.contentType, volume: ui.ttsVolume.value });
+      ui.voiceTranscript.textContent = 'OFFLINE TALKBACK COMPLETE'; ui.voiceConfidence.textContent = 'PI SYSTEM VOICE // eSpeak';
+    } catch (error) { ui.voiceTranscript.textContent = 'OFFLINE TALKBACK FAILED'; ui.voiceConfidence.textContent = error.message || 'Audio unavailable.'; }
+    return;
   }
   if (!('speechSynthesis' in window)) { ui.voiceConfidence.textContent = 'Speech synthesis is unavailable in this browser.'; return; }
   speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance('Voice core calibrated. I am ready.');
@@ -1551,6 +1564,10 @@ async function init() {
       ui.ttsProviderNote.textContent = config.fishConfigured
         ? `Locked: Fish Audio ${config.fishVoiceId} // ${config.fishModel}. ${retryNote}. ${timingNote}. Browser voice substitution is ${config.allowBrowserTtsFallback ? 'enabled' : 'disabled'}.`
         : `Fish Audio ${config.fishVoiceId} is selected, but FISH_AUDIO_API_KEY is not configured. ${retryNote}. ${timingNote}. JARVIS will stay silent instead of changing voices.`;
+    } else if (config.localSpeech?.available) {
+      ui.ttsProviderNote.textContent = 'Offline Pi speech is available. System default and Pi offline voice use eSpeak; an explicitly selected browser voice keeps its own identity. This is separate from the Fish Audio voice.';
+    } else {
+      ui.ttsProviderNote.textContent = 'Local mode uses an installed browser voice. On the Pi, install espeak-ng and restart the JARVIS core to enable offline WAV talkback.';
     }
     loadSpeechVoices(settings.ttsVoice || '');
     state.savedSettings = { ...settings };

@@ -1,4 +1,5 @@
 import { SCREEN_RETRY_DELAY_MS, canScheduleScreenRetry, isRetryableScreenPickerDismissal, screenRetryStatus, secondsUntilScreenRetry } from './screen-retry-policy.js';
+import { playSpeechAudio, requestPiSpeech, speakBrowser, usesPiSpeech } from './local-speech.js';
 
 const $ = (selector) => document.querySelector(selector);
 const ui = {
@@ -539,19 +540,25 @@ async function talkWorkspaceDirective() {
   if (ui.directiveTalk) { ui.directiveTalk.disabled = true; ui.directiveTalk.textContent = 'PLAYING…'; }
   text(ui.directiveStatus, 'TALKBACK // REQUESTING JARVIS VOICE');
   try {
-    const response = await (window.jarvisFetch || fetch)('/api/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: state.lastDirectiveText.slice(0, 2_400), mode: 'fish' }) });
+    // Prime during the TALK click, before waiting for configuration or audio.
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (AudioContextClass) {
+      if (!state.talkContext || state.talkContext.state === 'closed') state.talkContext = new AudioContextClass();
+      if (state.talkContext.state !== 'running') await state.talkContext.resume();
+    }
+    const [config, settings] = await Promise.all([request('/api/config'), request('/api/settings')]);
+    if (config.ttsMode !== 'fish') {
+      if (usesPiSpeech(config, settings)) {
+        const result = await requestPiSpeech(state.lastDirectiveText.slice(0, 2_400), settings);
+        await playSpeechAudio(result.bytes, { context: state.talkContext, volume: settings.ttsVolume ?? .95 });
+        text(ui.directiveStatus, 'TALKBACK // OFFLINE PI VOICE COMPLETE');
+      } else { await speakBrowser(state.lastDirectiveText, settings); text(ui.directiveStatus, 'TALKBACK // BROWSER VOICE COMPLETE'); }
+      return;
+    }
+    const response = await (window.jarvisFetch || fetch)('/api/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: state.lastDirectiveText.slice(0, 2_400), mode: 'fish' }), signal: AbortSignal.timeout(65_000) });
     if (!response.ok) { const detail = await response.json().catch(() => ({})); throw new Error(detail.error || `HTTP ${response.status}`); }
     const bytes = await response.arrayBuffer();
-    const url = URL.createObjectURL(new Blob([bytes], { type: response.headers.get('content-type') || 'audio/mpeg' }));
-    try {
-      const audio = new Audio(url); audio.preload = 'auto'; audio.volume = .95; await audio.play();
-      await new Promise((resolve) => {
-        let settled = false;
-        const finish = () => { if (settled) return; settled = true; clearTimeout(timeout); resolve(); };
-        const timeout = window.setTimeout(finish, 15_000);
-        audio.addEventListener('ended', finish, { once: true }); audio.addEventListener('error', finish, { once: true });
-      });
-    } finally { URL.revokeObjectURL(url); }
+    await playSpeechAudio(bytes, { context: state.talkContext, contentType: response.headers.get('content-type') || 'audio/mpeg', volume: .95 });
     text(ui.directiveStatus, 'TALKBACK // COMPLETE');
   } catch (error) { text(ui.directiveStatus, `TALKBACK UNAVAILABLE // ${error.message || 'audio blocked'}`); }
   finally { state.talkBusy = false; if (ui.directiveTalk) { ui.directiveTalk.disabled = !state.lastDirectiveText; ui.directiveTalk.textContent = 'TALK'; } }

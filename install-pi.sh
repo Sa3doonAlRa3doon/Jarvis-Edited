@@ -74,6 +74,7 @@ fi
 MISSING_MEDIA_PACKAGES=()
 command -v ffmpeg >/dev/null 2>&1 || MISSING_MEDIA_PACKAGES+=(ffmpeg)
 command -v arecord >/dev/null 2>&1 || MISSING_MEDIA_PACKAGES+=(alsa-utils)
+command -v espeak-ng >/dev/null 2>&1 || command -v espeak >/dev/null 2>&1 || MISSING_MEDIA_PACKAGES+=(espeak-ng)
 command -v v4l2-ctl >/dev/null 2>&1 || MISSING_MEDIA_PACKAGES+=(v4l-utils)
 command -v python3 >/dev/null 2>&1 || MISSING_MEDIA_PACKAGES+=(python3)
 python3 -m venv --help >/dev/null 2>&1 || MISSING_MEDIA_PACKAGES+=(python3-venv)
