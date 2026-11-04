@@ -991,6 +991,7 @@ app.get('/api/vision/status', async (_request, response) => {
   response.json({ ...vision, ollama: ollamaUrl });
 });
 app.get('/api/workspace/status', async (_request, response) => {
+  await refreshWakeBackendState();
   let desktopApps = { apps: [], platform: process.platform };
   try { desktopApps = await desktopAppBridge.list(); } catch {}
   const obsStatus = await obsClient.readStatus().catch(() => ({ online: false, configured: obsClient.configured }));
@@ -1277,7 +1278,7 @@ app.get('/api/events', (request, response) => {
   request.on('close', () => { clearInterval(keepalive); unsubscribe(); });
 });
 app.get('/api/status', async (_request, response) => {
-  const [services, google, operations, stirling] = await Promise.all([serviceStatus(), googleConnectorStatus(), operationStatus(), stirlingPdf.status()]);
+  const [services, google, operations, stirling] = await Promise.all([serviceStatus(), googleConnectorStatus(), operationStatus(), stirlingPdf.status(), refreshWakeBackendState()]);
   const routines = routineEngine.list();
   const reminders = localMemory.listReminders();
   response.json({ services, google, operations, stirling, routines: { count: routines.length, active: routines.filter((item) => item.enabled).length, nextRunAt: routines.filter((item) => item.enabled && item.nextRunAt).map((item) => item.nextRunAt).sort()[0] || null }, memory: { notes: localMemory.listNotes().length, reminders: reminders.length, nextReminderAt: reminders[0]?.dueAt || null }, engineering: engineeringStatusSummary(), wake: { ...wakeState, process: undefined } });
@@ -2038,7 +2039,7 @@ async function monitorTick() {
     await localMemory.tick();
     await broadcastHub.tick();
     await mediaDeck.tick();
-    const [services, agents, operations] = await Promise.all([serviceStatus(), agentSnapshot(), operationStatus()]);
+    const [services, agents, operations] = await Promise.all([serviceStatus(), agentSnapshot(), operationStatus(), refreshWakeBackendState()]);
     const signature = JSON.stringify({ jarvis: services.openjarvis.online, ollama: services.ollama.online, maintenance: operations.maintenancePersistent || operations.maintenanceUntilReboot });
     if (lastHealthSignature && signature !== lastHealthSignature) await eventStore.append('health', 'Core service state changed', { openjarvis: services.openjarvis.online, ollama: services.ollama.online, maintenance: operations.maintenancePersistent || operations.maintenanceUntilReboot });
     lastHealthSignature = signature;
