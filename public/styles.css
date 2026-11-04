@@ -964,6 +964,17 @@ button { color: inherit; }
   .command-page .control-actions button { min-height:23px; }
   .command-page .operations>div { padding-inline:7px; }
 }
+/* Keep the controls and live mirror inside a 1024px Pi display. The wider
+   desktop minimums otherwise extend both the preview and header off-screen. */
+@media (min-width:901px) and (max-width:1120px) {
+  .settings-page .settings-layout { grid-template-columns:160px minmax(0,1.15fr) minmax(0,.85fr); gap:8px; }
+  .settings-page .settings-layout>* { min-width:0; }
+  .settings-page .settings-header { grid-template-columns:minmax(0,1fr) auto auto; gap:10px; padding-inline:12px; }
+  .settings-page .settings-brand h1 { font-size:14px; }
+  .settings-page .settings-health>span { min-width:82px; padding-inline:8px; }
+  .settings-page .settings-nav { padding-inline:7px; }
+  .settings-page .settings-nav-list button { grid-template-columns:24px minmax(0,1fr); padding-inline:6px; }
+}
 @media (max-height:760px) and (min-width:901px) {
   .command-page { --deck-h:88px; }
   .command-page .command-shell { grid-template-rows:60px minmax(0,1fr); }
