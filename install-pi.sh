@@ -282,8 +282,8 @@ grep -q '^GOOGLE_CLIENT_SECRET=' .env || set_env_value GOOGLE_CLIENT_SECRET ''
 if ! grep -q '^OPS_CONTROL_PIN=.' .env; then
   GENERATED_PIN="$(python3 -c 'import secrets; print(f"{secrets.randbelow(1000000):06d}")')"
   set_env_value OPS_CONTROL_PIN "$GENERATED_PIN"
-  echo "Generated JARVIS maintenance PIN: $GENERATED_PIN"
-  echo "Save it now. It is stored only in $APP_DIR/.env and is required for service controls."
+  echo "Generated the JARVIS maintenance PIN in the private $APP_DIR/.env file."
+  echo "Read OPS_CONTROL_PIN locally when needed; its value is never printed into installation logs."
 fi
 CONTROL_PIN="$(sed -n 's/^OPS_CONTROL_PIN=//p' .env | tail -n 1)"
 if ! grep -q '^DASHBOARD_ACCESS_PIN=.' .env; then
