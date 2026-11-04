@@ -12,6 +12,7 @@ const host = process.env.HOST || '127.0.0.1';
 const port = Number(process.env.PORT || DEFAULT_LOCAL_PORTS.dashboard);
 const apiHost = process.env.API_HOST || '127.0.0.1';
 const apiPort = Number(process.env.API_PORT || DEFAULT_LOCAL_PORTS.api);
+const internalServiceToken = String(process.env.JARVIS_INTERNAL_SERVICE_TOKEN || '');
 const trustedProxyAddresses = String(process.env.TRUSTED_DASHBOARD_PROXY_IPS || '').split(',').map((value) => value.trim()).filter(Boolean);
 const publicDir = path.join(root, 'public');
 
@@ -46,7 +47,8 @@ app.use((request, response) => {
     ...request.headers,
     host: request.get('host'),
     'x-forwarded-proto': forwardedProto,
-    // Replace caller input; the API only trusts this from its loopback peer.
+    'x-jarvis-proxy-token': internalServiceToken,
+    // Replace caller input; the API verifies this front end's token as well.
     'x-jarvis-client-address': trustedProxyClientAddress({
       remoteAddress: request.socket.remoteAddress,
       forwardedFor: request.get('X-Forwarded-For'),

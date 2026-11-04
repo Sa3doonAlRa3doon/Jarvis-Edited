@@ -159,7 +159,32 @@ try {
   stored = await getJson(settingsPath, { headers: authorization });
   assert.equal(stored.body.wakeResponse, 'split backend smoke check');
 
-  console.log('Split-stack smoke passed: 5 processes ready; dashboard login/session cookies, forwarded-HTTPS spoof rejection, local backends, settings persistence, media proxy, and core settings round-trip all succeeded.');
+  const directLogin = await getJson(`${apiUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Forwarded-Proto': 'https', 'X-Jarvis-Proxy-Token': 'caller-spoof', 'X-Jarvis-Client-Address': '203.0.113.8' },
+    body: JSON.stringify({ pin: dashboardPin })
+  });
+  assert.equal(directLogin.response.status, 200);
+  assert.doesNotMatch(directLogin.response.headers.get('set-cookie') || '', /;\s*Secure(?:;|$)/i, 'unauthenticated loopback callers cannot assert forwarded HTTPS');
+  const trustedLogin = await getJson(`${apiUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Forwarded-Proto': 'https', 'X-Jarvis-Proxy-Token': token, 'X-Jarvis-Client-Address': '203.0.113.8' },
+    body: JSON.stringify({ pin: dashboardPin })
+  });
+  assert.equal(trustedLogin.response.status, 200);
+  assert.match(trustedLogin.response.headers.get('set-cookie') || '', /;\s*Secure(?:;|$)/i, 'authenticated front-end proof preserves forwarded HTTPS');
+  let lastStatus;
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const result = await getJson(`${apiUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Jarvis-Proxy-Token': 'caller-spoof', 'X-Jarvis-Client-Address': `198.51.100.${attempt + 1}` },
+      body: JSON.stringify({ pin: 'wrong-test-pin' })
+    });
+    lastStatus = result.response.status;
+  }
+  assert.equal(lastStatus, 429, 'rotating unauthenticated local proxy headers must not reset PIN attempt limits');
+
+  console.log('Split-stack smoke passed: 5 processes ready; dashboard login/session cookies, authenticated proxy identity/HTTPS, local PIN throttling, local backends, settings persistence, media proxy, and core settings round-trip all succeeded.');
 } finally {
   await stopStack();
   const resolvedTemp = path.resolve(temporaryRoot);

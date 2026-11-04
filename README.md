@@ -564,6 +564,7 @@ External projects used for design research and their code-reuse terms are listed
 - State-changing requests are same-origin checked.
 - The dashboard sends only a fixed action name to a root-owned helper. Service names and shell text are not accepted from the browser.
 - The root helper is limited by `/etc/sudoers.d/jarvis-command-center` to six exact commands.
+- The core verifies the front end's internal token before trusting forwarded client addresses or HTTPS state. Other local processes cannot choose new PIN-attempt buckets by supplying proxy headers.
 - The helper can stop/restart Ollama, the isolated OpenJarvis API, the settings/camera/mic backends, and Hatclanker. It deliberately leaves `openjarvis-core.service`, `openjarvis-dashboard.service`, SSH, networking, and the OS running so you can resume maintenance remotely.
 - “Stop until reboot” uses a lock in `/run`; Linux clears it on reboot.
 - “Persistent stop” uses a lock in `/var/lib/jarvis-command-center`; it survives reboot until **Resume** removes it.

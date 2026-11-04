@@ -29,7 +29,7 @@ import { issueDashboardSession, loadDashboardSessionSecret, verifyDashboardSessi
 import { PrinterClient } from './lib/printer-client.mjs';
 import { PrinterCameraClient } from './lib/printer-camera.mjs';
 import { normalizeWakeCapture } from './public/wake-state.js';
-import { internalServiceHeaders } from './lib/local-service-auth.mjs';
+import { internalServiceHeaders, serviceTokenMatches } from './lib/local-service-auth.mjs';
 import { RoutineEngine, routineCatalog } from './lib/routine-engine.mjs';
 import { StirlingPdfClient, parseStirlingPrompt, stirlingCatalog } from './lib/stirling-pdf.mjs';
 import { buildSyntheticPdf, documentSignature } from './lib/stirling-fixture.mjs';
@@ -193,7 +193,11 @@ function safeNumber(value, fallback, min, max) {
   return Number.isFinite(parsed) ? clamp(parsed, min, max) : fallback;
 }
 function requestUsesTrustedHttps(request) {
-  return trustedHttpsState({ secure: request.secure, remoteAddress: request.socket?.remoteAddress, forwardedProto: request.get('X-Forwarded-Proto') });
+  return trustedHttpsState({ secure: request.secure, remoteAddress: request.socket?.remoteAddress, forwardedProto: authenticatedFrontendRequest(request) ? request.get('X-Forwarded-Proto') : '' });
+}
+function authenticatedFrontendRequest(request) {
+  return isLoopbackAddress(request.socket?.remoteAddress)
+    && serviceTokenMatches(request.get('X-Jarvis-Proxy-Token'), internalServiceToken);
 }
 function wakePhrases(value) {
   const source = Array.isArray(value) ? value : String(value || '').split(',');
@@ -735,7 +739,8 @@ const operationAttempts = new Map();
 function requestRateLimitAddress(request) {
   return rateLimitClientAddress({
     remoteAddress: request.socket.remoteAddress || request.ip,
-    proxiedClientAddress: request.get('X-Jarvis-Client-Address')
+    proxiedClientAddress: request.get('X-Jarvis-Client-Address'),
+    proxyAuthenticated: authenticatedFrontendRequest(request)
   });
 }
 function operationRateLimited(key) {
