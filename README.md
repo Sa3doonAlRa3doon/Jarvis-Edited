@@ -748,9 +748,9 @@ Indexing is bounded to 180 nodes and four levels per refresh. It exposes file na
 
 ## Google Workspace
 
-Google belongs to this JARVIS installation, not the Discord bot. Use **one OAuth 2.0 Client ID of type Desktop app**. Do not create an API key, and do not use a service account for a personal Gmail/Drive/Calendar account. Enable Gmail API, Google Drive API, Google Calendar API, Google Tasks API, and People API in the same project, then add your own Google account under OAuth test users while the app is in Testing.
+Google belongs to this JARVIS installation, not the Discord bot. Use **one OAuth 2.0 Client ID**, either a Desktop app or a Web application with the exact loopback callback registered. Personal Gmail/Drive/Calendar access uses user OAuth rather than an API key or service account. Enable Gmail API, Google Drive API, Google Calendar API, Google Tasks API, and People API in the same project, then add your own Google account under OAuth test users while the app is in Testing.
 
-The OAuth client secret posted in chat is exposed. Delete or rotate that OAuth client in Google Cloud before continuing, download the replacement client JSON, and never commit it or paste it into chat. A single replacement desktop OAuth client can authorize all five Google services; each service is still limited by the scopes you approve.
+A single OAuth client can authorize all five Google services, limited by the scopes you approve. Store its downloaded client JSON or environment pair privately on the host, outside Git.
 
 Forward the OAuth callback from a second PowerShell/SSH session:
 
@@ -758,13 +758,7 @@ Forward the OAuth callback from a second PowerShell/SSH session:
 ssh -L 8792:127.0.0.1:8792 pi5@192.168.4.123
 ```
 
-Then on the Pi:
-
-```bash
-jarvis connect gdrive
-```
-
-Open the authorization URL it prints. The callback travels through the tunnel to the Pi. Keep OAuth client JSON and token files outside this repository; the dashboard reads only their redacted connector state and never exposes tokens.
+Use `npm run google:authorize` on the Pi as shown below. Open its authorization link on the Pi itself, or on the laptop while the tunnel is open. The callback must reach the same host that started the helper. The dashboard reads only redacted connector state and never exposes tokens.
 
 The direct bridge can search Gmail, list Calendar events, search Drive metadata, list Tasks, and find Contacts. Email drafting is local and never sends automatically. Gmail sending is the only write action and stays disabled until you explicitly authorize the `gmail.send` scope.
 
@@ -787,6 +781,8 @@ If the protected Settings screen reports **REAUTH REQUIRED**, use **REAUTHORIZE 
 
 After replacing the OAuth client, authorize it again: tokens are bound to the client that obtained them, and an older client's token cannot be reused with a new client pair. The helper uses PKCE, preserves the registered callback path, and shows its success page only after Google returns tokens and the private token file is saved. Failed exchanges and storage errors leave the previous file intact. Callback URLs with query parameters or fragments are rejected instead of silently rewritten.
 
+Google [expires refresh tokens after seven days](https://developers.google.com/identity/protocols/oauth2#expiration) for External apps in Testing when they request these Workspace scopes. Reauthorization is needed when that happens. Production publishing and any applicable Google verification are separate setup steps; JARVIS cannot extend Google's token lifetime. Contacts verification uses the address-book endpoint supported by `contacts.readonly`, so it does not require the additional `profile` scope.
+
 The helper accepts a downloaded desktop client or a web client with an explicitly registered loopback redirect. The OAuth listener uses its own port (`8792` by default); the settings backend remains on `8789`. For a web client, register `http://127.0.0.1:8792/` (or `http://localhost:8792/`) in Google Cloud and set `GOOGLE_OAUTH_PORT=8792` and `GOOGLE_OAUTH_REDIRECT_URI` to the exact same URI in the private `.env`. The Pi installer migrates the old callback default from `8789` to `8792`. It also moves existing OAuth files into `/var/lib/openjarvis-google` with private permissions: the core service runs with `ProtectHome=read-only`, so its OAuth token must be outside the user's home directory for dashboard reauthorization to save correctly. After pulling an installer update on the Pi, rerun `./install-pi.sh` to migrate the files. Alternatively, set both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in the ignored local `.env`; a complete pair overrides the downloaded credentials file. Never put the client secret in GitHub or chat. Non-loopback redirects are rejected, and credentials stay on the host.
 
 ```dotenv
@@ -794,7 +790,7 @@ GOOGLE_EMAIL_SEND_ENABLED=true
 ```
 
 ```bash
-sudo systemctl restart openjarvis-dashboard
+sudo systemctl restart openjarvis-core
 ```
 
 Usage example: `Draft an email to friend@example.com saying I will arrive at five.` Review and edit the exact draft, enter the operations PIN, type `SEND EMAIL`, and press **SEND THIS EXACT EMAIL**. Closing the draft sends nothing. Calendar, Drive, Tasks, Contacts, deletion, forwarding, and settings remain read-only.

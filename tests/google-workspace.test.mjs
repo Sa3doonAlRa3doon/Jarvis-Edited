@@ -97,6 +97,32 @@ test('coalesces concurrent OAuth refreshes and names rejected Google probes', as
   assert.match(status.errors.gmail, /google:authorize/);
 });
 
+test('Contacts verification succeeds with contacts.readonly without requiring profile access', async () => {
+  const files = credentialFiles();
+  const peopleReads = [];
+  const bridge = new GoogleWorkspaceBridge({
+    environment: credentialEnvironment(), home: TEST_HOME,
+    reader: async (file) => { if (!files.has(file)) throw new Error('missing'); return files.get(file); },
+    fetchImpl: async (url) => {
+      const target = new URL(url);
+      if (target.hostname === 'oauth2.googleapis.com') return response({ access_token: 'access', expires_in: 3600 });
+      if (target.hostname === 'people.googleapis.com') {
+        peopleReads.push(target);
+        if (target.pathname === '/v1/people/me') return response({ error: { message: 'profile permission required' } }, 403);
+        if (target.pathname === '/v1/people/me/connections') return response({ connections: [] });
+        return response({}, 404);
+      }
+      return response({});
+    }
+  });
+  const status = await bridge.status({ probe: true });
+  assert.equal(status.connectors.gcontacts, true);
+  assert.equal(status.errors.gcontacts, undefined);
+  assert.equal(status.needsReauthorization, false);
+  assert.equal(peopleReads.length, 1);
+  assert.equal(peopleReads[0].searchParams.get('pageSize'), '1');
+});
+
 test('names a deleted OAuth client without exposing provider details', async () => {
   const bridge = new GoogleWorkspaceBridge({
     environment: {}, home: '/tmp/jarvis-google',
