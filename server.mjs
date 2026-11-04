@@ -50,6 +50,7 @@ import { localStatusIntent, localStatusRoute, summarizeLocalStatus } from './lib
 import { selectVisionModel } from './lib/vision-model-profile.mjs';
 import { DEFAULT_LOCAL_PORTS } from './lib/local-ports.mjs';
 import { createPipelineRun, normalizePipelineRequest, redactRun } from './lib/engineering-pipeline.mjs';
+import { askLocalModelCascade } from './lib/ollama-cascade.mjs';
 import { runEngineeringPipeline } from './scripts/engineering-pipeline.mjs';
 import {
   clamp, dockerSummary, runBinary, storageDevices, systemMetrics
@@ -66,7 +67,7 @@ const ollamaUrl = (process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').repl
 const openJarvisChatTimeoutMs = safeNumber(process.env.OPENJARVIS_CHAT_TIMEOUT_MS, 45_000, 10_000, 180_000);
 const ollamaChatTimeoutMs = safeNumber(process.env.OLLAMA_CHAT_TIMEOUT_MS, 45_000, 5_000, 180_000);
 const multiPurposeOllamaTimeoutMs = safeNumber(process.env.MULTI_PURPOSE_OLLAMA_TIMEOUT_MS, 18_000, 5_000, 120_000);
-const ollamaStructuredTimeoutMs = safeNumber(process.env.OLLAMA_STRUCTURED_TIMEOUT_MS, 30_000, 8_000, 120_000);
+const ollamaStructuredTimeoutMs = safeNumber(process.env.OLLAMA_STRUCTURED_TIMEOUT_MS, 60_000, 8_000, 120_000);
 const dataDirectory = path.resolve(process.env.JARVIS_DATA_DIR || path.join(__dirname, 'data'));
 const internalServiceToken = String(process.env.JARVIS_INTERNAL_SERVICE_TOKEN || '');
 const settingsBackendUrl = String(process.env.JARVIS_SETTINGS_BACKEND_URL || `http://127.0.0.1:${DEFAULT_LOCAL_PORTS.settings}`).replace(/\/$/, '');
@@ -591,35 +592,12 @@ async function askOllamaWithCascade({ selected, messages, format = undefined, ti
   const installed = await installedOllamaModels();
   const order = modelAttemptOrder({ requested: selected?.model, primary: primaryModel, installed, route: selected?.route, limit: 3 });
   const modelsToTry = order.length ? order : [String(selected?.model || primaryModel).trim()].filter(Boolean);
-  const deadline = Date.now() + Math.max(5_000, Number(timeoutMs) || 180_000);
-  let lastError = new Error('No local model was available.');
-  for (let index = 0; index < modelsToTry.length; index += 1) {
-    const model = modelsToTry[index];
-    const remainingMs = deadline - Date.now();
-    if (remainingMs < 1_000) break;
-    const attemptsRemaining = Math.max(1, modelsToTry.length - index);
-    const attemptTimeoutMs = Math.max(1_000, Math.floor(remainingMs / attemptsRemaining));
-    try {
-      const body = { model, messages, stream: false, keep_alive: '2m' };
-      if (format) body.format = format;
-      const result = await fetchJson(`${ollamaUrl}/api/chat`, {
+  return askLocalModelCascade({
+    modelsToTry, selectedModel: selected?.model, messages, format, timeoutMs,
+    fetchChat: (body, attemptTimeoutMs) => fetchJson(`${ollamaUrl}/api/chat`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-      }, attemptTimeoutMs);
-      const content = result.message?.content || '';
-      if (!String(content).trim()) throw new Error('The local model returned no response.');
-      return {
-        result,
-        model,
-        attemptedModels: modelsToTry,
-        fallback: model !== selected?.model
-          ? `The routed model failed at runtime; JARVIS used ${model} instead.`
-          : ''
-      };
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  throw lastError;
+      }, attemptTimeoutMs)
+  });
 }
 
 async function generateEmailDraft(prompt) {

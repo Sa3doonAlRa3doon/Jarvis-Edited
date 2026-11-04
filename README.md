@@ -227,7 +227,7 @@ page owns the microphone measurement, while Pi mode reports the listener gate.
 ### 3.27.0 bounded local model recovery
 
 - **Runtime model cascade** — specialist routing still starts with the selected local model, but a transient Ollama runner/load failure now retries up to two additional installed local models in a bounded order: routed specialist, primary model, then Pi-friendly fallbacks. The response and workspace identify the model that actually answered. No model is downloaded and no cloud provider is contacted.
-- **Bounded drafting and artifact generation** — Gmail drafts and local DOCX/PPTX/XLSX planning use the installed-only specialist cascade and a shorter `OLLAMA_STRUCTURED_TIMEOUT_MS` total deadline (30 seconds by default). If every local JSON attempt expires, the response identifies the deterministic local fallback instead of labeling it with a model that did not answer.
+- **Bounded drafting and artifact generation** — Gmail drafts and local DOCX/PPTX/XLSX planning use the installed-only specialist cascade and an `OLLAMA_STRUCTURED_TIMEOUT_MS` total deadline (60 seconds by default). The routed model gets most of the available time to load and produce an answer, with the remaining time reserved for fallback. Attempts share one total deadline, and the result names only models actually tried. If all JSON attempts fail, the response identifies its deterministic local fallback.
 
 ### 3.26.2 multi-purpose PDF repair lane
 
