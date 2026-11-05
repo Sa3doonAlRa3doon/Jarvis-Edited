@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requireInternalServiceAuth } from './lib/local-service-auth.mjs';
 import { DEFAULT_LOCAL_PORTS } from './lib/local-ports.mjs';
+import { SerializedPrivateFile } from './lib/private-file-writer.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -12,6 +13,7 @@ const port = Number(process.env.JARVIS_SETTINGS_BACKEND_PORT || DEFAULT_LOCAL_PO
 const token = String(process.env.JARVIS_INTERNAL_SERVICE_TOKEN || '');
 const dataDirectory = path.resolve(process.env.JARVIS_DATA_DIR || path.join(root, 'data'));
 const settingsPath = path.join(dataDirectory, 'settings.json');
+const settingsWriter = new SerializedPrivateFile(settingsPath);
 
 app.disable('x-powered-by');
 app.use(express.json({ limit: '128kb', strict: true }));
@@ -31,15 +33,11 @@ app.put('/settings', requireInternalServiceAuth(token), async (request, response
   if (!value || typeof value !== 'object' || Array.isArray(value)) { response.status(400).json({ error: 'Settings must be a JSON object.' }); return; }
   const serialized = `${JSON.stringify(value, null, 2)}\n`;
   if (Buffer.byteLength(serialized) > 128 * 1024) { response.status(413).json({ error: 'Settings document is too large.' }); return; }
-  const temporaryPath = path.join(dataDirectory, `.settings-${process.pid}-${Date.now()}.tmp`);
   try {
-    await fs.mkdir(dataDirectory, { recursive: true });
-    await fs.writeFile(temporaryPath, serialized, { mode: 0o600, flag: 'wx' });
-    await fs.rename(temporaryPath, settingsPath);
+    await settingsWriter.write(serialized);
     await fs.chmod(settingsPath, 0o600).catch(() => {});
     response.json({ ok: true });
   } catch {
-    await fs.rm(temporaryPath, { force: true }).catch(() => {});
     response.status(500).json({ error: 'Could not save local settings.' });
   }
 });

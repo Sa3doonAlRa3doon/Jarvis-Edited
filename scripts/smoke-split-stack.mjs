@@ -158,6 +158,13 @@ try {
   assert.equal(stored.response.status, 200);
   assert.equal(stored.body.source, 'browser', 'core startup should persist validated defaults through the settings backend');
 
+  const concurrentUpdates = await Promise.all(Array.from({ length: 16 }, (_, index) => getJson(settingsPath, {
+    method: 'PUT',
+    headers: { ...authorization, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ smokeCheck: `concurrent-${index}` })
+  })));
+  assert.equal(concurrentUpdates.every(({ response }) => response.status === 200), true, 'concurrent settings writes must not collide or fail');
+
   const update = await getJson(settingsPath, {
     method: 'PUT',
     headers: { ...authorization, 'Content-Type': 'application/json' },
