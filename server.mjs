@@ -830,6 +830,10 @@ app.post('/api/wake-event', async (request, response) => {
     noiseFloor: safeNumber(request.body?.noise_floor, 0, 0, 1),
     signalToNoiseDb: safeNumber(request.body?.signal_to_noise_db, 0, -120, 120),
     physicalGate: Boolean(request.body?.physical_gate),
+    physicalEvidenceRecent: Boolean(request.body?.physical_evidence_recent),
+    ...(request.body?.physical_evidence_recent
+      ? { physicalEvidenceAgeMs: safeNumber(request.body?.physical_evidence_age_ms, 0, 0, 320) }
+      : {}),
     source: 'pi',
     ...(command ? { command, commandSource: cleanText(request.body?.command_source, 40) || 'local-stt' } : {})
   };

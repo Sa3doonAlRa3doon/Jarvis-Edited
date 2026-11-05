@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import select
@@ -207,6 +208,32 @@ def wake_physical_gate(
     return level >= required_level and sample_peak >= required_peak and speech_shape_ok
 
 
+def wake_physical_evidence_recent(
+    now: float,
+    last_physical_at: float,
+    *,
+    max_age_ms: int = 320,
+) -> bool:
+    """Allow model latency to trail a proven voice frame by at most 320 ms.
+
+    The openWakeWord model can peak a few inference frames after the acoustic
+    energy in the phrase has ended. Requiring the model score and physical
+    gate on the exact same 80 ms frame therefore rejects genuine wake phrases.
+    This helper preserves the physical evidence, but only for a small, fixed
+    window. Invalid, future, absent, and stale timestamps are always rejected;
+    callers cannot expand the safety window beyond 320 ms.
+    """
+    try:
+        current = float(now)
+        observed = float(last_physical_at)
+        window_ms = min(320, max(0, int(max_age_ms)))
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if not math.isfinite(current) or not math.isfinite(observed) or observed <= 0 or current < observed:
+        return False
+    return (current - observed) * 1000.0 <= window_ms + 1e-6
+
+
 def wake_score_ready(
     scores: list[float] | tuple[float, ...],
     threshold: float,
@@ -341,6 +368,7 @@ def main() -> int:
     clap_refractory_until = 0.0
     wake_refractory_until = 0.0
     wake_score_history: list[float] = []
+    last_physical_evidence_at = 0.0
     last_wake_score = 0.0
     last_wake_ready = False
     clap_calibration_until = time.monotonic() + 0.75
@@ -439,6 +467,14 @@ def main() -> int:
                 peak_ratio=max(1.0, min(3.0, args.wake_peak_ratio)),
                 speech_shape_ok=shape_ok,
             )
+            if physical_gate:
+                last_physical_evidence_at = now
+            physical_evidence_recent = wake_physical_evidence_recent(now, last_physical_evidence_at)
+            physical_evidence_age_ms = (
+                round(max(0.0, (now - last_physical_evidence_at) * 1000.0), 1)
+                if physical_evidence_recent
+                else None
+            )
 
             # Continuously follow slow room-noise drift, but never learn from
             # a likely voice/clap frame. The bounded helper also follows a
@@ -457,6 +493,8 @@ def main() -> int:
                     "noise_floor": round(wake_noise_floor, 5),
                     "signal_to_noise_db": round(snr_db, 2),
                     "physical_gate": physical_gate,
+                    "physical_evidence_recent": physical_evidence_recent,
+                    "physical_evidence_age_ms": physical_evidence_age_ms,
                     "wake_score": round(last_wake_score, 4),
                     "wake_score_hits": sum(value >= max(0.0, args.wake_threshold) * 0.88 for value in wake_score_history),
                     "wake_score_ready": last_wake_ready,
@@ -507,17 +545,17 @@ def main() -> int:
                     predictions = wake_model.predict(samples)
                     score = max((float(value) for key, value in predictions.items() if "jarvis" in key.lower()), default=0.0)
                     last_wake_score = score
-                    if physical_gate:
+                    if physical_evidence_recent:
                         wake_score_history.append(score)
                         wake_score_history = wake_score_history[-3:]
                     else:
-                        # Never let a model score accumulate while the real
-                        # microphone gate is quiet; the next physical burst
-                        # must earn a fresh temporal window.
+                        # Never let a model score accumulate without a fresh,
+                        # proven microphone voice frame. The bounded evidence
+                        # bridge only compensates for model inference latency.
                         wake_score_history = []
                     ready = wake_score_ready(wake_score_history, args.wake_threshold)
                     last_wake_ready = ready
-                    if ready and physical_gate:
+                    if ready and physical_evidence_recent:
                         payload = {
                             "kind": "wake_word",
                             "phrase": "hey jarvis",
@@ -528,8 +566,10 @@ def main() -> int:
                             "signal_to_noise_db": round(snr_db, 2),
                             "zero_crossing_rate": round(zero_crossing_rate, 4),
                             "crest_factor": round(crest_factor, 2),
-                            "speech_shape": True,
-                            "physical_gate": True,
+                            "speech_shape": shape_ok,
+                            "physical_gate": physical_gate,
+                            "physical_evidence_recent": True,
+                            "physical_evidence_age_ms": physical_evidence_age_ms,
                             "source": "pi",
                         }
                         notify(args.callback, args.token, payload)

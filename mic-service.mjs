@@ -175,6 +175,10 @@ async function configureListenerNow(input = {}) {
             noiseFloor: boundedNumber(message.noise_floor, 0, 0, 1),
             signalToNoiseDb: boundedNumber(message.signal_to_noise_db, 0, -120, 120),
             physicalGate: Boolean(message.physical_gate),
+            physicalEvidenceRecent: Boolean(message.physical_evidence_recent),
+            physicalEvidenceAgeMs: message.physical_evidence_recent
+              ? boundedNumber(message.physical_evidence_age_ms, 0, 0, 320)
+              : null,
             wakeScore: boundedNumber(message.wake_score, 0, 0, 1),
             wakeScoreHits: boundedNumber(message.wake_score_hits, 0, 0, 3),
             wakeScoreReady: Boolean(message.wake_score_ready),
