@@ -8,6 +8,7 @@ import express from 'express';
 import { appendWakeStderr, markWakeListenerSpawnFailure, wakeListenerExitError } from './lib/wake-stderr.mjs';
 import { requireInternalServiceAuth } from './lib/local-service-auth.mjs';
 import { DEFAULT_LOCAL_PORTS } from './lib/local-ports.mjs';
+import { acknowledgeWakeCommand } from './lib/mic-command-control.mjs';
 import { binaryAvailable, linuxMicrophones } from './lib/system-probe.mjs';
 import { piWakeEnergyFloor, piWakeListenerEnabled } from './lib/pi-wake-profile.mjs';
 import { wakeListenerRetryDelayMs } from './lib/wake-retry.mjs';
@@ -138,7 +139,8 @@ async function configureListenerNow(input = {}) {
   if (sttModel) args.push('--stt-model', sttModel,
     '--command-timeout-ms', String(boundedNumber(process.env.JARVIS_STT_COMMAND_TIMEOUT_MS, 15_000, 5_000, 30_000)),
     '--command-silence-ms', String(boundedNumber(process.env.JARVIS_STT_COMMAND_SILENCE_MS, 900, 350, 2_000)),
-    '--command-warmup-ms', String(boundedNumber(process.env.JARVIS_STT_COMMAND_WARMUP_MS, 1_200, 0, 5_000)));
+    '--command-ack-timeout-ms', String(boundedNumber(process.env.JARVIS_STT_ACK_TIMEOUT_MS, 15_000, 3_000, 20_000)),
+    '--command-post-ack-guard-ms', String(boundedNumber(process.env.JARVIS_STT_POST_ACK_GUARD_MS, 180, 0, 1_500)));
   if (settings.wakeWord) args.push('--wake-enabled');
   if (settings.doubleClap) args.push('--clap-enabled');
 
@@ -147,7 +149,8 @@ async function configureListenerNow(input = {}) {
     const runtimeDir = '/run/user/' + process.getuid();
     try { await fs.access(runtimeDir); childEnv.XDG_RUNTIME_DIR = runtimeDir; } catch {}
   }
-  const child = spawn(python, args, { stdio: ['ignore', 'pipe', 'pipe'], env: childEnv });
+  const child = spawn(python, args, { stdio: ['pipe', 'pipe', 'pipe'], env: childEnv });
+  child.stdin.on('error', () => {});
   wakeState.process = child;
   wakeState.running = true;
   let stderrTail = '';
@@ -233,6 +236,12 @@ app.get('/devices', async (_request, response) => {
   response.set('Cache-Control', 'no-store').json({ platform: process.platform, microphones, tools: { arecord } });
 });
 app.get('/status', (_request, response) => response.set('Cache-Control', 'no-store').json(publicState()));
+app.post('/command/acknowledge', (_request, response) => {
+  const result = acknowledgeWakeCommand(wakeState);
+  response.set('Cache-Control', 'no-store');
+  if (!result.ok) { response.status(result.status).json({ error: result.error }); return; }
+  response.json({ ok: true, alreadyStarted: Boolean(result.alreadyStarted), commandCapture: wakeState.commandCapture });
+});
 app.get('/level', async (request, response) => {
   const device = String(request.query.device || '');
   if (!activeSettings || device !== activeSettings.piMicrophone) { response.status(400).json({ error: 'Select the active Pi microphone first.' }); return; }

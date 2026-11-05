@@ -611,10 +611,16 @@ function renderStatus(payload) {
   setModelDisplay({ model: payload.services?.ollama?.models?.[0] || 'NO MODEL' });
   const capture = payload.wake?.commandCapture;
   const captureAt = Date.parse(capture?.at || '');
-  const captureFresh = capture && (capture.state === 'warming' || capture.state === 'listening' || (capture.state === 'complete' && Number.isFinite(captureAt) && Date.now() - captureAt < 8_000));
+  const captureFresh = capture && (capture.state === 'awaiting_ack' || capture.state === 'warming' || capture.state === 'listening' || (capture.state === 'complete' && Number.isFinite(captureAt) && Date.now() - captureAt < 8_000));
   ui.wakeState.textContent = captureFresh ? (wakeCaptureLabel(capture) || 'CAPTURING') : payload.wake?.ready ? 'LISTENING' : payload.wake?.configured ? 'STARTING' : 'STANDBY';
   if (state.voiceCapture.active && state.voiceCapture.source === 'pi') {
-    if (capture?.state === 'warming') {
+    if (capture?.state === 'awaiting_ack') {
+      state.voiceCapture.phase = 'acknowledging';
+      ui.voiceCaptureState.textContent = 'JARVIS IS REPLYING';
+      ui.searchInput.placeholder = 'Waiting for acknowledgement playback…';
+      ui.voiceCaptureTranscript.textContent = 'JARVIS will enable the Pi microphone after the reply finishes.';
+      ui.searchMode.textContent = 'VOICE SESSION // AUDIO REPLY';
+    } else if (capture?.state === 'warming') {
       state.voiceCapture.phase = 'warming';
       ui.voiceCaptureState.textContent = 'PI MIC WARMING';
       ui.searchInput.placeholder = 'Preparing Pi microphone…';
@@ -977,10 +983,20 @@ async function unlockAudioFromGesture() {
     const pending = state.pendingSpeech; state.pendingSpeech = null;
     if (pending?.text) {
       const played = await speak(pending.text, { pendingContext: pending.context });
-      if (played && pending.context?.kind === 'wake') await beginWakeCommandCapture(pending.context.session, pending.context.command, pending.context.source);
+      if (played && pending.context?.kind === 'wake') {
+        if (pending.context.nativePiWake && !pending.context.command && !(await acknowledgeNativePiCapture())) {
+          updateVoiceCapture({ state: 'error', reason: 'pi-ack-failed' }); return;
+        }
+        await beginWakeCommandCapture(pending.context.session, pending.context.command, pending.context.source);
+      }
     }
   } catch {}
   finally { state.audioPriming = false; }
+}
+
+async function acknowledgeNativePiCapture() {
+  try { return Boolean((await json('/api/wake/acknowledged', { method: 'POST' })).ok); }
+  catch { return false; }
 }
 
 async function beginWakeCommandCapture(session, initialCommand = '', source = '') {
@@ -1036,18 +1052,22 @@ async function beginConversationCapture() {
 
 async function handleWake(event) {
   const session = ++state.wakeSession; const initialCommand = String(event?.detail?.command || '').trim();
+  const nativePiWake = event?.detail?.source === 'pi';
   const source = event?.detail?.source === 'pi' || (state.settings?.source === 'pi' && state.settings?.piMicrophone) ? 'pi' : 'browser';
   if (!openVoiceCommandWindow()) return;
   ui.wakeFlash.classList.remove('active'); void ui.wakeFlash.offsetWidth; ui.wakeFlash.classList.add('active');
   ui.wakeState.textContent = event?.detail?.kind === 'double_clap' ? 'CLAP' : event?.detail?.kind === 'push_to_talk' ? 'PTT' : 'HEARD'; state.neuralEnergy = 1;
   updateVoiceVisual('armed', 1);
-  const context = { kind: 'wake', session, command: initialCommand, source };
+  const context = { kind: 'wake', session, command: initialCommand, source, nativePiWake };
   const wakeTimeout = Number(state.config?.fishWakeTimeoutMs) || FISH_TTS_WAKE_TIMEOUT_MS;
   const played = Boolean(initialCommand) || isEmbeddedPreview() || !state.settings?.wakeResponse ? true : await speak(state.settings.wakeResponse, { pendingContext: context, fishTimeoutMs: wakeTimeout });
   if (session !== state.wakeSession || !state.voiceCapture.active) return;
   if (!played && document.body.dataset.ttsState === 'blocked') {
     ui.voiceCaptureState.textContent = 'TAP TO ENABLE AUDIO'; ui.voiceCaptureTranscript.textContent = 'Tap anywhere once. JARVIS will reply, then begin listening.';
     ui.searchMode.textContent = 'VOICE SESSION // AUDIO LOCKED'; ui.searchCount.textContent = 'WAIT'; return;
+  }
+  if (nativePiWake && !initialCommand && !(await acknowledgeNativePiCapture())) {
+    updateVoiceCapture({ state: 'error', reason: 'pi-ack-failed' }); return;
   }
   await beginWakeCommandCapture(session, initialCommand, source);
   setTimeout(() => { ui.wakeState.textContent = state.status?.wake?.ready ? 'LISTENING' : 'STANDBY'; }, 2200);

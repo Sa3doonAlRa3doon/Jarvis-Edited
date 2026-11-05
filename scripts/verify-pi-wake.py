@@ -68,4 +68,9 @@ assert MODULE.command_should_finish(10.0, 20.0, 9.5, silence_ms=900) is False
 # A wake must leave the user the full bounded window to start speaking; the
 # silence timer only begins after a real post-warmup voice frame is observed.
 assert MODULE.command_should_finish(10.0, 20.0, 0.0, silence_ms=900) is False
+assert MODULE.command_acknowledgement_ready(10.0, True, 20.0) is True
+assert MODULE.command_acknowledgement_ready(10.0, False, 10.0) is True
+assert MODULE.command_acknowledgement_ready(9.9, False, 10.0) is False
+assert MODULE.command_acknowledgement_ready(10.0, False, 0.0) is False
+assert MODULE.command_acknowledgement_ready(float("nan"), False, 10.0) is False
 print("Pi wake policy checks passed.")

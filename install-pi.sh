@@ -297,7 +297,8 @@ set_env_value ENABLE_PI_WAKE_LISTENER "$WAKE_READY"
 set_env_value WAKE_PYTHON "$APP_DIR/.wake-venv/bin/python"
 set_env_value JARVIS_STT_COMMAND_TIMEOUT_MS 15000
 set_env_value JARVIS_STT_COMMAND_SILENCE_MS 900
-set_env_value JARVIS_STT_COMMAND_WARMUP_MS 1200
+set_env_value JARVIS_STT_ACK_TIMEOUT_MS 15000
+set_env_value JARVIS_STT_POST_ACK_GUARD_MS 180
 CURRENT_BROWSER_PROFILE="$(sed -n 's/^JARVIS_BROWSER_PROFILE=//p' .env | tail -n 1)"
 if [[ -z "$CURRENT_BROWSER_PROFILE" ]]; then
   CURRENT_BROWSER_PROFILE="$APP_DIR/data/camoufox-profile"

@@ -1396,7 +1396,7 @@ async function startPiSensors() {
         ui.voiceSnr.textContent = `${snr.toFixed(1)} dB`;
         ui.voiceGate.textContent = diagnostics.physicalGate ? (diagnostics.wakeScoreReady ? 'ENERGY PASS // MODEL READY' : 'ENERGY PASS // WAITING FOR SECOND SCORE') : 'ENERGY HOLD // ROOM FLOOR';
         const captureState = String(wake.commandCapture?.state || '').toLowerCase();
-        const captureLabel = { warming: 'LOCAL STT WARMING', listening: 'LOCAL STT LISTENING', complete: 'LOCAL COMMAND SENT', timeout: 'LOCAL STT TIMEOUT', error: 'LOCAL STT ERROR' }[captureState] || '';
+        const captureLabel = { awaiting_ack: 'WAITING FOR REPLY', warming: 'LOCAL STT WARMING', listening: 'LOCAL STT LISTENING', complete: 'LOCAL COMMAND SENT', timeout: 'LOCAL STT TIMEOUT', error: 'LOCAL STT ERROR' }[captureState] || '';
         ui.voiceDecision.textContent = captureLabel || (wake.sttModel ? 'OPENWAKEWORD + VOSK READY' : wake.model ? 'OPENWAKEWORD READY' : wake.error ? 'MODEL UNAVAILABLE' : 'MODEL STARTING');
         ui.wakeReadout.textContent = diagnostics.physicalGate && wake.ready ? 'HEY JARVIS READY' : wake.ready ? 'HEY JARVIS ARMED' : wake.running ? 'STARTING' : 'SAVE TO START';
       }

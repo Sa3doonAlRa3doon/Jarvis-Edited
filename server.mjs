@@ -841,7 +841,7 @@ app.post('/api/wake-event', async (request, response) => {
   const event = await eventStore.append('wake', message, detail);
   wakeState.lastEvent = event;
   if (command) wakeState.commandCapture = normalizeWakeCapture({ state: 'complete' });
-  else if (wakeState.sttModel) wakeState.commandCapture = normalizeWakeCapture({ state: 'warming' });
+  else if (wakeState.sttModel) wakeState.commandCapture = normalizeWakeCapture({ state: 'awaiting_ack' });
   response.json({ ok: true });
 });
 function enforceSameOrigin(request, response, next) {
@@ -1237,6 +1237,19 @@ app.get('/api/operations/status', async (_request, response) => response.json(aw
 app.get('/api/wake/status', async (_request, response) => {
   await refreshWakeBackendState();
   response.set('Cache-Control', 'no-store').json({ ...wakeState, process: undefined, configured: settings.source === 'pi' && Boolean(settings.piMicrophone) });
+});
+app.post('/api/wake/acknowledged', async (_request, response) => {
+  try {
+    const backend = await localBackendResponse(micBackendUrl, '/command/acknowledge', { method: 'POST' }, 2500);
+    const result = await backend.json().catch(() => ({}));
+    if (!backend.ok) {
+      response.status(backend.status === 409 ? 409 : 503).json({ error: cleanText(result.error || 'Pi wake acknowledgement failed.', 180) }); return;
+    }
+    applyWakeBackendState(result);
+    response.set('Cache-Control', 'no-store').json({ ok: true, commandCapture: wakeState.commandCapture });
+  } catch {
+    response.status(503).json({ error: 'The local microphone backend is unavailable.' });
+  }
 });
 app.get('/api/knowledge', async (_request, response) => {
   if (!knowledgeCache || Date.now() - knowledgeCache.createdAt > 30_000) {

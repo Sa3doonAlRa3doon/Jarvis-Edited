@@ -148,6 +148,12 @@ try {
   const unauthenticated = await getJson(settingsPath);
   assert.equal(unauthenticated.response.status, 401, 'settings backend must reject unauthenticated access');
   const authorization = { Authorization: `Bearer ${token}` };
+  const anonymousAck = await getJson(`${backendUrls.mic}/command/acknowledge`, { method: 'POST' });
+  assert.equal(anonymousAck.response.status, 401, 'mic acknowledgement control requires internal service authentication');
+  const idleBackendAck = await getJson(`${backendUrls.mic}/command/acknowledge`, { method: 'POST', headers: authorization });
+  assert.equal(idleBackendAck.response.status, 409, 'mic backend refuses acknowledgement without a waiting native capture');
+  const idleDashboardAck = await getJson(`${frontendUrl}/api/wake/acknowledged`, { method: 'POST', headers: sessionHeaders });
+  assert.equal(idleDashboardAck.response.status, 409, 'dashboard acknowledgement proxy preserves the waiting-capture boundary');
   let stored = await getJson(settingsPath, { headers: authorization });
   assert.equal(stored.response.status, 200);
   assert.equal(stored.body.source, 'browser', 'core startup should persist validated defaults through the settings backend');
