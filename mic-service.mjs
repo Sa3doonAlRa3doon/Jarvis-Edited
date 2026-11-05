@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
+import { terminateChildProcess } from './lib/child-process-stop.mjs';
 import { appendWakeStderr, markWakeListenerSpawnFailure, wakeListenerExitError } from './lib/wake-stderr.mjs';
 import { requireInternalServiceAuth } from './lib/local-service-auth.mjs';
 import { DEFAULT_LOCAL_PORTS } from './lib/local-ports.mjs';
@@ -64,19 +65,14 @@ async function stopListener() {
   const child = wakeState.process;
   if (child) {
     intentionalChildStop = child;
-    await new Promise((resolve) => {
-      let settled = false;
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve();
-      };
-      const timer = setTimeout(() => { child.kill('SIGKILL'); finish(); }, 2500);
-      if (child.exitCode !== null || child.signalCode) { finish(); return; }
-      child.once('exit', finish);
-      if (!child.killed) child.kill('SIGTERM');
-    });
+    const stopped = await terminateChildProcess(child);
+    if (!stopped) {
+      wakeState.ready = false;
+      wakeState.model = false;
+      wakeState.sttModel = false;
+      wakeState.error = 'The previous microphone listener has not released the audio device yet.';
+      return false;
+    }
   }
   if (intentionalChildStop === child) intentionalChildStop = null;
   if (wakeState.process === child) wakeState.process = null;
@@ -88,6 +84,7 @@ async function stopListener() {
   wakeState.captureTarget = null;
   wakeState.diagnostics = null;
   wakeState.commandCapture = normalizeWakeCapture({ state: 'idle' });
+  return true;
 }
 
 function configureListener(input = {}) {
@@ -102,12 +99,15 @@ async function configureListenerNow(input = {}) {
   const revision = configurationRevision;
   clearTimeout(restartTimer);
   restartTimer = null;
-  await stopListener();
-  wakeState.error = null;
   const settings = input.settings && typeof input.settings === 'object' ? input.settings : {};
   activeSettings = settings;
   callbackUrl = /^http:\/\/127\.0\.0\.1:\d{1,5}\/api\/wake-event$/.test(String(input.callbackUrl || '')) ? String(input.callbackUrl) : defaultCallback;
   desiredConfiguration = { settings: { ...settings }, callbackUrl };
+  if (!(await stopListener())) {
+    scheduleListenerRetry(revision, wakeState.error);
+    return publicState();
+  }
+  wakeState.error = null;
   if (!piWakeListenerEnabled(process.platform, process.env.ENABLE_PI_WAKE_LISTENER)) return publicState();
   if (settings.source !== 'pi' || !settings.piMicrophone || (!settings.wakeWord && !settings.doubleClap)) return publicState();
 

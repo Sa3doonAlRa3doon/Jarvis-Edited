@@ -358,6 +358,7 @@ assert.match(await read('scripts/verify-pi-wake.py'), /Pi wake policy checks pas
 const micService = await read('mic-service.mjs');
 assert.match(micService, /PI_WAKE_ENERGY_FLOOR/);
 assert.match(micService, /\/command\/acknowledge/);
+assert.match(micService, /terminateChildProcess/);
 assert.match(server, /signalToNoiseDb/);
 assert.match(server, /JARVIS_STT_MODEL_DIR/);
 assert.match(server, /localPiCommandTranscription/);
