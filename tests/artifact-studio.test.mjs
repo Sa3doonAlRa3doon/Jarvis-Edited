@@ -40,3 +40,21 @@ test('creates real PPTX, DOCX, and XLSX zip-based files in a private directory',
     }
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
+
+test('refuses artifact symlinks that resolve outside the private artifact directory', async (context) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'jarvis-artifact-link-'));
+  const directory = path.join(root, 'artifacts');
+  try {
+    await fs.mkdir(directory);
+    const id = '4f9203f4-3ba5-4c67-8b1e-8df8af03ef74';
+    const outside = path.join(root, 'outside.pdf');
+    const linked = path.join(directory, `${id}-outside.pdf`);
+    await fs.writeFile(outside, '%PDF-private-outside');
+    try { await fs.symlink(outside, linked, 'file'); }
+    catch (error) {
+      if (['EPERM', 'EACCES', 'ENOTSUP'].includes(error?.code)) { context.skip(`file symlinks unavailable: ${error.code}`); return; }
+      throw error;
+    }
+    assert.equal(await new ArtifactStudio(directory).resolve(id), null);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});

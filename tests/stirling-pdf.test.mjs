@@ -48,6 +48,28 @@ test('accepts only PDF files inside configured roots and rejects sensitive paths
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
+test('refuses Stirling inputs whose approved path is a symlink outside the configured root', async (context) => {
+  const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'jarvis-stirling-link-'));
+  const root = path.join(parent, 'allowed');
+  try {
+    await fs.mkdir(root);
+    const outside = path.join(parent, 'outside.pdf');
+    const linked = path.join(root, 'linked.pdf');
+    await fs.writeFile(outside, '%PDF-private-outside');
+    try { await fs.symlink(outside, linked, 'file'); }
+    catch (error) {
+      if (['EPERM', 'EACCES', 'ENOTSUP'].includes(error?.code)) { context.skip(`file symlinks unavailable: ${error.code}`); return; }
+      throw error;
+    }
+    const client = new StirlingPdfClient({
+      baseUrl: 'http://127.0.0.1:9999',
+      inputRoots: [root],
+      fetchImpl: async () => { throw new Error('network should not be called'); }
+    });
+    await assert.rejects(() => client.processFile('compress', linked), /inside a configured private Stirling input root/);
+  } finally { await fs.rm(parent, { recursive: true, force: true }); }
+});
+
 test('checks Stirling health without exposing the key and sends X-API-KEY only to processing', async () => {
   const calls = [];
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'jarvis-stirling-client-'));
