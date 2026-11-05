@@ -27,6 +27,7 @@ import { BroadcastHub, parseBroadcastPrompt } from './lib/broadcast-hub.mjs';
 import { MediaDeck, parseMediaPrompt } from './lib/media-deck.mjs';
 import { issueDashboardSession, loadDashboardSessionSecret, verifyDashboardSession } from './lib/dashboard-session.mjs';
 import { PrinterClient } from './lib/printer-client.mjs';
+import { loadOrCreatePrivateSecret } from './lib/private-secret.mjs';
 import { PrinterCameraClient } from './lib/printer-camera.mjs';
 import { normalizeWakeCapture } from './public/wake-state.js';
 import { internalServiceHeaders, serviceTokenMatches } from './lib/local-service-auth.mjs';
@@ -175,12 +176,10 @@ function tokenMatches(request, expected) {
 async function loadObsOverlayToken() {
   const configured = cleanText(process.env.OBS_OVERLAY_TOKEN || '', 180);
   if (/^[A-Za-z0-9_-]{24,180}$/.test(configured)) { obsOverlayToken = configured; return; }
-  try {
-    const existing = cleanText(await fs.readFile(obsOverlayTokenPath, 'utf8'), 180);
-    if (/^[A-Za-z0-9_-]{24,180}$/.test(existing)) { obsOverlayToken = existing; return; }
-  } catch {}
-  obsOverlayToken = crypto.randomBytes(32).toString('base64url');
-  try { await fs.writeFile(obsOverlayTokenPath, `${obsOverlayToken}\n`, { mode: 0o600 }); } catch {}
+  obsOverlayToken = await loadOrCreatePrivateSecret(obsOverlayTokenPath, {
+    bytes: 32,
+    validate: (value) => /^[A-Za-z0-9_-]{24,180}$/.test(value)
+  });
 }
 
 function obsOverlayUrl(request, theme = 'jarvis') {
