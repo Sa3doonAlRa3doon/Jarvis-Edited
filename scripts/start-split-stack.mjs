@@ -71,7 +71,10 @@ async function shutdown(code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   for (const child of children.values()) child.kill('SIGTERM');
-  const deadline = Date.now() + 4_000;
+  // The microphone backend may use its full 2.5 s graceful stop plus 1.5 s
+  // forced-exit verification. Leave supervisor margin so it can confirm the
+  // capture device is released instead of killing the backend at its boundary.
+  const deadline = Date.now() + 6_000;
   while (children.size && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
   for (const child of children.values()) child.kill('SIGKILL');
   process.exit(code);
