@@ -101,8 +101,12 @@ if [[ ! -f "$ENV_FILE" ]]; then
 fi
 set_env_value() {
   local key="$1" value="$2"
+  local escaped_value
+  [[ "$key" =~ ^[A-Z][A-Z0-9_]*$ ]] || { echo "Refusing invalid environment key." >&2; return 2; }
+  [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] || { echo "Refusing multiline environment value for $key." >&2; return 2; }
+  escaped_value="$(printf '%s' "$value" | sed 's/[\\&|]/\\\\&/g')"
   if grep -q "^${key}=" "$ENV_FILE"; then
-    sed -i "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
+    sed -i "s|^${key}=.*|${key}=${escaped_value}|" "$ENV_FILE"
   else
     if [[ -s "$ENV_FILE" && -n "$(tail -c 1 "$ENV_FILE")" ]]; then printf '\n' >> "$ENV_FILE"; fi
     printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
