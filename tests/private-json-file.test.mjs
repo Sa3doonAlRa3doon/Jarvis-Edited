@@ -22,6 +22,15 @@ test('reads one private regular JSON file', async (t) => {
   assert.deepEqual(await readPrivateJsonFile(file), { client_id: 'fixture-client' });
 });
 
+test('rejects a Google JSON file readable by group or other users', async (t) => {
+  if (process.platform === 'win32') return t.skip('Windows does not expose POSIX file modes');
+  const directory = await fixture(t);
+  const file = path.join(directory, 'token.json');
+  await fs.writeFile(file, JSON.stringify({ refresh_token: 'private-refresh' }), { mode: 0o644 });
+  await fs.chmod(file, 0o644);
+  await assert.rejects(() => readPrivateJsonFile(file), { code: 'EPRIVATEFILE', message: /group or other users/i });
+});
+
 test('rejects a private JSON symlink without reading its target', async (t) => {
   if (process.platform === 'win32') return t.skip('Windows test hosts may not grant symlink privilege');
   const directory = await fixture(t);

@@ -84,9 +84,22 @@ test('a failed token exchange cannot show a connected page or replace an existin
 test('the new client never inherits another client’s refresh token', async (t) => {
   const f = await fixture(t, { fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ access_token: 'fixture-access' }) }) });
   const previous = JSON.stringify({ client_id: 'older-client', refresh_token: 'older-private-refresh' });
-  await fs.writeFile(f.tokenPath, previous);
+  await fs.writeFile(f.tokenPath, previous, { mode: 0o600 });
   assert.equal((await fetch(f.callback)).status, 502);
   await assert.rejects(f.session.completion, /no refresh token for this client/);
+  assert.equal(await fs.readFile(f.tokenPath, 'utf8'), previous);
+});
+
+test('an existing Google token readable by other users is rejected before reuse', async (t) => {
+  if (process.platform === 'win32') return t.skip('Windows does not expose POSIX file modes');
+  const f = await fixture(t, { fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ access_token: 'fixture-access' }) }) });
+  const previous = JSON.stringify({ client_id: 'fixture-client', refresh_token: 'private-refresh' });
+  await fs.writeFile(f.tokenPath, previous, { mode: 0o644 });
+  await fs.chmod(f.tokenPath, 0o644);
+  const response = await fetch(f.callback);
+  assert.equal(response.status, 502);
+  assert.match(await response.text(), /group or other users/i);
+  await assert.rejects(f.session.completion, /group or other users/i);
   assert.equal(await fs.readFile(f.tokenPath, 'utf8'), previous);
 });
 
