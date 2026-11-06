@@ -286,3 +286,24 @@ test('a configured client without a private token asks for initial authorization
   const bridge = new GoogleWorkspaceBridge({ environment: credentialEnvironment(), reader: async (file) => files.get(file) });
   assert.equal((await bridge.status()).needsReauthorization, true);
 });
+
+test('a missing explicit token path never falls through to an auto-discovered token', async () => {
+  const explicitToken = path.join(TEST_HOME, 'explicit', 'token.json');
+  const fallbackToken = path.join(TEST_HOME, 'jarvis-google', 'token.json');
+  let networkCalls = 0;
+  const bridge = new GoogleWorkspaceBridge({
+    environment: {
+      GOOGLE_CLIENT_ID: 'private-id', GOOGLE_CLIENT_SECRET: 'private-secret', GOOGLE_TOKEN_PATH: explicitToken
+    },
+    home: TEST_HOME,
+    reader: async (file) => {
+      if (file === fallbackToken) return JSON.stringify({ client_id: 'private-id', refresh_token: 'fallback-refresh' });
+      throw Object.assign(new Error('missing explicit token'), { code: 'ENOENT' });
+    },
+    fetchImpl: async () => { networkCalls += 1; throw new Error('fallback token must not leave this host'); }
+  });
+  const status = await bridge.status({ probe: true });
+  assert.equal(status.connected, false);
+  assert.equal(status.needsReauthorization, true);
+  assert.equal(networkCalls, 0);
+});
