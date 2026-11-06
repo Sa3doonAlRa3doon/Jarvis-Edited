@@ -249,6 +249,8 @@ migrate_google_auth_file() {
   local target="$GOOGLE_AUTH_STORAGE/$filename"
   local source
   local source_owner
+  local source_links
+  local target_links
   local candidates=()
   if [[ -L "$target" ]]; then
     echo "Refusing unsafe symlink in private Google OAuth storage: $target" >&2
@@ -256,6 +258,8 @@ migrate_google_auth_file() {
   fi
   if [[ -e "$target" ]]; then
     [[ -f "$target" ]] || { echo "Refusing non-file in private Google OAuth storage: $target" >&2; return 1; }
+    target_links="$(stat -c '%h' -- "$target" 2>/dev/null || true)"
+    [[ "$target_links" == "1" ]] || { echo "Refusing multiply linked file in private Google OAuth storage: $target" >&2; return 1; }
     sudo chown "$APP_USER:$APP_GROUP" -- "$target"
     sudo chmod 0600 -- "$target"
     return 0
@@ -266,7 +270,9 @@ migrate_google_auth_file() {
   for source in "${candidates[@]}"; do
     if [[ "$source" != "$target" && -f "$source" && ! -L "$source" && -r "$source" ]]; then
       source_owner="$(stat -c '%u' -- "$source" 2>/dev/null || true)"
+      source_links="$(stat -c '%h' -- "$source" 2>/dev/null || true)"
       [[ "$source_owner" == "$APP_UID" ]] || continue
+      [[ "$source_links" == "1" ]] || continue
       run_as_app_user install -m 0600 -- "$source" "$target"
       echo "Migrated private Google OAuth material into $GOOGLE_AUTH_STORAGE."
       return 0

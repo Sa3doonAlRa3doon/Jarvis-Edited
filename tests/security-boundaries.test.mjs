@@ -121,6 +121,9 @@ test('Pi services separate OpenJarvis from the dashboard sudo principal', async 
   assert.doesNotMatch(configurer, /"http_request"/);
   assert.match(configurer, /if args\.host_control:[\s\S]{0,180}enabled\.extend\(HOST_CONTROL_TOOLS\)[\s\S]{0,80}else:[\s\S]{0,180}enabled\.extend\(READ_ONLY_BROWSER_TOOLS\)/);
   assert.match(installer, /AGENT_TOOLS_DIR="\/opt\/jarvis-agent-tools"/);
+  assert.match(installer, /source_links="\$\(stat -c '%h' -- "\$source"/);
+  assert.match(installer, /target_links="\$\(stat -c '%h' -- "\$target"/);
+  assert.match(installer, /Refusing multiply linked file in private Google OAuth storage/);
   assert.match(setup, /install -o root -g root -m 0644 "\$SCRIPT_DIR\/configure-openjarvis\.py" "\$AGENT_TOOLS_DIR\/configure-openjarvis\.py"/);
   assert.match(setup, /"\$SOURCE_DIR\/\.venv\/bin\/python" "\$AGENT_TOOLS_DIR\/configure-openjarvis\.py"/);
   assert.match(setup, /AGENT_TOOLS_SCRIPT_DIR="\$AGENT_TOOLS_DIR\/scripts"/);
