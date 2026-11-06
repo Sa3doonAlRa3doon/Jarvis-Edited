@@ -602,7 +602,7 @@ To update an existing GitHub installation later:
 ```bash
 cd ~/openjarvis-pi-command-center
 git pull --ff-only origin main
-npm install --omit=dev
+npm ci --omit=dev --no-audit --no-fund
 ./install-pi.sh
 ```
 

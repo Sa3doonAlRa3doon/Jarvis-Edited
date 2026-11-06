@@ -133,7 +133,7 @@ for MEDIA_GROUP in video audio; do
 done
 
 cd "$APP_DIR"
-npm install --omit=dev
+npm ci --omit=dev --no-audit --no-fund
 
 WAKE_READY=false
 if python3 -m venv "$APP_DIR/.wake-venv"; then
