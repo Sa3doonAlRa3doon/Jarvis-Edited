@@ -90,13 +90,47 @@ test('the new client never inherits another client’s refresh token', async (t)
   assert.equal(await fs.readFile(f.tokenPath, 'utf8'), previous);
 });
 
+test('an existing token symlink is rejected without reading or replacing its target', async (t) => {
+  if (process.platform === 'win32') return t.skip('Windows test hosts may not grant symlink privilege');
+  const f = await fixture(t);
+  const target = path.join(f.directory, 'other-private-token.json');
+  const previous = JSON.stringify({ client_id: 'fixture-client', refresh_token: 'other-private-refresh' });
+  await fs.writeFile(target, previous, { mode: 0o600 });
+  await fs.symlink(target, f.tokenPath);
+  const response = await fetch(f.callback);
+  assert.equal(response.status, 502);
+  assert.match(await response.text(), /cannot be a link/i);
+  await assert.rejects(f.session.completion, /cannot be a link/i);
+  assert.equal(await fs.readFile(target, 'utf8'), previous);
+  assert.equal((await fs.lstat(f.tokenPath)).isSymbolicLink(), true);
+});
+
+test('an existing multiply linked token is rejected without replacing either link', async (t) => {
+  const f = await fixture(t);
+  const target = path.join(f.directory, 'other-private-token.json');
+  const previous = JSON.stringify({ client_id: 'fixture-client', refresh_token: 'other-private-refresh' });
+  await fs.writeFile(target, previous, { mode: 0o600 });
+  try {
+    await fs.link(target, f.tokenPath);
+  } catch (error) {
+    if (['EPERM', 'ENOTSUP', 'EACCES'].includes(error?.code)) return t.skip(`Hard links unavailable: ${error.code}`);
+    throw error;
+  }
+  const response = await fetch(f.callback);
+  assert.equal(response.status, 502);
+  assert.match(await response.text(), /cannot be a link/i);
+  await assert.rejects(f.session.completion, /cannot be a link/i);
+  assert.equal(await fs.readFile(target, 'utf8'), previous);
+  assert.equal(await fs.readFile(f.tokenPath, 'utf8'), previous);
+});
+
 test('storage failure returns an honest failure page and removes only its temporary file', async (t) => {
   const f = await fixture(t);
   await fs.mkdir(f.tokenPath);
   const response = await fetch(f.callback);
   assert.equal(response.status, 502);
   assert.doesNotMatch(await response.text(), /Google connected|fixture-access|fixture-refresh|fixture-secret/);
-  await assert.rejects(f.session.completion, /could not be saved/);
+  await assert.rejects(f.session.completion, /must be one private regular file/);
   assert.equal((await fs.stat(f.tokenPath)).isDirectory(), true);
   assert.deepEqual(await fs.readdir(f.directory), ['token.json']);
 });
