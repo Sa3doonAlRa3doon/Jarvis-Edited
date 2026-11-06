@@ -188,16 +188,47 @@ fi
 set_env_value() {
   local key="$1"
   local value="$2"
-  local escaped_value
+  local env_file="${ENV_FILE:-.env}"
   [[ "$key" =~ ^[A-Z][A-Z0-9_]*$ ]] || { echo "Refusing invalid environment key." >&2; return 2; }
   [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] || { echo "Refusing multiline environment value for $key." >&2; return 2; }
-  escaped_value="$(printf '%s' "$value" | sed 's/[\\&|]/\\\\&/g')"
-  if grep -q "^${key}=" .env; then
-    sed -i "s|^${key}=.*|${key}=${escaped_value}|" .env
-  else
-    if [[ -s .env && -n "$(tail -c 1 .env)" ]]; then printf '\n' >> .env; fi
-    printf '%s=%s\n' "$key" "$value" >> .env
-  fi
+  JARVIS_ENV_KEY="$key" JARVIS_ENV_VALUE="$value" python3 - "$env_file" <<'PY'
+import os
+from pathlib import Path
+import stat
+import sys
+import tempfile
+
+path = Path(sys.argv[1])
+key = os.environ["JARVIS_ENV_KEY"]
+value = os.environ["JARVIS_ENV_VALUE"]
+raw = path.read_text(encoding="utf-8") if path.exists() else ""
+prefix = f"{key}="
+lines = raw.splitlines(keepends=True)
+found = False
+updated = []
+for line in lines:
+    body = line.rstrip("\r\n")
+    ending = line[len(body):]
+    if body.startswith(prefix):
+        updated.append(f"{prefix}{value}{ending}")
+        found = True
+    else:
+        updated.append(line)
+result = "".join(updated)
+if not found:
+    if result and not result.endswith(("\n", "\r")):
+        result += "\n"
+    result += f"{prefix}{value}\n"
+mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o600
+with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+    handle.write(result)
+    temporary = Path(handle.name)
+try:
+    os.chmod(temporary, mode)
+    os.replace(temporary, path)
+finally:
+    temporary.unlink(missing_ok=True)
+PY
 }
 
 if ! grep -q '^PRINTER_URL=.' .env; then
