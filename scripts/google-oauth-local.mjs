@@ -1,9 +1,9 @@
 import 'dotenv/config';
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import { firstExistingPath, googleAuthFileCandidates, googleTokenCandidatesForCredentials, resolveGoogleAuthPath } from '../lib/google-file-paths.mjs';
 import { googleOAuthClientFromEnvironment, resolveGoogleOAuthConfig } from '../lib/google-oauth-config.mjs';
 import { startGoogleOAuthSession } from '../lib/google-oauth-session.mjs';
+import { readPrivateJsonFile } from '../lib/private-json-file.mjs';
 
 const { redirectUri: safeRedirectUri, migratedFrom } = resolveGoogleOAuthConfig(process.env);
 const fileCandidates = googleAuthFileCandidates(process.env);
@@ -25,7 +25,7 @@ const scopes = [
 
 const callbackUri = new URL(safeRedirectUri);
 
-const credentials = credentialsPath ? JSON.parse(await fs.readFile(credentialsPath, 'utf8')) : null;
+const credentials = credentialsPath ? await readPrivateJsonFile(credentialsPath) : null;
 const client = environmentClient || credentials?.installed || credentials?.web || credentials || {};
 if (!client.client_id || !client.client_secret) throw new Error(`Desktop OAuth credentials are invalid: ${credentialsPath}`);
 
