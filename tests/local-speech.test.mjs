@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
 import { LocalSpeech, finalizeSpeechWav } from '../lib/local-speech.mjs';
-import { playSpeechAudio, requestPiSpeech, usesPiSpeech } from '../public/local-speech.js';
+import { browserSpeechTimeoutMs, playSpeechAudio, requestPiSpeech, usesPiSpeech } from '../public/local-speech.js';
 
 function wav() {
   const data = Buffer.alloc(48);
@@ -96,6 +96,12 @@ test('local voice choice preserves Fish mode and explicit browser voices', () =>
   assert.equal(usesPiSpeech({ localSpeech: { available: true } }, { ttsVoice: 'browser-voice' }), false);
   assert.equal(usesPiSpeech({ localSpeech: { available: true } }, { ttsVoice: 'pi:offline' }), true);
   assert.equal(usesPiSpeech({ localSpeech: { available: false } }), false);
+});
+
+test('browser speech watchdog stays bounded for short and long replies', () => {
+  assert.equal(browserSpeechTimeoutMs('yes sir'), 8_000);
+  assert.equal(browserSpeechTimeoutMs('x'.repeat(100)), 14_000);
+  assert.equal(browserSpeechTimeoutMs('x'.repeat(2_500)), 25_000);
 });
 
 test('client requests local mode and rejects failed or empty audio', async () => {

@@ -44,18 +44,23 @@ export async function playSpeechAudio(bytes, { context = null, contentType = 'au
   } finally { audio.pause(); URL.revokeObjectURL(url); }
 }
 
+export function browserSpeechTimeoutMs(text) {
+  return Math.min(25_000, Math.max(8_000, 4_000 + String(text || '').length * 100));
+}
+
 export async function speakBrowser(text, settings = {}) {
   if (!('speechSynthesis' in window)) throw new Error('No browser voice is available on this device.');
   const voice = speechSynthesis.getVoices().find((item) => item.voiceURI === settings.ttsVoice || item.name === settings.ttsVoice);
   await new Promise((resolve, reject) => {
-    const utterance = new SpeechSynthesisUtterance(String(text).slice(0, 2500));
+    const speechText = String(text).slice(0, 2500);
+    const utterance = new SpeechSynthesisUtterance(speechText);
     utterance.rate = Number(settings.ttsRate ?? 1.02); utterance.pitch = Number(settings.ttsPitch ?? .92); utterance.volume = Number(settings.ttsVolume ?? .95);
     utterance.lang = settings.voiceLanguage || 'en-GB'; if (voice) utterance.voice = voice;
     let started = false; let settled = false;
     const timeout = setTimeout(() => finish(new Error(started ? 'Browser speech timed out.' : 'Browser speech did not start. Select the Pi offline voice or an installed browser voice.')), 6000);
     const finish = (error) => { if (settled) return; settled = true; clearTimeout(timeout); clearTimeout(endTimeout); if (error) { speechSynthesis.cancel(); reject(error); } else resolve(); };
     let endTimeout;
-    utterance.onstart = () => { started = true; clearTimeout(timeout); endTimeout = setTimeout(() => finish(new Error('Browser speech timed out.')), 300_000); };
+    utterance.onstart = () => { started = true; clearTimeout(timeout); endTimeout = setTimeout(() => finish(new Error('Browser speech timed out.')), browserSpeechTimeoutMs(speechText)); };
     utterance.onend = () => finish(); utterance.onerror = () => finish(new Error('Browser speech failed. Check the selected voice and browser audio permission.'));
     try { speechSynthesis.cancel(); speechSynthesis.speak(utterance); } catch (error) { finish(error); }
   });

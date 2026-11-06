@@ -707,7 +707,12 @@ try {
     const answered = await page.evaluate(() => ({ status: document.querySelector('#workspace-directive-status')?.textContent?.trim(), route: document.querySelector('#workspace-route')?.textContent?.trim(), response: document.querySelector('#workspace-task-copy')?.textContent?.trim() }));
     assert(answered.response && answered.route && /DONE|READY/i.test(answered.status || ''), JSON.stringify(answered));
     await talk.click();
-    await page.waitForFunction(() => /TALKBACK \/\/ COMPLETE|TALKBACK UNAVAILABLE/i.test(document.querySelector('#workspace-directive-status')?.textContent || ''), null, { timeout: 30_000 });
+    try {
+      await page.waitForFunction(() => /TALKBACK \/\/ (?:.*\s)?COMPLETE|TALKBACK UNAVAILABLE/i.test(document.querySelector('#workspace-directive-status')?.textContent || ''), null, { timeout: 35_000 });
+    } catch (error) {
+      const status = await page.locator('#workspace-directive-status').textContent().catch(() => 'missing');
+      throw new Error(`${error.message} Directive talkback status: ${String(status || 'empty').trim()}`);
+    }
     const talkback = (await page.locator('#workspace-directive-status').textContent()).trim();
     assert(/^TALKBACK/i.test(talkback), talkback);
     return { ...snapshot, quick, missionPreview, focusedPrompt: value.slice(0, 60), answered: { route: answered.route, status: answered.status, response: answered.response.slice(0, 100) }, talkback };
