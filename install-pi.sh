@@ -465,6 +465,21 @@ if [[ "$EUID" -eq 0 ]]; then
   sudo chmod 0600 "$APP_DIR/.env"
 fi
 
+# Give each split service only the environment values it needs. In particular,
+# camera, microphone, settings and static frontend processes never receive
+# Google OAuth material, provider API keys, or dashboard/control PINs.
+SERVICE_ENV_DIRECTORY="/var/lib/jarvis-command-center/service-env"
+SERVICE_ENV_TEMP="$(mktemp -d --tmpdir jarvis-service-env-XXXXXX)"
+cleanup_service_env_temp() { rm -rf -- "$SERVICE_ENV_TEMP"; }
+trap cleanup_service_env_temp EXIT
+"$NODE_BIN" scripts/write-service-environments.mjs --source "$APP_DIR/.env" --output "$SERVICE_ENV_TEMP"
+sudo install -d -o root -g root -m 0700 "$SERVICE_ENV_DIRECTORY"
+for SERVICE_ENV_NAME in settings camera microphone frontend; do
+  sudo install -o root -g root -m 0600 -- "$SERVICE_ENV_TEMP/${SERVICE_ENV_NAME}.env" "$SERVICE_ENV_DIRECTORY/${SERVICE_ENV_NAME}.env"
+done
+cleanup_service_env_temp
+trap - EXIT
+
 sudo install -m 0750 "$APP_DIR/scripts/jarvis-service-control.sh" /usr/local/sbin/jarvis-service-control
 sudo tee /etc/sudoers.d/jarvis-command-center >/dev/null <<EOF
 $APP_USER ALL=(root) NOPASSWD: /usr/local/sbin/jarvis-service-control status, /usr/local/sbin/jarvis-service-control restart-all, /usr/local/sbin/jarvis-service-control stop-until-reboot, /usr/local/sbin/jarvis-service-control maintenance-on, /usr/local/sbin/jarvis-service-control resume, /usr/local/sbin/jarvis-service-control repair
@@ -555,7 +570,7 @@ Wants=network-online.target
 Type=simple
 User=$APP_USER
 WorkingDirectory=$APP_DIR
-EnvironmentFile=$APP_DIR/.env
+EnvironmentFile=$SERVICE_ENV_DIRECTORY/settings.env
 Environment=NODE_ENV=production
 Environment=JARVIS_DATA_DIR=$APP_DIR/data
 ExecStart=$NODE_BIN $APP_DIR/settings-service.mjs
@@ -565,7 +580,8 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=read-only
-ReadWritePaths=$APP_DIR/data $GOOGLE_AUTH_STORAGE
+ReadWritePaths=$APP_DIR/data
+InaccessiblePaths=$APP_DIR/.env $GOOGLE_AUTH_STORAGE
 
 [Install]
 WantedBy=multi-user.target
@@ -582,7 +598,7 @@ Wants=network-online.target
 Type=simple
 User=$APP_USER
 WorkingDirectory=$APP_DIR
-EnvironmentFile=$APP_DIR/.env
+EnvironmentFile=$SERVICE_ENV_DIRECTORY/camera.env
 Environment=NODE_ENV=production
 ExecStart=$NODE_BIN $APP_DIR/camera-service.mjs
 Restart=on-failure
@@ -591,6 +607,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=read-only
+InaccessiblePaths=$APP_DIR/.env $GOOGLE_AUTH_STORAGE
 
 [Install]
 WantedBy=multi-user.target
@@ -607,7 +624,7 @@ Wants=network-online.target
 Type=simple
 User=$APP_USER
 WorkingDirectory=$APP_DIR
-EnvironmentFile=$APP_DIR/.env
+EnvironmentFile=$SERVICE_ENV_DIRECTORY/microphone.env
 Environment=NODE_ENV=production
 ExecStart=$NODE_BIN $APP_DIR/mic-service.mjs
 Restart=on-failure
@@ -616,6 +633,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=read-only
+InaccessiblePaths=$APP_DIR/.env $GOOGLE_AUTH_STORAGE
 
 [Install]
 WantedBy=multi-user.target
@@ -644,7 +662,7 @@ NoNewPrivileges=false
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=read-only
-ReadWritePaths=$APP_DIR/data
+ReadWritePaths=$APP_DIR/data $GOOGLE_AUTH_STORAGE
 
 [Install]
 WantedBy=multi-user.target
@@ -662,7 +680,7 @@ Wants=openjarvis-core.service
 Type=simple
 User=$APP_USER
 WorkingDirectory=$APP_DIR
-EnvironmentFile=$APP_DIR/.env
+EnvironmentFile=$SERVICE_ENV_DIRECTORY/frontend.env
 Environment=NODE_ENV=production
 ExecStart=$NODE_BIN $APP_DIR/frontend.mjs
 Restart=on-failure
@@ -672,6 +690,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=read-only
+InaccessiblePaths=$APP_DIR/.env $GOOGLE_AUTH_STORAGE
 
 [Install]
 WantedBy=multi-user.target
