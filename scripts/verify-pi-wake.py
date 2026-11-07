@@ -4,14 +4,23 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SPEC = importlib.util.spec_from_file_location("jarvis_wake_listener", ROOT / "lib" / "wake-listener.py")
+LIB = ROOT / "lib"
+SPEC = importlib.util.spec_from_file_location("jarvis_wake_listener", LIB / "wake-listener.py")
 if SPEC is None or SPEC.loader is None:
     raise SystemExit("Could not load lib/wake-listener.py")
 MODULE = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(MODULE)
+# wake-listener.py imports sibling helpers. Running this verifier from the
+# project root must behave like running the listener from lib/, without
+# requiring callers to mutate PYTHONPATH themselves.
+sys.path.insert(0, str(LIB))
+try:
+    SPEC.loader.exec_module(MODULE)
+finally:
+    sys.path.remove(str(LIB))
 
 
 assert MODULE.wake_score_ready([0.91], 0.7) is False

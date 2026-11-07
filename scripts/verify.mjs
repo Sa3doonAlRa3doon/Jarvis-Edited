@@ -361,6 +361,7 @@ assert.doesNotMatch(piInstaller, /openwakeword\.utils\.download_models\(\)/);
 assert.match(await read('mic-service.mjs'), /wakeScoreReady/);
 assert.match(settingsClient, /TEMPORAL HITS/);
 assert.match(await read('scripts/verify-pi-wake.py'), /Pi wake policy checks passed/);
+assert.match(await read('scripts/verify-pi-wake.py'), /sys\.path\.insert\(0, str\(LIB\)\)/);
 const micService = await read('mic-service.mjs');
 assert.match(micService, /PI_WAKE_ENERGY_FLOOR/);
 assert.match(micService, /\/command\/acknowledge/);
