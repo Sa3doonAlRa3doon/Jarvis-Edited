@@ -1,4 +1,30 @@
-# OpenJarvis Pi Command Center 3.35.2
+# OpenJarvis Pi Command Center 3.36.0
+
+### 3.36.0 separate local backends
+
+- The dashboard, core API, settings storage, camera capture, and microphone/wake
+  listener now run as five independent local processes. Each private backend
+  listens only on `127.0.0.1`; internal calls use a random local bearer token.
+- On Pi, settings, camera, and mic backends have separate systemd units. The
+  microphone backend is the only process that opens the selected ALSA device;
+  camera capture stays in the camera unit and settings writes stay in the
+  settings unit.
+- The installer resolves the service user from `SUDO_USER` when run with sudo,
+  then starts the mic backend as that account so its `audio` group membership
+  applies.
+- Mic health now treats `ENABLE_PI_WAKE_LISTENER=false` as an intentional
+  disable, and a failed listener spawn clears stale readiness and retries with
+  bounded backoff. Errors from a child that already has a PID do not make the
+  backend forget a process that could still be alive.
+- If the Pi wake Python environment is missing, the mic backend retries with
+  bounded backoff so installing its dependencies can recover without manually
+  re-saving settings or restarting the service.
+- The isolated browser agent warns before blocking a repeated two-action loop;
+  the full loop must fall inside the guard's expiry window, and changing pages
+  or controls does not trigger it.
+- JARVIS creates its formatted XLSX briefing with a small local OpenXML writer
+  over JSZip, keeping frozen headers, filters, and styling while removing the
+  vulnerable legacy archiver/glob dependency chain.
 
 ### 3.35.2 retry dismissed screen pickers
 
@@ -184,7 +210,7 @@ page owns the microphone measurement, while Pi mode reports the listener gate.
 - **Workspace directive channel** — the private screen now has its own small JARVIS input with health, Docker, print-ETA, and briefing shortcuts. It uses the same local model router as the command screen, shows the route/model/result in the current-run card, and can play the latest response through the configured Fish Audio voice with an explicit TALK button. It never grants browser, desktop, email, printer, OBS, or PDF mutations implicitly.
 - **Mission preview** — the workspace directive channel now has a **PLAN** action that shows the selected specialist, local model, multi-purpose fan-out lanes, bounded steps, approvals, and warnings before the request runs. It is a deterministic preview only: it never opens a browser, calls a connector, changes a service, or grants permission.
 - **Fish Audio resilience** — the server retries one transient 500/502/503/504 Fish Audio response with a short bounded backoff, and Settings displays that policy next to the selected voice. Authentication errors, rate limits, and other client errors are never retried, and the configured voice is never silently substituted unless the explicit browser-fallback setting is enabled.
-- This workflow is an independent implementation of observable assistant patterns described in public Dexter and OpenJarvis materials; it does not copy proprietary binaries, source, assets, authentication, or paid-feature gates.
+- **Reference code integration** — JARVIS installs and runs the actual OpenJarvis engine as its local agent backend, and its specialist routing uses an attributed JavaScript adaptation of Sukeesh/Jarvis's MIT `PluginStorage` pattern. The isolated browser bridge adapts OpenJarvis's Apache-2.0 repeated-action guard: it warns on the third identical browser action and blocks another repeat within 30 seconds; it also warns after two rounds of an exact alternating pair and blocks the third round. It compares hashed full call signatures and never logs arguments. Recent-window context trimming bounds tool-free conversation history to 24,000 characters, keeps whole recent messages, and excludes client history from tool-enabled requests. The plug-in registry only accepts application-registered descriptors; it never loads modules from user-writable folders. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and [`docs/REFERENCE-SOURCES.md`](docs/REFERENCE-SOURCES.md) for exact reuse and modification details. The unlicensed gist and Priler source are not copied; Priler's license file and Cargo metadata declare conflicting reuse terms. Proprietary Dexter binaries, source, assets, authentication, and paid-feature gates are not used.
 
 ### 3.27.0 private website launcher
 
@@ -201,7 +227,7 @@ page owns the microphone measurement, while Pi mode reports the listener gate.
 ### 3.27.0 bounded local model recovery
 
 - **Runtime model cascade** — specialist routing still starts with the selected local model, but a transient Ollama runner/load failure now retries up to two additional installed local models in a bounded order: routed specialist, primary model, then Pi-friendly fallbacks. The response and workspace identify the model that actually answered. No model is downloaded and no cloud provider is contacted.
-- **Bounded drafting and artifact generation** — Gmail drafts and local DOCX/PPTX/XLSX planning use the installed-only specialist cascade and a shorter `OLLAMA_STRUCTURED_TIMEOUT_MS` total deadline (30 seconds by default). If every local JSON attempt expires, the response identifies the deterministic local fallback instead of labeling it with a model that did not answer.
+- **Bounded drafting and artifact generation** — Gmail drafts and local DOCX/PPTX/XLSX planning use the installed-only specialist cascade and an `OLLAMA_STRUCTURED_TIMEOUT_MS` total deadline (60 seconds by default). The routed model gets most of the available time to load and produce an answer, with the remaining time reserved for fallback. Attempts share one total deadline, and the result names only models actually tried. If all JSON attempts fail, the response identifies its deterministic local fallback.
 
 ### 3.26.2 multi-purpose PDF repair lane
 
@@ -365,7 +391,7 @@ A private, Pi-first JARVIS visualization for OpenJarvis, Ollama, Docker, Google 
 - **Draft first, always visible** — ask `Draft an email to name@example.com saying ...`. JARVIS creates a local draft and opens an editable To/Subject/Body preview. Drafting sends nothing.
 - **Explicit Gmail sending** — one visible draft can be sent only when Gmail sending is enabled, the dashboard session is unlocked, the operations PIN is correct, and `SEND EMAIL` is typed exactly. Draft IDs expire after 15 minutes and work once.
 - **Separate agent account** — OpenJarvis runs as `jarvis-agent`, not the dashboard owner. Optional shell/code/Git tools are restricted to `/srv/jarvis-workspace`; the agent has no sudo rule, dashboard `.env`, OAuth files, SSH keys, private home, or Docker socket.
-- **Secure transport boundary** — the dashboard now binds to `127.0.0.1`. Use an SSH tunnel or Tailscale Serve HTTPS; private APIs reject remote plain HTTP, and forwarded HTTPS is trusted only from a loopback proxy.
+- **Secure transport boundary** — the dashboard now binds to `127.0.0.1`. Use an SSH tunnel or Tailscale Serve HTTPS; private APIs reject remote plain HTTP. Forwarded HTTPS and client addresses are trusted only when the reverse proxy's exact connecting IP is listed in `TRUSTED_DASHBOARD_PROXY_IPS`.
 - **Stronger voice acceptance** — wake phrases and captured command transcripts both require recent physical microphone energy when the audio analyser is available, rejecting silent speech-provider guesses.
 - **Speech-shaped VAD hysteresis** — the microphone gate now requires sustained energy with a peak-to-RMS speech shape, then uses separate attack/release windows. Continuous fans, keyboard rumble, and isolated spikes no longer keep a command capture open or authorize a wake transcript.
 - **Wake troubleshooting is visible** — first-run microphone permission can start from the main page, delayed final wake transcripts are accepted within a bounded six-second physical-voice window, and unsupported speech-recognition browsers report an actionable error instead of appearing silently armed.
@@ -522,13 +548,26 @@ The 2.0 agent, monitoring, maintenance, sensor, wake-word, Google, and Pi teleme
 
 OpenJarvis documents `native_openhands` as a CodeAct agent that generates and executes Python, `deep_research` as multi-hop research with citations, and `monitor_operative` as a long-horizon agent with memory, compression, retrieval, and decomposition. This dashboard visualizes the official `/v1/traces`, `/v1/telemetry/stats`, and `/v1/memory/stats` data rather than simulating it. See the [OpenJarvis agent guide](https://github.com/open-jarvis/OpenJarvis/blob/main/docs/user-guide/agents.md) and [architecture overview](https://github.com/open-jarvis/OpenJarvis/blob/main/docs/architecture/overview.md).
 
+## Runtime process split
+
+External projects used for design research and their code-reuse terms are listed in [docs/REFERENCE-SOURCES.md](docs/REFERENCE-SOURCES.md).
+
+- The Pi installer runs five processes as separate systemd units: `openjarvis-dashboard.service` (front end), `openjarvis-core.service` (application API), `openjarvis-settings.service` (settings file owner), `openjarvis-camera.service` (Pi camera enumeration/capture), and `openjarvis-mic.service` (selected ALSA microphone and wake listener).
+- On Pi, the installer creates root-only environment files containing only each split service's allow-listed local variables. Camera, microphone, settings, and frontend processes are also denied filesystem access to the full `.env` and Google OAuth storage; only the core receives integration credentials, provider keys, and control PINs.
+- The API binds to `API_HOST` / `API_PORT` (loopback by default); the dashboard serves `public/` and proxies API traffic through the same browser origin. This keeps cookies, microphone permissions, and server-sent status streams on one origin while preventing a direct LAN API port.
+- `npm start` or `npm run start:split` starts all five processes locally and waits for each health endpoint before announcing readiness. On Windows, camera/mic devices selected in the dashboard still use browser permissions; the Pi-only ALSA and V4L2 adapters stay inactive.
+- `npm run smoke:split` starts an isolated temporary stack on loopback and checks all five process health endpoints, internal service authentication, dashboard login/cookie behavior, rejection of a forged forwarded-HTTPS header, settings persistence, and API-to-backend routing. CI runs it after the unit suite. It does not replace a physical Pi camera or microphone test.
+- `PORT` is the dashboard port (`8787`); `API_PORT` is private (`8788`). The local settings, camera, and mic backends use ports `8789`, `8790`, and `8791`. Keep all backend addresses on `127.0.0.1`.
+- Dashboard, routine, and chat Docker reads share a five-second container sample. The heavier daemon-wide disk scan refreshes once per minute. Concurrent callers share the same in-flight collection, and both sample timestamps are returned. Failed listings remain unavailable rather than appearing as an empty healthy engine.
+
 ## Security model
 
 - The Pi service can listen on the LAN, but every non-health API is protected by the generated dashboard PIN. Session cookies are `HttpOnly` and `SameSite=Strict`.
 - State-changing requests are same-origin checked.
 - The dashboard sends only a fixed action name to a root-owned helper. Service names and shell text are not accepted from the browser.
 - The root helper is limited by `/etc/sudoers.d/jarvis-command-center` to six exact commands.
-- The helper manages only `ollama.service`, `openjarvis-api.service`, and `hatclanker.service`. It deliberately leaves `openjarvis-dashboard.service`, SSH, networking, and the OS running so you can resume maintenance remotely.
+- The core verifies the front end's internal token before trusting forwarded client addresses or HTTPS state. Other local processes cannot choose new PIN-attempt buckets by supplying proxy headers.
+- The helper can stop/restart Ollama, the isolated OpenJarvis API, the settings/camera/mic backends, and Hatclanker. It deliberately leaves `openjarvis-core.service`, `openjarvis-dashboard.service`, SSH, networking, and the OS running so you can resume maintenance remotely.
 - “Stop until reboot” uses a lock in `/run`; Linux clears it on reboot.
 - “Persistent stop” uses a lock in `/var/lib/jarvis-command-center`; it survives reboot until **Resume** removes it.
 - Docker maintenance records the exact running container IDs before stopping them and resumes only those IDs.
@@ -552,6 +591,7 @@ chmod +x install-pi.sh scripts/setup-openjarvis-pi.sh
 # OR, for the requested user-level Pi control:
 ./scripts/setup-openjarvis-pi.sh --host-control
 ./install-pi.sh
+# This installs/restarts the new settings, camera, and mic units too.
 # Optional, explicit 3.2 GB local vision download:
 # ./install-pi.sh --vision
 ```
@@ -563,8 +603,8 @@ To update an existing GitHub installation later:
 ```bash
 cd ~/openjarvis-pi-command-center
 git pull --ff-only origin main
-npm install --omit=dev
-sudo systemctl restart openjarvis-dashboard
+npm ci --omit=dev --no-audit --no-fund
+./install-pi.sh
 ```
 
 Your local `.env`, OAuth files, logs, and wake environment remain untracked during updates.
@@ -596,9 +636,9 @@ runtime uses Node's current zlib/zstd bindings. It:
 1. Installs production Node packages, the paired Camoufox browser, the root-owned Playwright MCP bridge, and FFmpeg/ALSA/V4L2 tools.
 2. Creates `.wake-venv`, installs openWakeWord/ONNX Runtime, and downloads the official pretrained wake models once.
 3. Generates and prints a private six-digit dashboard/maintenance PIN if `.env` does not already contain one.
-4. Installs the fixed root helper and its exact sudoers rule.
-5. Adds maintenance-lock conditions to the three allow-listed services.
-6. Installs persistent `openjarvis-api.service` and `openjarvis-dashboard.service` units. Both bind only to loopback; OpenJarvis runs under the isolated `jarvis-agent` account with its browser profile and output under `/srv/jarvis-workspace`.
+4. Generates a random private token shared only by the loopback backends, then installs the fixed root helper and its exact sudoers rule.
+5. Adds maintenance-lock conditions to the allow-listed services, including the three hardware/settings backends.
+6. Installs persistent `openjarvis-api.service`, `openjarvis-settings.service`, `openjarvis-camera.service`, `openjarvis-mic.service`, `openjarvis-core.service`, and `openjarvis-dashboard.service` units. Internal JARVIS backends bind only to loopback; the dashboard keeps the configured `HOST` / `PORT`. OpenJarvis runs under the isolated `jarvis-agent` account with its browser profile and output under `/srv/jarvis-workspace`.
 
 The installer does not silently download a multi-gigabyte vision model. After checking Pi storage and bandwidth, run `./install-pi.sh --vision` (or `./install-pi.sh --vision-model qwen2.5vl:3b`) to pull the selected Ollama tag and write `JARVIS_VISION_MODEL` into the private `.env`. Both the Node installer and the Pi shell installer independently check `ollama list` after the pull and refuse to write the vision setting if the exact tag is missing; the dashboard reports `VISION READY` only after its own local catalog check also succeeds.
 
@@ -616,7 +656,7 @@ node .\scripts\start-browser-mcp.mjs --check
 npm.cmd run start:local
 ```
 
-`start:local` starts Ollama, the configured OpenJarvis virtual environment, and the dashboard with hidden local processes. It prints only the three loopback URLs and service health; credentials stay in `.env` and are never printed.
+`start:local` starts Ollama, the configured OpenJarvis virtual environment, and the five JARVIS processes with hidden local processes. It checks front-end, API, settings, camera, and microphone health; credentials stay in `.env` and are never printed.
 
 After changing server code, reload only this project safely with:
 
@@ -624,7 +664,7 @@ After changing server code, reload only this project safely with:
 npm.cmd run restart:local
 ```
 
-The restart helper stops a listener only when its command line is verified to be this project's `server.mjs`; it refuses to touch an unrelated process on the configured port. Ollama and OpenJarvis are left running.
+The restart helper stops a listener only when its command line or JARVIS health version identifies this project; it refuses to touch an unrelated process on the configured port. Ollama and OpenJarvis are left running.
 
 On non-Pi Linux, use the same Node project and `scripts/start-browser-mcp.mjs`; run `npx camoufox fetch` and `npm run browser:patch` when the paired browser is not installed. The `--check` command validates the Camoufox executable, private profile, output directory, and headless mode without launching an agent session.
 
@@ -641,7 +681,7 @@ Then use:
 - Command screen: `http://127.0.0.1:8787/`
 - Hidden settings: `http://127.0.0.1:8787/settings`
 
-Enter the installer-generated PIN when the private-console lock appears. For a permanent phone-friendly URL, put a TLS reverse proxy such as Tailscale Serve in front of `127.0.0.1:8787`; do not bind the dashboard directly to LAN HTTP.
+Enter the installer-generated PIN when the private-console lock appears. For a permanent phone-friendly URL, put a TLS reverse proxy such as Tailscale Serve in front of `127.0.0.1:8787`; add the proxy's exact connecting IP to `TRUSTED_DASHBOARD_PROXY_IPS` so its forwarded HTTPS and client address headers can be trusted. Leave the list empty for direct localhost or SSH-tunnel use, and do not bind the dashboard directly to LAN HTTP.
 
 The tunnel is optional for viewing the Pi dashboard and selecting Pi-attached devices, but required for reliable laptop `getUserMedia()` testing unless you add HTTPS.
 
@@ -655,9 +695,9 @@ Open `/settings`, choose **This browser** for laptop testing or **Raspberry Pi 5
 - Pi mode uses the selected `/dev/video*` and `plughw:CARD,DEVICE` paths only.
 - Person detection runs the TensorFlow.js COCO-SSD model locally. The release ZIP includes it; GitHub installs download the official model shards once during `npm install`, verify their hashes, and then run offline.
 - Voice activity and double-clap detection analyze signal levels locally; audio is not saved. Browser speech transcription uses the browser's installed speech-recognition provider and may use the operating-system default microphone even though VAD and clap analysis stay locked to the selected device.
-- For a fully local Pi command window, run `./install-pi.sh --stt` once. This installs the small Vosk English model in the project-owned model folder and adds `JARVIS_STT_MODEL_DIR`; after a local wake or double clap, the Pi opens a bounded 15-second command window, ignores the wake phrase and the dashboard's short spoken acknowledgement for the first 1.2 seconds, then waits for about 0.9 seconds of silence and sends the normalized transcript over the loopback callback. Vosk partial results are kept only in the local capture and provide a bounded fallback for short sentences that reach the silence boundary before a finalized segment; overlapping partial/final words are merged once. Raw audio never enters the dashboard or an external provider. Tune `JARVIS_STT_COMMAND_WARMUP_MS`, `JARVIS_STT_COMMAND_TIMEOUT_MS`, and `JARVIS_STT_COMMAND_SILENCE_MS` in `.env` if your speaker or room needs different timing. Leave the model variable blank to keep the wake listener wake-only.
+- For a fully local Pi command window, run `./install-pi.sh --stt` once. This installs the small Vosk English model in the project-owned model folder and adds `JARVIS_STT_MODEL_DIR`. After a local wake or double clap, the native listener waits while the dashboard plays “Yes sir…”, receives a loopback acknowledgement only after playback ends, applies a short 180 ms speaker-settle guard, and then gives the user the full bounded 15-second command window. A 15-second acknowledgement fallback prevents a missing dashboard from waiting forever; it does not shorten the command window. Vosk waits for about 0.9 seconds of silence and sends only the normalized transcript over the loopback callback. Partial results stay inside the local capture and provide a bounded fallback for short sentences that reach the silence boundary before a finalized segment; overlapping partial/final words are merged once. Raw audio never enters the dashboard or an external provider. Tune `JARVIS_STT_ACK_TIMEOUT_MS`, `JARVIS_STT_POST_ACK_GUARD_MS`, `JARVIS_STT_COMMAND_TIMEOUT_MS`, and `JARVIS_STT_COMMAND_SILENCE_MS` in `.env` if the local speaker or room needs different timing. Leave the model variable blank to keep the wake listener wake-only.
 - When that local Vosk window has already produced a sentence, the dashboard routes the bounded command directly after the acknowledgement; it does not require a second browser microphone permission. Wake-only events still open the normal 15-second browser capture window.
-- `/api/wake/status` and the Pi Settings diagnostics expose only the bounded capture phase (`LOCAL STT WARMING`, `LOCAL STT LISTENING`, `LOCAL COMMAND SENT`, or timeout/error); they never retain or return the spoken sentence in wake telemetry.
+- `/api/wake/status` and the Pi Settings diagnostics expose only the bounded capture phase (`WAITING FOR REPLY`, `LOCAL STT WARMING`, `LOCAL STT LISTENING`, `LOCAL COMMAND SENT`, or timeout/error); they never retain or return the spoken sentence in wake telemetry.
 - Open **Voice Core** in `/settings` to test recognition and talkback, choose English US/UK/UAE or Arabic UAE, set wake aliases, and tune confidence and command-end silence.
 - The Pi `hey jarvis` model runs fully locally through openWakeWord. Its own documentation notes that saying only “Jarvis” may work but has a higher false-reject rate, so “Hey Jarvis” is the reliable phrase. See [openWakeWord’s Hey Jarvis model documentation](https://github.com/dscripka/openWakeWord/blob/main/docs/models/hey_jarvis.md).
 - A high wake threshold reduces false activations; noisy rooms may need a higher clap threshold.
@@ -709,30 +749,24 @@ Indexing is bounded to 180 nodes and four levels per refresh. It exposes file na
 
 ## Google Workspace
 
-Google belongs to this JARVIS installation, not the Discord bot. Use **one OAuth 2.0 Client ID of type Desktop app**. Do not create an API key, and do not use a service account for a personal Gmail/Drive/Calendar account. Enable Gmail API, Google Drive API, Google Calendar API, Google Tasks API, and People API in the same project, then add your own Google account under OAuth test users while the app is in Testing.
+Google belongs to this JARVIS installation, not the Discord bot. Use **one OAuth 2.0 Client ID**, either a Desktop app or a Web application with the exact loopback callback registered. Personal Gmail/Drive/Calendar access uses user OAuth rather than an API key or service account. Enable Gmail API, Google Drive API, Google Calendar API, Google Tasks API, and People API in the same project, then add your own Google account under OAuth test users while the app is in Testing.
 
-The OAuth client secret posted in chat is exposed. Delete or rotate that OAuth client in Google Cloud before continuing, download the replacement client JSON, and never commit it or paste it into chat. A single replacement desktop OAuth client can authorize all five Google services; each service is still limited by the scopes you approve.
+A single OAuth client can authorize all five Google services, limited by the scopes you approve. Store its downloaded client JSON or environment pair privately on the host, outside Git.
 
 Forward the OAuth callback from a second PowerShell/SSH session:
 
 ```powershell
-ssh -L 8789:127.0.0.1:8789 pi5@192.168.4.123
+ssh -L 8792:127.0.0.1:8792 pi5@192.168.4.123
 ```
 
-Then on the Pi:
-
-```bash
-jarvis connect gdrive
-```
-
-Open the authorization URL it prints. The callback travels through the tunnel to the Pi. Keep OAuth client JSON and token files outside this repository; the dashboard reads only their redacted connector state and never exposes tokens.
+Use `npm run google:authorize` on the Pi as shown below. Open its authorization link on the Pi itself, or on the laptop while the tunnel is open. The callback must reach the same host that started the helper. The dashboard reads only redacted connector state and never exposes tokens.
 
 The direct bridge can search Gmail, list Calendar events, search Drive metadata, list Tasks, and find Contacts. Email drafting is local and never sends automatically. Gmail sending is the only write action and stays disabled until you explicitly authorize the `gmail.send` scope.
 
 To authorize or refresh all required read scopes plus `gmail.send`, keep this PowerShell tunnel open:
 
 ```powershell
-ssh -N -L 8789:127.0.0.1:8789 pi5@192.168.4.123
+ssh -N -L 8792:127.0.0.1:8792 pi5@192.168.4.123
 ```
 
 Then run on the Pi:
@@ -744,16 +778,20 @@ npm run google:authorize
 
 Open the printed Google URL, approve it with your configured OAuth test-user account, and wait for `token.json` to be saved privately. Then set this only in the Pi `.env` and restart:
 
-If the protected Settings screen reports **REAUTH REQUIRED**, use **REAUTHORIZE GOOGLE** in `/settings#integrations`. JARVIS starts the same local helper, gives you a one-time consent link, and keeps the callback listener bound to loopback. On a Pi reached over SSH, keep the `8789` tunnel open while the consent tab is active; when Google shows the success page, return to Settings and press **VERIFY GOOGLE**.
+If the protected Settings screen reports **REAUTH REQUIRED**, use **REAUTHORIZE GOOGLE** in `/settings#integrations`. JARVIS starts the same local helper, gives you a one-time consent link, and keeps the callback listener bound to loopback. On a Pi reached over SSH, keep the `8792` tunnel open while the consent tab is active; when Google shows the success page, return to Settings and press **VERIFY GOOGLE**.
 
-The helper accepts a downloaded desktop client or a web client with an explicitly registered loopback redirect. For a web client, register `http://127.0.0.1:8789/` (or `http://localhost:8789/`) in Google Cloud and set `GOOGLE_OAUTH_REDIRECT_URI` to the exact same value in the private `.env`. Non-loopback redirects are rejected, and the client secret stays on the host.
+After replacing the OAuth client, authorize it again: tokens are bound to the client that obtained them, and an older client's token cannot be reused with a new client pair. The helper uses PKCE, preserves the registered callback path, and shows its success page only after Google returns tokens and the private token file is saved. Failed exchanges and storage errors leave the previous file intact. Callback URLs with query parameters or fragments are rejected instead of silently rewritten.
+
+Google [expires refresh tokens after seven days](https://developers.google.com/identity/protocols/oauth2#expiration) for External apps in Testing when they request these Workspace scopes. Reauthorization is needed when that happens. Production publishing and any applicable Google verification are separate setup steps; JARVIS cannot extend Google's token lifetime. Contacts verification uses the address-book endpoint supported by `contacts.readonly`, so it does not require the additional `profile` scope.
+
+The helper accepts a downloaded desktop client or a web client with an explicitly registered loopback redirect. The OAuth listener uses its own port (`8792` by default); the settings backend remains on `8789`. For a web client, register `http://127.0.0.1:8792/` (or `http://localhost:8792/`) in Google Cloud and set `GOOGLE_OAUTH_PORT=8792` and `GOOGLE_OAUTH_REDIRECT_URI` to the exact same URI in the private `.env`. The Pi installer migrates the old callback default from `8789` to `8792`. It also moves existing OAuth files into `/var/lib/openjarvis-google` with private permissions: the core service runs with `ProtectHome=read-only`, so its OAuth token must be outside the user's home directory for dashboard reauthorization to save correctly. After pulling an installer update on the Pi, rerun `./install-pi.sh` to migrate the files. Alternatively, set both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in the ignored local `.env`; a complete pair overrides the downloaded credentials file. Never put the client secret in GitHub or chat. Non-loopback redirects are rejected, and credentials stay on the host.
 
 ```dotenv
 GOOGLE_EMAIL_SEND_ENABLED=true
 ```
 
 ```bash
-sudo systemctl restart openjarvis-dashboard
+sudo systemctl restart openjarvis-core
 ```
 
 Usage example: `Draft an email to friend@example.com saying I will arrive at five.` Review and edit the exact draft, enter the operations PIN, type `SEND EMAIL`, and press **SEND THIS EXACT EMAIL**. Closing the draft sends nothing. Calendar, Drive, Tasks, Contacts, deletion, forwarding, and settings remain read-only.
@@ -879,13 +917,21 @@ For a fast local readiness report before the longer smoke test, run:
 npm.cmd run doctor
 # Fail on every warning as well as every required check:
 npm.cmd run doctor -- --strict
+# Require the dashboard PIN gate for a deployment check:
+npm.cmd run doctor -- --require-auth
 # Make selected dependencies hard requirements for this run:
 npm.cmd run doctor -- --require-openjarvis --require-ollama --require-vision --require-camera --require-mic --require-stirling --require-printer --require-printer-camera
 ```
 
-`doctor` probes only the local dashboard session and its bounded local status endpoints. It reports Camoufox-only browser configuration, OpenJarvis/Ollama reachability, verified vision capability, Google OAuth availability, Stirling health, Moonraker printer reachability, same-host printer-camera discovery, and Pi ALSA/V4L2 devices when running on Linux. It never prints `.env` values, never calls a public API, and never changes services; optional Google, Stirling, printer, printer-camera, camera, and microphone warnings become failures only when explicitly required. On Windows, the camera and microphone checks remain browser-side; use the real Camoufox smoke test below for physical device evidence.
+`doctor` targets the dashboard on `PORT` (`8787` by default), or `JARVIS_BASE_URL` when explicitly set. It checks the front end, proxied core API, and three local backends separately. These are required checks; a healthy API cannot hide a broken dashboard or microphone backend. Optional endpoint failures stay separate, so a stalled printer or vision probe cannot erase healthy Google, model, or microphone results.
 
-Fish Audio talkback is bounded by `FISH_AUDIO_TIMEOUT_MS` (30 seconds by default, with one bounded retry) so an unavailable provider cannot leave a normal reply hanging indefinitely. Wake acknowledgements use `FISH_AUDIO_WAKE_TIMEOUT_MS` (12 seconds by default, bounded to 4–60 seconds) so a slow provider cannot block the 15-second command window; JARVIS proceeds to listen and leaves the selected Fish voice unchanged. Settings shows both effective deadlines. Enable the browser voice fallback in Settings when you need local speech during an outage.
+On Linux, when Pi wake/clap input is enabled, the report also requires a ready listener and recent audio telemetry. `--require-mic` additionally requires the local transcription model. Device discovery, microphone capture, and a successful spoken wake phrase are separate checks; recent telemetry alone does not prove that JARVIS understood a person. Windows camera and microphone capture remain browser-side.
+
+The report also covers the dashboard PIN gate, Camoufox configuration, OpenJarvis/Ollama reachability, verified vision capability, Google OAuth availability, Stirling processing state, Moonraker reachability, printer-camera discovery, and Pi ALSA/V4L2 devices. These local status requests can trigger bounded checks of configured upstream services. The doctor does not print private environment values, send email, or change services. Optional connectors are warnings unless explicitly required or `--strict` is used; use the live smoke test for real API and TTS operations.
+
+Fish Audio talkback is bounded by `FISH_AUDIO_TIMEOUT_MS` (30 seconds by default, with one bounded retry) so an unavailable provider cannot leave a normal reply hanging indefinitely. Wake acknowledgements use `FISH_AUDIO_WAKE_TIMEOUT_MS` (12 seconds by default, bounded to 4–60 seconds) so a slow provider cannot block the 15-second command window; JARVIS proceeds to listen and leaves the selected Fish voice unchanged. Settings shows both effective deadlines. Enable the browser voice fallback in Settings when you need browser speech during an outage.
+
+For fully offline Pi talkback, set `TTS_MODE=local`. The Pi installer adds Debian's `espeak-ng` package; existing installations can run `sudo apt-get install espeak-ng`, then `sudo systemctl restart openjarvis-core`. The authenticated `/api/tts` local mode generates bounded PCM WAV audio on the Pi and sends it to the dashboard for playback. Speech text stays in a private process pipe, with no shell, temporary speech file, or cloud request. The Settings system default and **Pi offline voice** choices use this engine when available; an explicitly selected browser voice remains selected. Settings TALKBACK and workspace TALK respect local mode. eSpeak is a separate system voice and does not reproduce the configured Fish Audio voice. A browser audio gesture may still be required, and successful WAV generation alone does not prove that the monitor speakers played it.
 
 For a visible Camoufox end-to-end check of the actual command screen, camera, microphone, gestures, search, Settings, sensor calibration, and Google verification UI, run:
 
@@ -914,5 +960,10 @@ cd "$env:USERPROFILE\Documents\Codex\2026-10-17\new-bot-im-working-on-called\out
 npm.cmd install
 npm.cmd start
 ```
+
+`npm start` launches the dashboard, core API, settings service, camera service,
+and microphone service on loopback. Check each backend in the response from
+`http://127.0.0.1:8787/api/health`; camera/mic capture from the Windows browser
+continues to use the browser's selected devices.
 
 Open the command screen and `/settings`. Pi-only maintenance and openWakeWord controls correctly stay unavailable on Windows; system telemetry, the UI, live preview, browser camera/person detection, browser microphone level, local double-clap detection, and any reachable OpenJarvis/Ollama services can still be tested.

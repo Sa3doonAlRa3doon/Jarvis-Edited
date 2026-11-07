@@ -2,8 +2,10 @@
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP_USER="$(id -un)"
+APP_USER="${SUDO_USER:-$(id -un)}"
 APP_HOME="$(getent passwd "$APP_USER" | cut -d: -f6)"
+APP_UID="$(id -u "$APP_USER")"
+APP_GROUP="$(id -gn "$APP_USER")"
 AGENT_USER="jarvis-agent"
 AGENT_HOME="/var/lib/jarvis-agent"
 AGENT_GROUP="jarvis-workspace"
@@ -72,6 +74,7 @@ fi
 MISSING_MEDIA_PACKAGES=()
 command -v ffmpeg >/dev/null 2>&1 || MISSING_MEDIA_PACKAGES+=(ffmpeg)
 command -v arecord >/dev/null 2>&1 || MISSING_MEDIA_PACKAGES+=(alsa-utils)
+command -v espeak-ng >/dev/null 2>&1 || command -v espeak >/dev/null 2>&1 || MISSING_MEDIA_PACKAGES+=(espeak-ng)
 command -v v4l2-ctl >/dev/null 2>&1 || MISSING_MEDIA_PACKAGES+=(v4l-utils)
 command -v python3 >/dev/null 2>&1 || MISSING_MEDIA_PACKAGES+=(python3)
 python3 -m venv --help >/dev/null 2>&1 || MISSING_MEDIA_PACKAGES+=(python3-venv)
@@ -130,7 +133,7 @@ for MEDIA_GROUP in video audio; do
 done
 
 cd "$APP_DIR"
-npm install --omit=dev
+npm ci --omit=dev --no-audit --no-fund
 
 WAKE_READY=false
 if python3 -m venv "$APP_DIR/.wake-venv"; then
@@ -185,11 +188,47 @@ fi
 set_env_value() {
   local key="$1"
   local value="$2"
-  if grep -q "^${key}=" .env; then
-    sed -i "s|^${key}=.*|${key}=${value}|" .env
-  else
-    printf '%s=%s\n' "$key" "$value" >> .env
-  fi
+  local env_file="${ENV_FILE:-.env}"
+  [[ "$key" =~ ^[A-Z][A-Z0-9_]*$ ]] || { echo "Refusing invalid environment key." >&2; return 2; }
+  [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] || { echo "Refusing multiline environment value for $key." >&2; return 2; }
+  JARVIS_ENV_KEY="$key" JARVIS_ENV_VALUE="$value" python3 - "$env_file" <<'PY'
+import os
+from pathlib import Path
+import stat
+import sys
+import tempfile
+
+path = Path(sys.argv[1])
+key = os.environ["JARVIS_ENV_KEY"]
+value = os.environ["JARVIS_ENV_VALUE"]
+raw = path.read_text(encoding="utf-8") if path.exists() else ""
+prefix = f"{key}="
+lines = raw.splitlines(keepends=True)
+found = False
+updated = []
+for line in lines:
+    body = line.rstrip("\r\n")
+    ending = line[len(body):]
+    if body.startswith(prefix):
+        updated.append(f"{prefix}{value}{ending}")
+        found = True
+    else:
+        updated.append(line)
+result = "".join(updated)
+if not found:
+    if result and not result.endswith(("\n", "\r")):
+        result += "\n"
+    result += f"{prefix}{value}\n"
+mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o600
+with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+    handle.write(result)
+    temporary = Path(handle.name)
+try:
+    os.chmod(temporary, mode)
+    os.replace(temporary, path)
+finally:
+    temporary.unlink(missing_ok=True)
+PY
 }
 
 if ! grep -q '^PRINTER_URL=.' .env; then
@@ -200,11 +239,94 @@ grep -q '^PRINTER_API_KEY=' .env || set_env_value PRINTER_API_KEY ''
 grep -q '^PRINTER_TIMEOUT_MS=' .env || set_env_value PRINTER_TIMEOUT_MS 2800
 grep -q '^KNOWLEDGE_ROOTS=' .env || set_env_value KNOWLEDGE_ROOTS ''
 
+if ! grep -q '^JARVIS_INTERNAL_SERVICE_TOKEN=.' .env; then
+  INTERNAL_SERVICE_TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+  set_env_value JARVIS_INTERNAL_SERVICE_TOKEN "$INTERNAL_SERVICE_TOKEN"
+  unset INTERNAL_SERVICE_TOKEN
+fi
+set_env_value JARVIS_SETTINGS_BACKEND_PORT 8789
+set_env_value JARVIS_CAMERA_BACKEND_PORT 8790
+set_env_value JARVIS_MIC_BACKEND_PORT 8791
+set_env_value JARVIS_SETTINGS_BACKEND_URL http://127.0.0.1:8789
+set_env_value JARVIS_CAMERA_BACKEND_URL http://127.0.0.1:8790
+set_env_value JARVIS_MIC_BACKEND_URL http://127.0.0.1:8791
+if ! grep -q '^GOOGLE_OAUTH_PORT=.' .env; then
+  set_env_value GOOGLE_OAUTH_PORT 8792
+elif grep -Eq '^GOOGLE_OAUTH_PORT=8789\r?$' .env; then
+  set_env_value GOOGLE_OAUTH_PORT 8792
+fi
+GOOGLE_OAUTH_PORT_VALUE="$(sed -n 's/^GOOGLE_OAUTH_PORT=//p' .env | tr -d '\r' | tail -n 1)"
+GOOGLE_OAUTH_REDIRECT_URI_VALUE="$(sed -n 's/^GOOGLE_OAUTH_REDIRECT_URI=//p' .env | tr -d '\r' | tail -n 1)"
+if [[ "$GOOGLE_OAUTH_REDIRECT_URI_VALUE" == "http://127.0.0.1:8789/" || "$GOOGLE_OAUTH_REDIRECT_URI_VALUE" == "http://localhost:8789/" ]]; then
+  set_env_value GOOGLE_OAUTH_REDIRECT_URI "http://127.0.0.1:${GOOGLE_OAUTH_PORT_VALUE}/"
+  echo "Moved the legacy Google OAuth callback off the settings backend port to ${GOOGLE_OAUTH_PORT_VALUE}; update the registered redirect URI for a web OAuth client."
+elif [[ -z "$GOOGLE_OAUTH_REDIRECT_URI_VALUE" ]]; then
+  set_env_value GOOGLE_OAUTH_REDIRECT_URI "http://127.0.0.1:${GOOGLE_OAUTH_PORT_VALUE}/"
+fi
+
+# Keep OAuth files writable by the sandboxed core service without granting it
+# write access to the user's home. Preserve existing private files on upgrade.
+GOOGLE_AUTH_STORAGE="/var/lib/openjarvis-google"
+GOOGLE_AUTH_SOURCE_DIR="$(sed -n 's/^GOOGLE_AUTH_DIRECTORY=//p' .env | tr -d '\r' | tail -n 1)"
+GOOGLE_CREDENTIALS_SOURCE="$(sed -n 's/^GOOGLE_CREDENTIALS_PATH=//p' .env | tr -d '\r' | tail -n 1)"
+GOOGLE_TOKEN_SOURCE="$(sed -n 's/^GOOGLE_TOKEN_PATH=//p' .env | tr -d '\r' | tail -n 1)"
+sudo install -d -o "$APP_USER" -g "$APP_GROUP" -m 0700 "$GOOGLE_AUTH_STORAGE"
+run_as_app_user() {
+  if [[ "$(id -u)" == "$APP_UID" ]]; then
+    "$@"
+  else
+    sudo -u "$APP_USER" "$@"
+  fi
+}
+migrate_google_auth_file() {
+  local filename="$1"
+  local configured_source="$2"
+  local target="$GOOGLE_AUTH_STORAGE/$filename"
+  local source
+  local source_owner
+  local source_links
+  local target_links
+  local candidates=()
+  if [[ -L "$target" ]]; then
+    echo "Refusing unsafe symlink in private Google OAuth storage: $target" >&2
+    return 1
+  fi
+  if [[ -e "$target" ]]; then
+    [[ -f "$target" ]] || { echo "Refusing non-file in private Google OAuth storage: $target" >&2; return 1; }
+    target_links="$(stat -c '%h' -- "$target" 2>/dev/null || true)"
+    [[ "$target_links" == "1" ]] || { echo "Refusing multiply linked file in private Google OAuth storage: $target" >&2; return 1; }
+    sudo chown "$APP_USER:$APP_GROUP" -- "$target"
+    sudo chmod 0600 -- "$target"
+    return 0
+  fi
+  [[ -z "$configured_source" ]] || candidates+=("$configured_source")
+  [[ -z "$GOOGLE_AUTH_SOURCE_DIR" ]] || candidates+=("$GOOGLE_AUTH_SOURCE_DIR/$filename")
+  candidates+=("$APP_HOME/jarvis-google/$filename" "$APP_HOME/Documents/Jarvis-Google-Auth/$filename")
+  for source in "${candidates[@]}"; do
+    if [[ "$source" != "$target" && -f "$source" && ! -L "$source" && -r "$source" ]]; then
+      source_owner="$(stat -c '%u' -- "$source" 2>/dev/null || true)"
+      source_links="$(stat -c '%h' -- "$source" 2>/dev/null || true)"
+      [[ "$source_owner" == "$APP_UID" ]] || continue
+      [[ "$source_links" == "1" ]] || continue
+      run_as_app_user install -m 0600 -- "$source" "$target"
+      echo "Migrated private Google OAuth material into $GOOGLE_AUTH_STORAGE."
+      return 0
+    fi
+  done
+  return 0
+}
+migrate_google_auth_file credentials.json "$GOOGLE_CREDENTIALS_SOURCE"
+migrate_google_auth_file token.json "$GOOGLE_TOKEN_SOURCE"
+set_env_value GOOGLE_AUTH_DIRECTORY "$GOOGLE_AUTH_STORAGE"
+set_env_value GOOGLE_CREDENTIALS_PATH "$GOOGLE_AUTH_STORAGE/credentials.json"
+set_env_value GOOGLE_TOKEN_PATH "$GOOGLE_AUTH_STORAGE/token.json"
+grep -q '^GOOGLE_CLIENT_SECRET=' .env || set_env_value GOOGLE_CLIENT_SECRET ''
+
 if ! grep -q '^OPS_CONTROL_PIN=.' .env; then
   GENERATED_PIN="$(python3 -c 'import secrets; print(f"{secrets.randbelow(1000000):06d}")')"
   set_env_value OPS_CONTROL_PIN "$GENERATED_PIN"
-  echo "Generated JARVIS maintenance PIN: $GENERATED_PIN"
-  echo "Save it now. It is stored only in $APP_DIR/.env and is required for service controls."
+  echo "Generated the JARVIS maintenance PIN in the private $APP_DIR/.env file."
+  echo "Read OPS_CONTROL_PIN locally when needed; its value is never printed into installation logs."
 fi
 CONTROL_PIN="$(sed -n 's/^OPS_CONTROL_PIN=//p' .env | tail -n 1)"
 if ! grep -q '^DASHBOARD_ACCESS_PIN=.' .env; then
@@ -216,7 +338,8 @@ set_env_value ENABLE_PI_WAKE_LISTENER "$WAKE_READY"
 set_env_value WAKE_PYTHON "$APP_DIR/.wake-venv/bin/python"
 set_env_value JARVIS_STT_COMMAND_TIMEOUT_MS 15000
 set_env_value JARVIS_STT_COMMAND_SILENCE_MS 900
-set_env_value JARVIS_STT_COMMAND_WARMUP_MS 1200
+set_env_value JARVIS_STT_ACK_TIMEOUT_MS 15000
+set_env_value JARVIS_STT_POST_ACK_GUARD_MS 180
 CURRENT_BROWSER_PROFILE="$(sed -n 's/^JARVIS_BROWSER_PROFILE=//p' .env | tail -n 1)"
 if [[ -z "$CURRENT_BROWSER_PROFILE" ]]; then
   CURRENT_BROWSER_PROFILE="$APP_DIR/data/camoufox-profile"
@@ -235,6 +358,8 @@ set_env_value OLLAMA_HOST 127.0.0.1:11434
 set_env_value OLLAMA_NO_CLOUD 1
 set_env_value OLLAMA_MAX_LOADED_MODELS 1
 set_env_value HOST 127.0.0.1
+set_env_value API_HOST 127.0.0.1
+set_env_value API_PORT 8788
 if [[ "$INSTALL_VISION" == true ]]; then
   OLLAMA_BIN="$(command -v ollama || true)"
   if [[ -z "$OLLAMA_BIN" ]]; then
@@ -333,6 +458,27 @@ else
   echo "Local command transcription skipped. When ready, run: $0 --stt"
 fi
 install -d -m 0700 "$APP_DIR/data"
+if [[ "$EUID" -eq 0 ]]; then
+  sudo chown "$APP_USER:$APP_USER" "$APP_DIR/.env"
+  sudo chown -R "$APP_USER:$APP_USER" "$APP_DIR/data"
+  [[ ! -d "$APP_DIR/models" ]] || sudo chown -R "$APP_USER:$APP_USER" "$APP_DIR/models"
+  sudo chmod 0600 "$APP_DIR/.env"
+fi
+
+# Give each split service only the environment values it needs. In particular,
+# camera, microphone, settings and static frontend processes never receive
+# Google OAuth material, provider API keys, or dashboard/control PINs.
+SERVICE_ENV_DIRECTORY="/var/lib/jarvis-command-center/service-env"
+SERVICE_ENV_TEMP="$(mktemp -d --tmpdir jarvis-service-env-XXXXXX)"
+cleanup_service_env_temp() { rm -rf -- "$SERVICE_ENV_TEMP"; }
+trap cleanup_service_env_temp EXIT
+"$NODE_BIN" scripts/write-service-environments.mjs --source "$APP_DIR/.env" --output "$SERVICE_ENV_TEMP"
+sudo install -d -o root -g root -m 0700 "$SERVICE_ENV_DIRECTORY"
+for SERVICE_ENV_NAME in settings camera microphone frontend; do
+  sudo install -o root -g root -m 0600 -- "$SERVICE_ENV_TEMP/${SERVICE_ENV_NAME}.env" "$SERVICE_ENV_DIRECTORY/${SERVICE_ENV_NAME}.env"
+done
+cleanup_service_env_temp
+trap - EXIT
 
 sudo install -m 0750 "$APP_DIR/scripts/jarvis-service-control.sh" /usr/local/sbin/jarvis-service-control
 sudo tee /etc/sudoers.d/jarvis-command-center >/dev/null <<EOF
@@ -341,7 +487,7 @@ EOF
 sudo chmod 0440 /etc/sudoers.d/jarvis-command-center
 sudo visudo -cf /etc/sudoers.d/jarvis-command-center >/dev/null
 
-for GUARDED_SERVICE in ollama.service openjarvis-api.service hatclanker.service; do
+for GUARDED_SERVICE in ollama.service openjarvis-api.service openjarvis-settings.service openjarvis-camera.service openjarvis-mic.service hatclanker.service; do
   sudo install -d -m 0755 "/etc/systemd/system/${GUARDED_SERVICE}.d"
   sudo tee "/etc/systemd/system/${GUARDED_SERVICE}.d/90-jarvis-maintenance.conf" >/dev/null <<'EOF'
 [Unit]
@@ -413,12 +559,92 @@ else
   echo "Isolated OpenJarvis was not found at $OPENJARVIS_DIR. Run scripts/setup-openjarvis-pi.sh first; the dashboard will use Ollama fallback meanwhile."
 fi
 
-SERVICE_FILE="/etc/systemd/system/openjarvis-dashboard.service"
-sudo tee "$SERVICE_FILE" >/dev/null <<EOF
+SETTINGS_SERVICE_FILE="/etc/systemd/system/openjarvis-settings.service"
+sudo tee "$SETTINGS_SERVICE_FILE" >/dev/null <<EOF
 [Unit]
-Description=OpenJarvis Pi Command Center
-After=network-online.target ollama.service openjarvis-api.service
+Description=JARVIS local settings backend
+After=network-online.target
 Wants=network-online.target
+
+[Service]
+Type=simple
+User=$APP_USER
+WorkingDirectory=$APP_DIR
+EnvironmentFile=$SERVICE_ENV_DIRECTORY/settings.env
+Environment=NODE_ENV=production
+Environment=JARVIS_DATA_DIR=$APP_DIR/data
+ExecStart=$NODE_BIN $APP_DIR/settings-service.mjs
+Restart=on-failure
+RestartSec=4
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=$APP_DIR/data
+InaccessiblePaths=$APP_DIR/.env $GOOGLE_AUTH_STORAGE
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+CAMERA_SERVICE_FILE="/etc/systemd/system/openjarvis-camera.service"
+sudo tee "$CAMERA_SERVICE_FILE" >/dev/null <<EOF
+[Unit]
+Description=JARVIS local camera backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$APP_USER
+WorkingDirectory=$APP_DIR
+EnvironmentFile=$SERVICE_ENV_DIRECTORY/camera.env
+Environment=NODE_ENV=production
+ExecStart=$NODE_BIN $APP_DIR/camera-service.mjs
+Restart=on-failure
+RestartSec=4
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+InaccessiblePaths=$APP_DIR/.env $GOOGLE_AUTH_STORAGE
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+MIC_SERVICE_FILE="/etc/systemd/system/openjarvis-mic.service"
+sudo tee "$MIC_SERVICE_FILE" >/dev/null <<EOF
+[Unit]
+Description=JARVIS local microphone and wake-word backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$APP_USER
+WorkingDirectory=$APP_DIR
+EnvironmentFile=$SERVICE_ENV_DIRECTORY/microphone.env
+Environment=NODE_ENV=production
+ExecStart=$NODE_BIN $APP_DIR/mic-service.mjs
+Restart=on-failure
+RestartSec=4
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+InaccessiblePaths=$APP_DIR/.env $GOOGLE_AUTH_STORAGE
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+CORE_SERVICE_FILE="/etc/systemd/system/openjarvis-core.service"
+sudo tee "$CORE_SERVICE_FILE" >/dev/null <<EOF
+[Unit]
+Description=JARVIS private API and voice back end
+After=network-online.target ollama.service openjarvis-api.service openjarvis-settings.service openjarvis-camera.service openjarvis-mic.service
+Wants=network-online.target ollama.service openjarvis-api.service openjarvis-settings.service openjarvis-camera.service openjarvis-mic.service
 
 [Service]
 Type=simple
@@ -426,16 +652,45 @@ User=$APP_USER
 WorkingDirectory=$APP_DIR
 EnvironmentFile=$APP_DIR/.env
 Environment=NODE_ENV=production
+Environment=JARVIS_API_ONLY=1
+Environment=JARVIS_DATA_DIR=$APP_DIR/data
 ExecStart=$NODE_BIN $APP_DIR/server.mjs
 Restart=on-failure
 RestartSec=4
-# sudo is restricted to the exact root-owned helper actions in
-# /etc/sudoers.d/jarvis-command-center. This service cannot sudo anything else.
+# The wake worker needs the narrow sudo helper for approved host operations only.
 NoNewPrivileges=false
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=read-only
-ReadWritePaths=$APP_DIR/data
+ReadWritePaths=$APP_DIR/data $GOOGLE_AUTH_STORAGE
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+SERVICE_FILE="/etc/systemd/system/openjarvis-dashboard.service"
+sudo tee "$SERVICE_FILE" >/dev/null <<EOF
+[Unit]
+Description=JARVIS dashboard front end
+After=network-online.target openjarvis-core.service
+Wants=network-online.target
+Wants=openjarvis-core.service
+
+[Service]
+Type=simple
+User=$APP_USER
+WorkingDirectory=$APP_DIR
+EnvironmentFile=$SERVICE_ENV_DIRECTORY/frontend.env
+Environment=NODE_ENV=production
+ExecStart=$NODE_BIN $APP_DIR/frontend.mjs
+Restart=on-failure
+RestartSec=4
+# Static UI process has no host-control privilege and cannot write project data.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+InaccessiblePaths=$APP_DIR/.env $GOOGLE_AUTH_STORAGE
 
 [Install]
 WantedBy=multi-user.target
@@ -445,10 +700,15 @@ sudo systemctl daemon-reload
 if systemctl list-unit-files ollama.service >/dev/null 2>&1; then
   sudo systemctl try-restart ollama.service || true
 fi
-sudo systemctl enable --now openjarvis-dashboard
+sudo systemctl enable openjarvis-settings openjarvis-camera openjarvis-mic openjarvis-core openjarvis-dashboard
+sudo systemctl restart openjarvis-settings openjarvis-camera openjarvis-mic || sudo systemctl start openjarvis-settings openjarvis-camera openjarvis-mic
+sudo systemctl restart openjarvis-core || sudo systemctl start openjarvis-core
+sudo systemctl restart openjarvis-dashboard || sudo systemctl start openjarvis-dashboard
 if [[ -n "$JARVIS_BIN" ]]; then
   sudo systemctl status openjarvis-api --no-pager -l || true
 fi
+sudo systemctl status openjarvis-core --no-pager -l
+sudo systemctl status openjarvis-settings openjarvis-camera openjarvis-mic --no-pager -l
 sudo systemctl status openjarvis-dashboard --no-pager -l
 
 echo

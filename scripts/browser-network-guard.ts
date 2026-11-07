@@ -7,8 +7,42 @@ export function blockedMethod(method: string) {
   return !SAFE_BROWSER_METHODS.has(String(method || '').toUpperCase());
 }
 
+export function blockedNavigationScheme(protocol: string, isNavigationRequest: boolean) {
+  return isNavigationRequest && !['http:', 'https:'].includes(String(protocol).toLowerCase());
+}
+
 const cache = new Map<string, { expiresAt: number; addresses: string[] }>();
 const CACHE_MS = 60_000;
+const MAX_CACHE_ENTRIES = 512;
+
+export function cachedPublicAddresses(cacheStore: Map<string, { expiresAt: number; addresses: string[] }>, hostname: string, now = Date.now()) {
+  const key = String(hostname || '').toLowerCase();
+  const entry = cacheStore.get(key);
+  if (!entry || entry.expiresAt <= now) {
+    if (entry) cacheStore.delete(key);
+    return null;
+  }
+  cacheStore.delete(key);
+  cacheStore.set(key, entry);
+  return entry.addresses;
+}
+
+export function rememberPublicAddresses(
+  cacheStore: Map<string, { expiresAt: number; addresses: string[] }>,
+  hostname: string,
+  addresses: string[],
+  now = Date.now(),
+  maxEntries = MAX_CACHE_ENTRIES
+) {
+  const key = String(hostname || '').toLowerCase();
+  const safeLimit = Math.max(1, Math.floor(Number(maxEntries) || MAX_CACHE_ENTRIES));
+  for (const [entryKey, entry] of cacheStore) {
+    if (entry.expiresAt <= now) cacheStore.delete(entryKey);
+  }
+  cacheStore.delete(key);
+  cacheStore.set(key, { expiresAt: now + CACHE_MS, addresses: [...addresses] });
+  while (cacheStore.size > safeLimit) cacheStore.delete(cacheStore.keys().next().value as string);
+}
 
 export function blockedIpv4(address: string) {
   const parts = address.split('.').map(Number);
@@ -37,12 +71,12 @@ export function blockedHostname(hostname: string) {
 
 async function publicAddresses(hostname: string) {
   const key = hostname.toLowerCase();
-  const cached = cache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.addresses;
+  const cached = cachedPublicAddresses(cache, key);
+  if (cached) return cached;
   const records = await dns.lookup(hostname, { all: true, verbatim: true });
   const addresses = records.map((record) => record.address);
   if (!addresses.length || addresses.some(blockedIp)) throw new Error('Private or unresolved browser destination blocked.');
-  cache.set(key, { addresses, expiresAt: Date.now() + CACHE_MS });
+  rememberPublicAddresses(cache, key, addresses);
   return addresses;
 }
 
@@ -51,6 +85,10 @@ export default async ({ page }: { page: any }) => {
     try {
       const url = new URL(route.request().url());
       if (blockedMethod(route.request().method())) {
+        await route.abort('blockedbyclient');
+        return;
+      }
+      if (blockedNavigationScheme(url.protocol, route.request().isNavigationRequest())) {
         await route.abort('blockedbyclient');
         return;
       }

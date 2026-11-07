@@ -4,8 +4,9 @@ import { VoiceController } from './voice-controller.js';
 import { isIntegratedBrowserName, searchCatalog } from './search-utils.js';
 import { shouldApplyTranscriptToInput } from './voice-utils.js';
 import { hasWakeCommand, normalizeWakeCommand } from './wake-command.js';
-import { wakeCaptureLabel } from './wake-state.js';
+import { piCaptureStartupExpired, wakeCaptureLabel } from './wake-state.js';
 import { requiresBrowserTtsGesture } from './tts-autoplay-policy.js';
+import { playSpeechAudio, requestPiSpeech, usesPiSpeech } from './local-speech.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -336,6 +337,7 @@ function startVoiceCaptureCountdown(timeoutMs = VOICE_COMMAND_TIMEOUT_MS) {
     if (!state.voiceCapture.active || !state.voiceCapture.deadline) return;
     const remaining = Math.max(0, state.voiceCapture.deadline - Date.now());
     ui.searchCount.textContent = `${(remaining / 1000).toFixed(1)}S`;
+    if (piCaptureStartupExpired(state.voiceCapture)) updateVoiceCapture({ state: 'error', reason: 'pi-start-timeout' });
   };
   render(); state.voiceCapture.ticker = window.setInterval(render, 100);
 }
@@ -382,6 +384,17 @@ function updateVoiceCapture(detail = {}) {
   }
   if (phase === 'complete') {
     stopVoiceCaptureTimers(); ui.voiceCaptureState.textContent = 'SENDING'; ui.searchMode.textContent = 'VOICE SESSION // ROUTING'; ui.searchCount.textContent = 'READY'; return;
+  }
+  if (phase === 'error') {
+    stopVoiceCaptureTimers(); state.voiceCapture.source = '';
+    ui.voiceCaptureState.textContent = detail.reason === 'pi-start-timeout' ? 'PI CAPTURE DID NOT START' : 'MICROPHONE ERROR';
+    ui.voiceCaptureTranscript.textContent = detail.reason === 'pi-start-timeout'
+      ? 'The Pi did not begin listening. Check local speech status, then say “Hey Jarvis” to retry.'
+      : 'Command capture failed. Check the microphone and local speech status, then retry.';
+    ui.searchInput.placeholder = 'Capture unavailable'; ui.searchMode.textContent = 'VOICE SESSION // ERROR'; ui.searchCount.textContent = 'ERROR';
+    const session = state.wakeSession;
+    state.voiceCapture.closeTimer = window.setTimeout(() => { if (session === state.wakeSession) closeSearch({ cancelVoice: false }); }, 3000);
+    return;
   }
   if (phase === 'timeout') {
     stopVoiceCaptureTimers(); ui.voiceCaptureState.textContent = 'NO SPEECH DETECTED'; ui.voiceCaptureTranscript.textContent = 'Command capture stopped. Say “Hey Jarvis” to try again.';
@@ -598,17 +611,25 @@ function renderStatus(payload) {
   setModelDisplay({ model: payload.services?.ollama?.models?.[0] || 'NO MODEL' });
   const capture = payload.wake?.commandCapture;
   const captureAt = Date.parse(capture?.at || '');
-  const captureFresh = capture && (capture.state === 'warming' || capture.state === 'listening' || (capture.state === 'complete' && Number.isFinite(captureAt) && Date.now() - captureAt < 8_000));
+  const captureFresh = capture && (capture.state === 'awaiting_ack' || capture.state === 'warming' || capture.state === 'listening' || (capture.state === 'complete' && Number.isFinite(captureAt) && Date.now() - captureAt < 8_000));
   ui.wakeState.textContent = captureFresh ? (wakeCaptureLabel(capture) || 'CAPTURING') : payload.wake?.ready ? 'LISTENING' : payload.wake?.configured ? 'STARTING' : 'STANDBY';
   if (state.voiceCapture.active && state.voiceCapture.source === 'pi') {
-    if (capture?.state === 'warming') {
+    if (capture?.state === 'awaiting_ack') {
+      state.voiceCapture.phase = 'acknowledging';
+      ui.voiceCaptureState.textContent = 'JARVIS IS REPLYING';
+      ui.searchInput.placeholder = 'Waiting for acknowledgement playback…';
+      ui.voiceCaptureTranscript.textContent = 'JARVIS will enable the Pi microphone after the reply finishes.';
+      ui.searchMode.textContent = 'VOICE SESSION // AUDIO REPLY';
+    } else if (capture?.state === 'warming') {
       state.voiceCapture.phase = 'warming';
       ui.voiceCaptureState.textContent = 'PI MIC WARMING';
+      ui.searchInput.placeholder = 'Preparing Pi microphone…';
       ui.voiceCaptureTranscript.textContent = 'Wake detected. Speak your question after the acknowledgement.';
       ui.searchMode.textContent = 'VOICE SESSION // PI MIC';
     } else if (capture?.state === 'listening') {
       state.voiceCapture.phase = 'listening';
       ui.voiceCaptureState.textContent = 'PI MIC LISTENING';
+      ui.searchInput.placeholder = 'Speak now…';
       ui.voiceCaptureTranscript.textContent = 'JARVIS is listening through the Raspberry Pi microphone.';
       ui.searchMode.textContent = 'VOICE SESSION // PI MIC LIVE';
     } else if (capture?.state === 'timeout') {
@@ -647,7 +668,7 @@ function renderOperationStatus(operations) {
 
 function renderDocker(payload) {
   state.docker = payload;
-  if (!payload.available) { ui.dockerSummary.textContent = 'UNAVAILABLE'; ui.dockerList.innerHTML = '<p class="empty-state">Docker engine is not available on this host.</p>'; refreshSearchIfOpen(); return; }
+  if (!payload.available) { ui.dockerSummary.textContent = 'UNAVAILABLE'; ui.dockerList.innerHTML = '<p class="empty-state">Docker status is unavailable on this host.</p>'; refreshSearchIfOpen(); return; }
   const running = payload.containers.filter((item) => String(item.state).toLowerCase() === 'running').length;
   ui.dockerSummary.textContent = `${running}/${payload.containers.length} RUNNING`;
   ui.dockerList.innerHTML = payload.containers.length ? payload.containers.slice(0, 8).map((item) => `<article class="docker-item"><i class="${String(item.state).toLowerCase() === 'running' ? 'ok' : ''}"></i><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.cpu || item.state)}</span><b>${escapeHtml(item.memoryPercent || item.status)}</b></article>`).join('') : '<p class="empty-state">Docker is online with no containers.</p>';
@@ -908,6 +929,22 @@ async function speak(text, { pendingContext = null, onPlaybackStart = null, fish
         if (!state.config?.allowBrowserTtsFallback) { onPlaybackStart?.(); state.galaxy?.setActivity('error', 1); return false; }
       }
     }
+    if (usesPiSpeech(state.config, state.settings)) {
+      document.body.dataset.ttsProvider = 'espeak'; document.body.dataset.ttsVoice = 'pi:offline'; document.body.dataset.ttsState = 'requesting';
+      try {
+        const result = await requestPiSpeech(text, state.settings);
+        onPlaybackStart?.(); document.body.dataset.ttsState = 'playing';
+        if (state.voice?.playAudio) await state.voice.playAudio(result.bytes, Number(state.settings?.ttsVolume ?? 1));
+        else await playSpeechAudio(result.bytes, { contentType: result.contentType, volume: state.settings?.ttsVolume ?? 1 });
+        state.pendingSpeech = null; document.body.classList.remove('audio-locked'); document.body.dataset.ttsState = 'complete'; return true;
+      } catch (error) {
+        onPlaybackStart?.();
+        if (error?.name === 'NotAllowedError') {
+          state.pendingSpeech = { text, context: pendingContext }; document.body.classList.add('audio-locked'); document.body.dataset.ttsState = 'blocked'; state.galaxy?.setActivity('armed', 1);
+        } else { document.body.dataset.ttsState = 'error'; console.warn(`Offline Pi speech failed: ${error?.message || 'audio unavailable'}`); }
+        return false;
+      }
+    }
     if ('speechSynthesis' in window) {
       document.body.dataset.ttsProvider = 'browser'; document.body.dataset.ttsVoice = selectBrowserVoice()?.voiceURI || 'system-default'; document.body.dataset.ttsState = 'requesting';
       if (requiresBrowserTtsGesture({
@@ -946,10 +983,20 @@ async function unlockAudioFromGesture() {
     const pending = state.pendingSpeech; state.pendingSpeech = null;
     if (pending?.text) {
       const played = await speak(pending.text, { pendingContext: pending.context });
-      if (played && pending.context?.kind === 'wake') await beginWakeCommandCapture(pending.context.session, pending.context.command, pending.context.source);
+      if (played && pending.context?.kind === 'wake') {
+        if (pending.context.nativePiWake && !pending.context.command && !(await acknowledgeNativePiCapture())) {
+          updateVoiceCapture({ state: 'error', reason: 'pi-ack-failed' }); return;
+        }
+        await beginWakeCommandCapture(pending.context.session, pending.context.command, pending.context.source);
+      }
     }
   } catch {}
   finally { state.audioPriming = false; }
+}
+
+async function acknowledgeNativePiCapture() {
+  try { return Boolean((await json('/api/wake/acknowledged', { method: 'POST' })).ok); }
+  catch { return false; }
 }
 
 async function beginWakeCommandCapture(session, initialCommand = '', source = '') {
@@ -968,6 +1015,7 @@ async function beginWakeCommandCapture(session, initialCommand = '', source = ''
     state.voiceCapture.source = 'pi';
     state.voiceCapture.phase = 'warming';
     ui.voiceCaptureState.textContent = 'PI MIC WARMING';
+    ui.searchInput.placeholder = 'Preparing Pi microphone…';
     ui.voiceCaptureTranscript.textContent = 'Wake detected. Speak your question after the acknowledgement.';
     ui.searchMode.textContent = 'VOICE SESSION // PI MIC';
     startVoiceCaptureCountdown(Number(state.status?.wake?.commandCapture?.timeoutMs) || VOICE_COMMAND_TIMEOUT_MS);
@@ -1004,18 +1052,22 @@ async function beginConversationCapture() {
 
 async function handleWake(event) {
   const session = ++state.wakeSession; const initialCommand = String(event?.detail?.command || '').trim();
+  const nativePiWake = event?.detail?.source === 'pi';
   const source = event?.detail?.source === 'pi' || (state.settings?.source === 'pi' && state.settings?.piMicrophone) ? 'pi' : 'browser';
   if (!openVoiceCommandWindow()) return;
   ui.wakeFlash.classList.remove('active'); void ui.wakeFlash.offsetWidth; ui.wakeFlash.classList.add('active');
   ui.wakeState.textContent = event?.detail?.kind === 'double_clap' ? 'CLAP' : event?.detail?.kind === 'push_to_talk' ? 'PTT' : 'HEARD'; state.neuralEnergy = 1;
   updateVoiceVisual('armed', 1);
-  const context = { kind: 'wake', session, command: initialCommand, source };
+  const context = { kind: 'wake', session, command: initialCommand, source, nativePiWake };
   const wakeTimeout = Number(state.config?.fishWakeTimeoutMs) || FISH_TTS_WAKE_TIMEOUT_MS;
   const played = Boolean(initialCommand) || isEmbeddedPreview() || !state.settings?.wakeResponse ? true : await speak(state.settings.wakeResponse, { pendingContext: context, fishTimeoutMs: wakeTimeout });
   if (session !== state.wakeSession || !state.voiceCapture.active) return;
   if (!played && document.body.dataset.ttsState === 'blocked') {
     ui.voiceCaptureState.textContent = 'TAP TO ENABLE AUDIO'; ui.voiceCaptureTranscript.textContent = 'Tap anywhere once. JARVIS will reply, then begin listening.';
     ui.searchMode.textContent = 'VOICE SESSION // AUDIO LOCKED'; ui.searchCount.textContent = 'WAIT'; return;
+  }
+  if (nativePiWake && !initialCommand && !(await acknowledgeNativePiCapture())) {
+    updateVoiceCapture({ state: 'error', reason: 'pi-ack-failed' }); return;
   }
   await beginWakeCommandCapture(session, initialCommand, source);
   setTimeout(() => { ui.wakeState.textContent = state.status?.wake?.ready ? 'LISTENING' : 'STANDBY'; }, 2200);

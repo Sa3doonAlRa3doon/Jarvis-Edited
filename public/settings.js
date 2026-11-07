@@ -4,6 +4,7 @@ import {
 import { analyzeVoiceFrame, analyzeVoiceSpectrum, clearVoiceProfile, configureRecognitionCapabilities, isSpeechBandEligible, loadVoiceProfile, saveVoiceProfile, stabilizeNoiseFloor, startRecognitionWithTrack } from './voice-controller.js';
 import { deviceIdConstraint, deviceSelectionAvailability, friendlyMediaError, getUserMediaWithFallback, normalizeDeviceId, reconcileDeviceSelection } from './media-utils.js';
 import { SCREEN_RETRY_DELAY_MS, canScheduleScreenRetry, isRetryableScreenPickerDismissal, screenRetryStatus, secondsUntilScreenRetry } from './screen-retry-policy.js';
+import { playSpeechAudio, requestPiSpeech, usesPiSpeech } from './local-speech.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -281,8 +282,11 @@ function queueBrowserDeviceRefresh() {
 }
 
 function loadSpeechVoices(selected = ui.ttsVoice.value) {
-  if (!('speechSynthesis' in window)) { ui.ttsVoice.disabled = true; ui.testTalkback.disabled = true; return; }
-  const voices = speechSynthesis.getVoices(); const items = voices.map((voice) => ({ id: voice.voiceURI, label: `${voice.name} // ${voice.lang}${voice.localService ? ' // LOCAL' : ''}` }));
+  const voices = 'speechSynthesis' in window ? speechSynthesis.getVoices() : [];
+  const items = voices.map((voice) => ({ id: voice.voiceURI, label: `${voice.name} // ${voice.lang}${voice.localService ? ' // LOCAL' : ''}` }));
+  if (state.config.localSpeech?.available) items.unshift({ id: 'pi:offline', label: 'Pi offline voice // eSpeak' });
+  ui.ttsVoice.disabled = items.length === 0;
+  ui.testTalkback.disabled = !state.config.localSpeech?.available && state.config.ttsMode !== 'fish' && !('speechSynthesis' in window);
   fillSelect(ui.ttsVoice, items, 'System default voice', selected);
 }
 
@@ -519,6 +523,15 @@ async function testTalkback() {
       if (!state.config.allowBrowserTtsFallback) return;
     }
   }
+  if (usesPiSpeech(state.config, currentSettings())) {
+    ui.voiceTranscript.textContent = 'OFFLINE PI VOICE REQUEST';
+    try {
+      const result = await requestPiSpeech(text, currentSettings());
+      await playSpeechAudio(result.bytes, { context: state.talkbackContext, contentType: result.contentType, volume: ui.ttsVolume.value });
+      ui.voiceTranscript.textContent = 'OFFLINE TALKBACK COMPLETE'; ui.voiceConfidence.textContent = 'PI SYSTEM VOICE // eSpeak';
+    } catch (error) { ui.voiceTranscript.textContent = 'OFFLINE TALKBACK FAILED'; ui.voiceConfidence.textContent = error.message || 'Audio unavailable.'; }
+    return;
+  }
   if (!('speechSynthesis' in window)) { ui.voiceConfidence.textContent = 'Speech synthesis is unavailable in this browser.'; return; }
   speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance('Voice core calibrated. I am ready.');
   utterance.rate = Number(ui.ttsRate.value); utterance.pitch = Number(ui.ttsPitch.value); utterance.volume = Number(ui.ttsVolume.value); utterance.lang = ui.voiceLanguage.value;
@@ -581,10 +594,10 @@ async function loadDeviceLists(selections = currentSettings(), { requestBrowserP
 function renderGoogle(status) {
   const names = { gdrive: ['DRIVE', 'FILES'], gmail: ['GMAIL', 'MAIL'], gmail_imap: ['GMAIL IMAP', 'INBOX'], gcalendar: ['CALENDAR', 'EVENTS'], gtasks: ['TASKS', 'ACTIONS'], gcontacts: ['CONTACTS', 'PEOPLE'] };
   const errors = Object.values(status.errors || {}).map((value) => String(value || '').trim()).filter(Boolean);
-  const reauthorizationNeeded = !status.liveVerified && errors.length > 0;
+  const reauthorizationNeeded = status.needsReauthorization === true;
   let connected = 0;
   ui.googleGrid.replaceChildren(...Object.entries(names).map(([key, [name, detail]]) => {
-    const active = Boolean(status.connectors?.[key]);
+    const active = !reauthorizationNeeded && Boolean(status.connectors?.[key]);
     if (active) connected += 1;
     const item = document.createElement('div');
     item.className = `google-item ${active ? 'connected' : ''}`;
@@ -592,7 +605,7 @@ function renderGoogle(status) {
     return item;
   }));
   const sendState = status.emailSendEnabled ? ' // SEND APPROVAL ARMED' : ' // SEND OFF';
-  const stateLabel = status.liveVerified ? `${connected}/6 VERIFIED` : reauthorizationNeeded ? 'REAUTH REQUIRED' : `${connected}/6 LINKED`;
+  const stateLabel = status.liveVerified ? `${connected}/6 VERIFIED` : reauthorizationNeeded ? 'REAUTH REQUIRED' : errors.length ? 'API CHECK FAILED' : status.configured ? `${connected}/6 LINKED` : 'SETUP REQUIRED';
   ui.googleState.textContent = `${stateLabel}${sendState}`;
   ui.googleState.classList.toggle('active', status.liveVerified === true || connected > 0);
   ui.googleState.classList.toggle('warning', reauthorizationNeeded);
@@ -1383,7 +1396,7 @@ async function startPiSensors() {
         ui.voiceSnr.textContent = `${snr.toFixed(1)} dB`;
         ui.voiceGate.textContent = diagnostics.physicalGate ? (diagnostics.wakeScoreReady ? 'ENERGY PASS // MODEL READY' : 'ENERGY PASS // WAITING FOR SECOND SCORE') : 'ENERGY HOLD // ROOM FLOOR';
         const captureState = String(wake.commandCapture?.state || '').toLowerCase();
-        const captureLabel = { warming: 'LOCAL STT WARMING', listening: 'LOCAL STT LISTENING', complete: 'LOCAL COMMAND SENT', timeout: 'LOCAL STT TIMEOUT', error: 'LOCAL STT ERROR' }[captureState] || '';
+        const captureLabel = { awaiting_ack: 'WAITING FOR REPLY', warming: 'LOCAL STT WARMING', listening: 'LOCAL STT LISTENING', complete: 'LOCAL COMMAND SENT', timeout: 'LOCAL STT TIMEOUT', error: 'LOCAL STT ERROR' }[captureState] || '';
         ui.voiceDecision.textContent = captureLabel || (wake.sttModel ? 'OPENWAKEWORD + VOSK READY' : wake.model ? 'OPENWAKEWORD READY' : wake.error ? 'MODEL UNAVAILABLE' : 'MODEL STARTING');
         ui.wakeReadout.textContent = diagnostics.physicalGate && wake.ready ? 'HEY JARVIS READY' : wake.ready ? 'HEY JARVIS ARMED' : wake.running ? 'STARTING' : 'SAVE TO START';
       }
@@ -1530,7 +1543,7 @@ async function init() {
   try {
     await window.ensureDashboardAuthentication?.();
     const [settings, status, config, workspace, desktopApps, routines, memory, media] = await Promise.all([json('/api/settings'), json('/api/status'), json('/api/config'), json('/api/workspace/status'), json('/api/desktop/apps').catch(() => ({ apps: [], platform: 'host' })), json('/api/routines'), json('/api/memory'), json('/api/media/state').catch(() => ({}))]);
-    ui.version.textContent = config.version || '3.35.2';
+    ui.version.textContent = config.version || '3.36.0';
     ui.node.textContent = config.piOnly ? 'PI-5' : 'LOCAL';
     state.config = config;
     ui.screenVisionNote.textContent = config.visionRuntime === 'ready'
@@ -1551,6 +1564,10 @@ async function init() {
       ui.ttsProviderNote.textContent = config.fishConfigured
         ? `Locked: Fish Audio ${config.fishVoiceId} // ${config.fishModel}. ${retryNote}. ${timingNote}. Browser voice substitution is ${config.allowBrowserTtsFallback ? 'enabled' : 'disabled'}.`
         : `Fish Audio ${config.fishVoiceId} is selected, but FISH_AUDIO_API_KEY is not configured. ${retryNote}. ${timingNote}. JARVIS will stay silent instead of changing voices.`;
+    } else if (config.localSpeech?.available) {
+      ui.ttsProviderNote.textContent = 'Offline Pi speech is available. System default and Pi offline voice use eSpeak; an explicitly selected browser voice keeps its own identity. This is separate from the Fish Audio voice.';
+    } else {
+      ui.ttsProviderNote.textContent = 'Local mode uses an installed browser voice. On the Pi, install espeak-ng and restart the JARVIS core to enable offline WAV talkback.';
     }
     loadSpeechVoices(settings.ttsVoice || '');
     state.savedSettings = { ...settings };

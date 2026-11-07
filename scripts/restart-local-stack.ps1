@@ -20,10 +20,10 @@ if ($connection) {
   $commandLine = [string]$process.CommandLine
   $normalizedCommand = $commandLine.Replace('/', '\').ToLowerInvariant()
   $normalizedRoot = $ProjectRoot.Replace('/', '\').ToLowerInvariant()
-  $commandMatchesProject = $normalizedCommand.Contains($normalizedRoot) -and $normalizedCommand.Contains('server.mjs')
+  $commandMatchesProject = $normalizedCommand.Contains($normalizedRoot) -and ($normalizedCommand.Contains('server.mjs') -or $normalizedCommand.Contains('frontend.mjs') -or $normalizedCommand.Contains('start-split-stack.mjs'))
   $healthMatchesProject = $false
-  if (-not $commandMatchesProject -and $normalizedCommand -match '(?:^|\s)server\.mjs(?:\s|$)') {
-    $knownJarvisVersions = @('3.33.0', '3.34.0', '3.35.0', '3.35.1', '3.35.2')
+  if (-not $commandMatchesProject -and $normalizedCommand -match '(?:^|\s)(?:server|frontend)\.mjs(?:\s|$)|start-split-stack\.mjs') {
+    $knownJarvisVersions = @('3.33.0', '3.34.0', '3.35.0', '3.35.1', '3.35.2', '3.36.0')
     try { $healthMatchesProject = (Invoke-RestMethod "http://127.0.0.1:$dashboardPort/api/health" -TimeoutSec 3).version -in $knownJarvisVersions } catch {}
   }
   if (-not $commandMatchesProject -and -not $healthMatchesProject) {

@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import os
 import re
 import select
 import subprocess
@@ -68,6 +70,29 @@ def command_should_finish(now: float, deadline: float, last_voice: float, *, sil
     if deadline > 0 and now >= deadline:
         return True
     return last_voice > 0 and now - last_voice >= max(250, int(silence_ms)) / 1000.0
+
+
+def command_acknowledgement_ready(now: float, acknowledged: bool, deadline: float) -> bool:
+    """Start command capture after dashboard playback or a bounded fallback."""
+    if acknowledged:
+        return True
+    try:
+        current = float(now)
+        fallback_at = float(deadline)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return math.isfinite(current) and math.isfinite(fallback_at) and fallback_at > 0 and current >= fallback_at
+
+
+def read_control_command(stream) -> str:
+    """Read one bounded local parent command without blocking microphone audio."""
+    try:
+        readable, _, _ = select.select([stream], [], [], 0)
+        if not readable:
+            return ""
+        return str(stream.readline() or "").strip().upper()[:32]
+    except (OSError, ValueError):
+        return ""
 
 
 def notify(url: str, token: str, payload: dict) -> None:
@@ -206,6 +231,32 @@ def wake_physical_gate(
     return level >= required_level and sample_peak >= required_peak and speech_shape_ok
 
 
+def wake_physical_evidence_recent(
+    now: float,
+    last_physical_at: float,
+    *,
+    max_age_ms: int = 320,
+) -> bool:
+    """Allow model latency to trail a proven voice frame by at most 320 ms.
+
+    The openWakeWord model can peak a few inference frames after the acoustic
+    energy in the phrase has ended. Requiring the model score and physical
+    gate on the exact same 80 ms frame therefore rejects genuine wake phrases.
+    This helper preserves the physical evidence, but only for a small, fixed
+    window. Invalid, future, absent, and stale timestamps are always rejected;
+    callers cannot expand the safety window beyond 320 ms.
+    """
+    try:
+        current = float(now)
+        observed = float(last_physical_at)
+        window_ms = min(320, max(0, int(max_age_ms)))
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if not math.isfinite(current) or not math.isfinite(observed) or observed <= 0 or current < observed:
+        return False
+    return (current - observed) * 1000.0 <= window_ms + 1e-6
+
+
 def wake_score_ready(
     scores: list[float] | tuple[float, ...],
     threshold: float,
@@ -239,7 +290,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", required=True)
     parser.add_argument("--callback", required=True)
-    parser.add_argument("--token", required=True)
+    parser.add_argument("--token", default=os.environ.get("JARVIS_WAKE_EVENT_TOKEN", ""))
     parser.add_argument("--wake-threshold", type=float, default=0.55)
     parser.add_argument("--wake-energy-floor", type=float, default=0.0035)
     parser.add_argument("--wake-noise-multiplier", type=float, default=1.6)
@@ -250,11 +301,17 @@ def main() -> int:
     parser.add_argument("--stt-model", default="", help="Optional local Vosk model directory for Pi command transcription")
     parser.add_argument("--command-timeout-ms", type=int, default=15_000)
     parser.add_argument("--command-silence-ms", type=int, default=900)
-    parser.add_argument("--command-warmup-ms", type=int, default=1_200,
-                        help="Ignore the wake/TTS tail before local command capture begins")
+    parser.add_argument("--command-ack-timeout-ms", type=int, default=15_000,
+                        help="Bounded fallback when no dashboard playback acknowledgement arrives")
+    parser.add_argument("--command-post-ack-guard-ms", type=int, default=180,
+                        help="Short speaker-settle guard after acknowledgement playback completes")
+    parser.add_argument("--command-warmup-ms", dest="command_post_ack_guard_ms", type=int,
+                        default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     parser.add_argument("--wake-enabled", action="store_true")
     parser.add_argument("--clap-enabled", action="store_true")
     args = parser.parse_args()
+    if not args.token:
+        parser.error("Set JARVIS_WAKE_EVENT_TOKEN or pass --token.")
 
     wake_model = None
     if args.wake_enabled:
@@ -338,6 +395,7 @@ def main() -> int:
     clap_refractory_until = 0.0
     wake_refractory_until = 0.0
     wake_score_history: list[float] = []
+    last_physical_evidence_at = 0.0
     last_wake_score = 0.0
     last_wake_ready = False
     clap_calibration_until = time.monotonic() + 0.75
@@ -351,6 +409,8 @@ def main() -> int:
     last_diagnostic_at = 0.0
     command_active = False
     command_deadline = 0.0
+    command_ack_deadline = 0.0
+    command_acknowledged = False
     command_last_voice = 0.0
     command_warmup_until = 0.0
     command_recognizer_armed = False
@@ -361,31 +421,47 @@ def main() -> int:
     interrupted = False
 
     def start_command_capture(now: float) -> None:
-        nonlocal command_active, command_deadline, command_last_voice, command_warmup_until
+        nonlocal command_active, command_deadline, command_ack_deadline, command_acknowledged
+        nonlocal command_last_voice, command_warmup_until
         nonlocal command_recognizer_armed, command_text, command_partial_text, command_recognizer
         if kaldi_recognizer_class is None or stt_model is None or command_active:
             return
         try:
             # Do not feed the wake phrase or the dashboard's spoken wake
-            # response into Vosk.  The recognizer is armed only after this
-            # short local warm-up, while the hard timeout still starts now.
+            # response into Vosk. The recognizer waits for a playback-complete
+            # acknowledgement, and the full command timeout starts afterward.
             command_recognizer = None
             command_active = True
-            command_deadline = now + max(5_000, int(args.command_timeout_ms)) / 1000.0
+            command_deadline = 0.0
+            command_ack_deadline = now + max(3_000, min(20_000, int(args.command_ack_timeout_ms))) / 1000.0
+            command_acknowledged = False
             command_last_voice = 0.0
-            command_warmup_until = now + max(0, min(5_000, int(args.command_warmup_ms))) / 1000.0
+            command_warmup_until = 0.0
             command_recognizer_armed = False
             command_text = ""
             command_partial_text = ""
-            emit({"type": "command_capture", "state": "warming", "timeout_ms": max(5_000, int(args.command_timeout_ms)),
-                  "warmup_ms": max(0, min(5_000, int(args.command_warmup_ms))), "source": "pi"})
+            emit({"type": "command_capture", "state": "awaiting_ack", "timeout_ms": max(5_000, int(args.command_timeout_ms)),
+                  "ack_timeout_ms": max(3_000, min(20_000, int(args.command_ack_timeout_ms))), "source": "pi"})
         except Exception as error:
             command_recognizer = None
             command_recognizer_armed = False
             emit({"type": "stt_error", "message": str(error)[:240]})
 
+    def arm_command_capture(now: float, acknowledgement: str) -> None:
+        nonlocal command_deadline, command_ack_deadline, command_acknowledged, command_warmup_until
+        if not command_active or command_acknowledged:
+            return
+        command_acknowledged = True
+        command_ack_deadline = 0.0
+        command_deadline = now + max(5_000, int(args.command_timeout_ms)) / 1000.0
+        guard_ms = max(0, min(1_500, int(args.command_post_ack_guard_ms)))
+        command_warmup_until = now + guard_ms / 1000.0
+        emit({"type": "command_capture", "state": "warming", "timeout_ms": max(5_000, int(args.command_timeout_ms)),
+              "warmup_ms": guard_ms, "acknowledgement": acknowledgement, "source": "pi"})
+
     def finish_command_capture() -> None:
-        nonlocal command_active, command_deadline, command_last_voice, command_warmup_until
+        nonlocal command_active, command_deadline, command_ack_deadline, command_acknowledged
+        nonlocal command_last_voice, command_warmup_until
         nonlocal command_recognizer_armed, command_text, command_partial_text, command_recognizer
         if not command_active:
             return
@@ -404,6 +480,8 @@ def main() -> int:
             emit({"type": "command_capture", "state": "timeout", "source": "pi"})
         command_active = False
         command_deadline = 0.0
+        command_ack_deadline = 0.0
+        command_acknowledged = False
         command_last_voice = 0.0
         command_warmup_until = 0.0
         command_recognizer_armed = False
@@ -421,6 +499,12 @@ def main() -> int:
                 break
             samples = np.frombuffer(raw, dtype=np.int16)
             now = time.monotonic()
+            control_command = read_control_command(sys.stdin)
+            if command_active and not command_acknowledged:
+                if control_command == "ACK":
+                    arm_command_capture(now, "dashboard")
+                elif command_acknowledgement_ready(now, False, command_ack_deadline):
+                    arm_command_capture(now, "timeout")
             level = rms(samples)
             sample_peak = peak(samples)
             zero_crossing_rate, crest_factor = speech_shape(samples)
@@ -435,6 +519,14 @@ def main() -> int:
                 peak_floor=max(0.0005, min(0.25, args.wake_peak_floor)),
                 peak_ratio=max(1.0, min(3.0, args.wake_peak_ratio)),
                 speech_shape_ok=shape_ok,
+            )
+            if physical_gate:
+                last_physical_evidence_at = now
+            physical_evidence_recent = wake_physical_evidence_recent(now, last_physical_evidence_at)
+            physical_evidence_age_ms = (
+                round(max(0.0, (now - last_physical_evidence_at) * 1000.0), 1)
+                if physical_evidence_recent
+                else None
             )
 
             # Continuously follow slow room-noise drift, but never learn from
@@ -454,6 +546,8 @@ def main() -> int:
                     "noise_floor": round(wake_noise_floor, 5),
                     "signal_to_noise_db": round(snr_db, 2),
                     "physical_gate": physical_gate,
+                    "physical_evidence_recent": physical_evidence_recent,
+                    "physical_evidence_age_ms": physical_evidence_age_ms,
                     "wake_score": round(last_wake_score, 4),
                     "wake_score_hits": sum(value >= max(0.0, args.wake_threshold) * 0.88 for value in wake_score_history),
                     "wake_score_ready": last_wake_ready,
@@ -489,9 +583,9 @@ def main() -> int:
                     if impulse:
                         if first_clap and (now - first_clap) * 1000 <= args.double_clap_ms:
                             payload = {"kind": "double_clap", "score": round(level, 4), "source": "pi"}
+                            start_command_capture(now)
                             notify(args.callback, args.token, payload)
                             emit({"type": "activation", **payload})
-                            start_command_capture(now)
                             first_clap = 0.0
                             clap_refractory_until = now + 1.1
                         elif not first_clap or (now - first_clap) * 1000 > args.double_clap_ms:
@@ -504,17 +598,17 @@ def main() -> int:
                     predictions = wake_model.predict(samples)
                     score = max((float(value) for key, value in predictions.items() if "jarvis" in key.lower()), default=0.0)
                     last_wake_score = score
-                    if physical_gate:
+                    if physical_evidence_recent:
                         wake_score_history.append(score)
                         wake_score_history = wake_score_history[-3:]
                     else:
-                        # Never let a model score accumulate while the real
-                        # microphone gate is quiet; the next physical burst
-                        # must earn a fresh temporal window.
+                        # Never let a model score accumulate without a fresh,
+                        # proven microphone voice frame. The bounded evidence
+                        # bridge only compensates for model inference latency.
                         wake_score_history = []
                     ready = wake_score_ready(wake_score_history, args.wake_threshold)
                     last_wake_ready = ready
-                    if ready and physical_gate:
+                    if ready and physical_evidence_recent:
                         payload = {
                             "kind": "wake_word",
                             "phrase": "hey jarvis",
@@ -525,13 +619,15 @@ def main() -> int:
                             "signal_to_noise_db": round(snr_db, 2),
                             "zero_crossing_rate": round(zero_crossing_rate, 4),
                             "crest_factor": round(crest_factor, 2),
-                            "speech_shape": True,
-                            "physical_gate": True,
+                            "speech_shape": shape_ok,
+                            "physical_gate": physical_gate,
+                            "physical_evidence_recent": True,
+                            "physical_evidence_age_ms": physical_evidence_age_ms,
                             "source": "pi",
                         }
+                        start_command_capture(now)
                         notify(args.callback, args.token, payload)
                         emit({"type": "activation", **payload})
-                        start_command_capture(now)
                         wake_refractory_until = now + 2.0
                         wake_score_history = []
                 except Exception as error:
@@ -541,7 +637,7 @@ def main() -> int:
             # A Pi wake event is followed by one bounded local command window.
             # First discard the wake/TTS tail, then arm Vosk. Only the final
             # normalized sentence is sent to the dashboard, never raw audio.
-            if command_active and not command_recognizer_armed and now >= command_warmup_until:
+            if command_active and command_acknowledged and not command_recognizer_armed and now >= command_warmup_until:
                 try:
                     command_recognizer = kaldi_recognizer_class(stt_model, 16000)
                     command_recognizer.SetWords(False)

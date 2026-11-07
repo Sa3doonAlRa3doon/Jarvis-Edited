@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import { DesktopAppBridge, parseDesktopEntry, parseWindowsApps, redactedApps, tokenizeExec } from '../lib/desktop-apps.mjs';
 
@@ -32,5 +35,44 @@ test('normalizes Windows Start Apps and launches only a discovered app id', asyn
 test('unknown platforms expose an empty catalog instead of executable input', async () => {
   const bridge = new DesktopAppBridge({ platform: 'plan9', runner: async () => { throw new Error('must not run'); } });
   assert.deepEqual((await bridge.list()).apps, []);
+});
+
+test('launches the exact approved Linux Exec vector without reopening the desktop file', async () => {
+  const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'jarvis-desktop-apps-'));
+  const appDir = path.join(homeDir, '.local', 'share', 'applications');
+  const entry = path.join(appDir, 'notes.desktop');
+  const calls = [];
+  try {
+    await fs.mkdir(appDir, { recursive: true });
+    await fs.writeFile(entry, '[Desktop Entry]\nType=Application\nName=Notes\nExec=/usr/bin/notes --private %U\n');
+    const bridge = new DesktopAppBridge({ platform: 'linux', homeDir, runner: async (command, args) => { calls.push({ command, args }); return { stdout: '', stderr: '' }; } });
+    const listed = await bridge.list({ force: true });
+    const app = listed.apps.find((item) => item.name === 'Notes');
+    assert.ok(app);
+    await bridge.launch(app.id);
+    assert.deepEqual(calls, [{ command: '/usr/bin/notes', args: ['--private'] }]);
+  } finally {
+    await fs.rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('rejects a previously approved Linux app id after its desktop entry changes', async () => {
+  const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'jarvis-desktop-apps-swap-'));
+  const appDir = path.join(homeDir, '.local', 'share', 'applications');
+  const entry = path.join(appDir, 'notes.desktop');
+  const calls = [];
+  try {
+    await fs.mkdir(appDir, { recursive: true });
+    await fs.writeFile(entry, '[Desktop Entry]\nType=Application\nName=Notes\nExec=/usr/bin/notes\n');
+    const bridge = new DesktopAppBridge({ platform: 'linux', homeDir, runner: async (command, args) => { calls.push({ command, args }); return { stdout: '', stderr: '' }; } });
+    const listed = await bridge.list({ force: true });
+    const approved = listed.apps.find((item) => item.name === 'Notes');
+    assert.ok(approved);
+    await fs.writeFile(entry, '[Desktop Entry]\nType=Application\nName=Notes\nExec=/usr/bin/different-command\n');
+    await assert.rejects(() => bridge.launch(approved.id), /not in the current allow-list/);
+    assert.deepEqual(calls, []);
+  } finally {
+    await fs.rm(homeDir, { recursive: true, force: true });
+  }
 });
 
