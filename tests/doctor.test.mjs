@@ -161,6 +161,7 @@ test('an optional endpoint timeout preserves healthy Google, model, and mic evid
     if (route === '/api/status') return { status: 200, body: { services: { ollama: { online: true } }, wake: { ready: true } } };
     if (route === '/api/wake/status') return { status: 200, body: { ready: true } };
     if (route === '/api/capabilities') return { status: 200, body: { capabilities: [{ id: 'google', status: { available: true } }] } };
+    if (route === '/api/google/status?probe=1') return { status: 200, body: { connected: true, liveVerified: true } };
     if (route === '/api/media/devices') return { status: 200, body: { microphones: [{ id: 'plughw:2,0' }] } };
     if (route === '/api/settings') return { status: 200, body: { source: 'pi', wakeWord: true } };
     return { status: 503, body: { error: 'private failure detail', services: { ollama: { online: false } } } };
@@ -168,6 +169,7 @@ test('an optional endpoint timeout preserves healthy Google, model, and mic evid
   assert.equal(probes.services.ollama.online, true);
   assert.equal(probes.wake.ready, true);
   assert.equal(probes.capabilities.capabilities[0].status.available, true);
+  assert.equal(probes.google.liveVerified, true);
   assert.equal(probes.media.microphones[0].id, 'plughw:2,0');
   assert.equal(probes.settings.source, 'pi');
   assert.deepEqual(probes.vision, {});
@@ -180,7 +182,7 @@ test('unauthorized protected responses never count as healthy diagnostic results
   assert.deepEqual(probes.services, {});
   assert.deepEqual(probes.settings, {});
   assert.deepEqual(probes.capabilities, {});
-  assert.equal(probes.probeErrors.length, 10);
+  assert.equal(probes.probeErrors.length, 11);
 });
 
 test('a slow optional probe does not age out audio sampled during the same inspection', async () => {

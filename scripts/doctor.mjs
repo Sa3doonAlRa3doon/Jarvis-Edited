@@ -91,8 +91,19 @@ export function evaluateDoctorSnapshot(snapshot, options = {}) {
   const googleCapability = Array.isArray(snapshot.capabilities?.capabilities)
     ? snapshot.capabilities.capabilities.find((item) => item?.id === 'google')
     : null;
-  const googleReady = Boolean(googleCapability?.status?.available);
-  add('google', googleReady, googleReady ? 'Google OAuth live' : 'Google OAuth unavailable; review Google authorization in Settings', needs.google);
+  // The capability catalog is intentionally a cheap, non-probing snapshot.
+  // Prefer the explicit Google probe collected by the doctor so a newly saved
+  // token is verified against the real APIs instead of being reported stale.
+  const hasGoogleProbe = snapshot.google && Object.keys(snapshot.google).length > 0;
+  const googleReady = hasGoogleProbe
+    ? snapshot.google.liveVerified === true
+    : Boolean(googleCapability?.status?.available);
+  const googleDetail = googleReady
+    ? 'Google OAuth live'
+    : snapshot.google?.needsReauthorization
+      ? 'Google OAuth reauthorization required'
+      : 'Google OAuth unavailable; review Google authorization in Settings';
+  add('google', googleReady, googleDetail, needs.google);
   const stirling = snapshot.integrations?.stirling || {};
   const processingState = String(stirling.processing?.state || 'not-verified');
   const stirlingReady = Boolean(stirling.online && processingState === 'verified');
@@ -152,7 +163,7 @@ export function evaluateDoctorSnapshot(snapshot, options = {}) {
 export async function collectDoctorProbes(read, { platform = process.platform, now = Date.now } = {}) {
   const paths = {
     status: '/api/status', config: '/api/config', vision: '/api/vision/status',
-    capabilities: '/api/capabilities', stirling: '/api/stirling/status',
+    capabilities: '/api/capabilities', google: '/api/google/status?probe=1', stirling: '/api/stirling/status',
     printer: '/api/printer/status', printerCamera: '/api/media/printer-camera/discover',
     media: '/api/media/devices', settings: '/api/settings', wake: '/api/wake/status'
   };
@@ -170,7 +181,7 @@ export async function collectDoctorProbes(read, { platform = process.platform, n
   const frame = responses.printerFrame;
   return {
     services: body('status').services || {}, wake: body('wake'), wakeObservedAt: responses.wake?.observedAt,
-    config: body('config'), vision: body('vision'), capabilities: body('capabilities'),
+    config: body('config'), vision: body('vision'), capabilities: body('capabilities'), google: body('google'),
     integrations: { stirling: body('stirling'), printerCamera: body('printerCamera') },
     printer: body('printer'), media: body('media'), settings: body('settings').settings || body('settings'),
     printerCameraFrame: { ok: Boolean(frame?.status === 200 && Number(frame.body?.bytes) > 100), status: frame?.status || 0, bytes: frame?.status === 200 ? Number(frame.body?.bytes) || 0 : 0, contentType: clean(frame?.contentType, 80) },
