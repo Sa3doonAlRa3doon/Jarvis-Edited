@@ -2,7 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import { CameraFrameBroker } from './lib/camera-frame-broker.mjs';
 import { abortCameraCaptures, captureCameraFrame } from './lib/camera-capture.mjs';
-import { binaryAvailable, linuxCameras, runBinary } from './lib/system-probe.mjs';
+import { binaryAvailable, isLinuxCameraDeviceId, linuxCameras, runBinary } from './lib/system-probe.mjs';
 import { requireInternalServiceAuth } from './lib/local-service-auth.mjs';
 import { DEFAULT_LOCAL_PORTS } from './lib/local-ports.mjs';
 
@@ -22,7 +22,7 @@ app.get('/devices', async (_request, response) => {
 });
 app.get('/frame', async (request, response) => {
   const requestedDevice = String(request.query.device || '');
-  if (process.platform !== 'linux' || !/^\/dev\/video\d+$/.test(requestedDevice)) {
+  if (process.platform !== 'linux' || !isLinuxCameraDeviceId(requestedDevice)) {
     response.status(400).json({ error: 'Choose a Pi camera returned by the local camera backend.' }); return;
   }
   if (!(await linuxCameras()).some((item) => item.id === requestedDevice)) { response.status(400).json({ error: 'The selected Pi camera is not available.' }); return; }

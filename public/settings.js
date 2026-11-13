@@ -553,7 +553,7 @@ async function loadDeviceLists(selections = currentSettings(), { requestBrowserP
     state.media = await json('/api/media/devices');
     const cameras = state.media.cameras || [];
     const microphones = state.media.microphones || [];
-    fillSelect(ui.piCamera, cameras, 'Select /dev/video*', draft.piCamera);
+    fillSelect(ui.piCamera, cameras, 'Select a Pi camera', draft.piCamera);
     fillSelect(ui.printerPiCamera, cameras, 'Use configured printer URL', draft.printerPiCamera);
     fillSelect(ui.piMicrophone, microphones, 'Select plughw device', draft.piMicrophone);
     let suggestedCamera = false;
