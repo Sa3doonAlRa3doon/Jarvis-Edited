@@ -19,6 +19,7 @@
     "smoke:camoufox": "node scripts/camoufox-e2e-smoke.mjs",
     "google:authorize": "node scripts/google-oauth-local.mjs",
     "voice:calibrate": "node scripts/calibrate-fish-voice.mjs",
+    "devices:migrate": "node scripts/migrate-pi-device-ids.mjs",
     "vision:install": "node scripts/install-vision-model.mjs",
     "vision:check": "node scripts/install-vision-model.mjs --check",
     "browser:patch": "node scripts/patch-camoufox-windows.mjs",
