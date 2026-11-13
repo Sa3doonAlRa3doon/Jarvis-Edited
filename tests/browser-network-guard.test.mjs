@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { blockedHostname, blockedIp, blockedMethod } from '../scripts/browser-network-guard.ts';
+import { blockedHostname, blockedIp, blockedMethod, blockedNavigationScheme, cachedPublicAddresses, rememberPublicAddresses } from '../scripts/browser-network-guard.ts';
 
 test('browser network guard allows public domains and public IPs', () => {
   assert.equal(blockedHostname('example.com'), false);
@@ -26,4 +26,26 @@ test('browser network guard blocks state-changing HTTP methods', () => {
   assert.equal(blockedMethod('PUT'), true);
   assert.equal(blockedMethod('PATCH'), true);
   assert.equal(blockedMethod('DELETE'), true);
+});
+
+test('browser network guard blocks non-web navigation schemes but permits embedded resources', () => {
+  for (const protocol of ['file:', 'data:', 'javascript:', 'ftp:', 'about:', 'blob:']) {
+    assert.equal(blockedNavigationScheme(protocol, true), true, protocol);
+  }
+  assert.equal(blockedNavigationScheme('https:', true), false);
+  assert.equal(blockedNavigationScheme('http:', true), false);
+  assert.equal(blockedNavigationScheme('data:', false), false);
+  assert.equal(blockedNavigationScheme('blob:', false), false);
+});
+
+test('public DNS cache expires entries and enforces a bounded LRU size', () => {
+  const cache = new Map();
+  rememberPublicAddresses(cache, 'A.example', ['1.1.1.1'], 1000, 2);
+  rememberPublicAddresses(cache, 'b.example', ['8.8.8.8'], 1000, 2);
+  assert.deepEqual(cachedPublicAddresses(cache, 'a.example', 2000), ['1.1.1.1']);
+  rememberPublicAddresses(cache, 'c.example', ['9.9.9.9'], 2000, 2);
+  assert.equal(cache.size, 2);
+  assert.equal(cache.has('b.example'), false);
+  assert.deepEqual(cachedPublicAddresses(cache, 'c.example', 2001), ['9.9.9.9']);
+  assert.equal(cachedPublicAddresses(cache, 'a.example', 62_000), null);
 });

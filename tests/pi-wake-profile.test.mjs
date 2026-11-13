@@ -1,6 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { piWakeEnergyFloor } from '../lib/pi-wake-profile.mjs';
+import { piWakeEnergyFloor, piWakeListenerEnabled } from '../lib/pi-wake-profile.mjs';
+
+test('treats the Pi listener as intentionally disabled on non-Linux hosts', () => {
+  assert.equal(piWakeListenerEnabled('win32', 'true'), false);
+  assert.equal(piWakeListenerEnabled('darwin', undefined), false);
+});
+
+test('honors an explicit listener disable without making backend health appear degraded', () => {
+  assert.equal(piWakeListenerEnabled('linux', 'false'), false);
+  assert.equal(piWakeListenerEnabled('linux', '0'), false);
+  assert.equal(piWakeListenerEnabled('linux', 'off'), false);
+});
+
+test('enables the Pi listener by default and accepts standard true values', () => {
+  assert.equal(piWakeListenerEnabled('linux', undefined), true);
+  assert.equal(piWakeListenerEnabled('linux', ''), true);
+  assert.equal(piWakeListenerEnabled('linux', 'yes'), true);
+  assert.equal(piWakeListenerEnabled('linux', '1'), true);
+});
 
 test('keeps the Pi wake energy floor at its configured baseline for default sensitivity', () => {
   assert.equal(piWakeEnergyFloor(0.28, 0.0035), 0.0035);

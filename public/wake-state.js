@@ -1,4 +1,4 @@
-const CAPTURE_STATES = new Set(['idle', 'warming', 'listening', 'complete', 'timeout', 'error']);
+const CAPTURE_STATES = new Set(['idle', 'awaiting_ack', 'warming', 'listening', 'complete', 'timeout', 'error']);
 
 function boundedNumber(value, fallback, min, max) {
   const parsed = Number(value);
@@ -18,8 +18,9 @@ export function normalizeWakeCapture(value = {}, now = Date.now()) {
   return {
     state,
     source: 'pi',
-    timeoutMs: Math.round(boundedNumber(value?.timeoutMs, 15_000, 0, 30_000)),
-    warmupMs: Math.round(boundedNumber(value?.warmupMs, 1_200, 0, 5_000)),
+    timeoutMs: Math.round(boundedNumber(value?.timeoutMs ?? value?.timeout_ms, 15_000, 0, 30_000)),
+    ackTimeoutMs: Math.round(boundedNumber(value?.ackTimeoutMs ?? value?.ack_timeout_ms, 15_000, 0, 20_000)),
+    warmupMs: Math.round(boundedNumber(value?.warmupMs ?? value?.warmup_ms, 180, 0, 1_500)),
     at: timestamp
   };
 }
@@ -27,12 +28,20 @@ export function normalizeWakeCapture(value = {}, now = Date.now()) {
 export function wakeCaptureLabel(value = {}) {
   const state = String(value?.state || '').trim().toLowerCase();
   return {
+    awaiting_ack: 'WAITING FOR REPLY',
     warming: 'LOCAL STT WARMING',
     listening: 'LOCAL STT LISTENING',
     complete: 'LOCAL COMMAND SENT',
     timeout: 'LOCAL STT TIMEOUT',
     error: 'LOCAL STT ERROR'
   }[state] || '';
+}
+
+// A wake signal can reach the UI even when the Pi never begins a command
+// capture. Expire that startup wait independently of the native recognizer's
+// sentence timer; a listening/hearing session must retain its own deadline.
+export function piCaptureStartupExpired({ source, phase, deadline, now = Date.now() } = {}) {
+  return source === 'pi' && phase === 'warming' && Number.isFinite(deadline) && deadline > 0 && now >= deadline;
 }
 
 export { CAPTURE_STATES };

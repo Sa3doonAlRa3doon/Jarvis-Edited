@@ -17,7 +17,7 @@
       </div>
       <div class="settings-health" aria-label="System context">
         <span><i class="pulse-dot"></i> LOCAL NODE <b id="settings-node">PI-5</b></span>
-        <span>BUILD <b id="settings-version">3.35.2</b></span>
+        <span>BUILD <b id="settings-version">3.36.0</b></span>
         <span>PROFILE <b id="settings-profile">LOADING</b></span>
       </div>
       <div class="settings-header-actions">
@@ -94,9 +94,9 @@
             <div class="device-zone" data-host="pi">
               <div class="zone-title"><span>PI NATIVE INPUTS</span><b id="pi-device-count">SCANNING</b></div>
               <div class="settings-grid">
-                <label class="setting" data-search="pi v4l2 camera video person main lenovo"><span>MAIN PI CAMERA</span><select id="pi-camera" data-sensor-source><option value="">Select /dev/video*</option></select><small>Used for your person detection and gesture controls. Lenovo is preselected when available.</small></label>
+                <label class="setting" data-search="pi v4l2 camera video person main lenovo"><span>MAIN PI CAMERA</span><select id="pi-camera" data-sensor-source><option value="">Select a Pi camera</option></select><small>Used for person detection and gesture controls. Stable USB identity survives reboots and cable reconnection.</small></label>
                 <label class="setting" data-search="printer camera webcam v4l2 second pi"><span>LOCAL PRINTER CAMERA</span><select id="printer-pi-camera" data-sensor-source><option value="">Use configured printer URL</option></select><small>Optional second Pi camera for the printer view. Keep it separate from the main camera.</small></label>
-                <label class="setting" data-search="pi alsa microphone plughw"><span>PI ALSA MICROPHONE</span><select id="pi-microphone" data-sensor-source><option value="">Select plughw device</option></select><small>Wake listener stays locked to this ALSA input.</small></label>
+                <label class="setting" data-search="pi alsa microphone plughw"><span>PI ALSA MICROPHONE</span><select id="pi-microphone" data-sensor-source><option value="">Select a Pi microphone</option></select><small>Stable ALSA identity keeps the wake listener on the same physical microphone after reconnecting.</small></label>
               </div>
             </div>
             <div class="privacy-callout"><b>LOCAL PERCEPTION BOUNDARY</b><p>Camera frames and microphone samples stay inside this browser or the Raspberry Pi. They are not sent to Google or the dashboard repository.</p></div>

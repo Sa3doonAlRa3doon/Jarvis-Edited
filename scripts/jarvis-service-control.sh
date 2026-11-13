@@ -6,7 +6,7 @@ RUNTIME_DIR="/run/jarvis-command-center"
 PERSIST_MARKER="$STATE_DIR/maintenance.lock"
 RUNTIME_MARKER="$RUNTIME_DIR/maintenance.lock"
 CONTAINER_STATE="$STATE_DIR/running-containers"
-SERVICES=(ollama.service openjarvis-api.service hatclanker.service)
+SERVICES=(ollama.service openjarvis-api.service openjarvis-settings.service openjarvis-camera.service openjarvis-mic.service hatclanker.service)
 
 install -d -m 0750 "$STATE_DIR" "$RUNTIME_DIR"
 

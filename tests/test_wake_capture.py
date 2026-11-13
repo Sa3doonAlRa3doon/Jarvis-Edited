@@ -5,10 +5,12 @@ import unittest
 from lib.wake_capture import resolve_capture_command, resolve_pipewire_source
 
 
-def source(node_id, card, device=None, stream="capture"):
+def source(node_id, card, device=None, stream="capture", card_name=None):
     props = {"api.alsa.pcm.card": str(card), "api.alsa.pcm.stream": stream}
     if device is not None:
         props["api.alsa.pcm.device"] = str(device)
+    if card_name is not None:
+        props["api.alsa.card.name"] = card_name
     return {"id": node_id, "info": {"props": props}}
 
 
@@ -20,6 +22,11 @@ class WakeCaptureTests(unittest.TestCase):
     def test_prefers_exact_device_when_a_card_exposes_multiple_capture_nodes(self):
         graph = [source(57, 2, 0), source(58, 2, 1)]
         self.assertEqual(resolve_pipewire_source("plughw:2,1", graph), ("58", "pipewire"))
+
+    def test_maps_stable_alsa_identity_to_pipewire_card_name(self):
+        graph = [source(57, 2, 0, card_name="Lenovo FHD Webcam Audio")]
+        stable = "alsa:CARD=Audio,DEV=0,NAME=Lenovo_FHD_Webcam_Audio"
+        self.assertEqual(resolve_pipewire_source(stable, graph), ("57", "pipewire"))
 
     def test_rejects_ambiguous_or_missing_pipewire_sources(self):
         with self.assertRaisesRegex(RuntimeError, "cannot be identified safely"):
@@ -57,6 +64,13 @@ class WakeCaptureTests(unittest.TestCase):
         self.assertEqual(backend, "alsa")
         self.assertEqual(target, "plughw:2,0")
         self.assertEqual(command[0], "arecord")
+
+    def test_stable_identity_uses_named_alsa_fallback(self):
+        stable = "alsa:CARD=Audio,DEV=0,NAME=Lenovo_FHD_Webcam_Audio"
+        command, backend, target = resolve_capture_command(stable, which=lambda name: "arecord" if name == "arecord" else None)
+        self.assertEqual(backend, "alsa")
+        self.assertEqual(target, stable)
+        self.assertEqual(command[0:3], ["arecord", "-D", "plughw:CARD=Audio,DEV=0"])
 
 
 if __name__ == "__main__":

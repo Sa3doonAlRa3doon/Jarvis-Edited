@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { browserRequestToUpstream, browserResponseToClient, prefixToolName, stripToolPrefix } from '../scripts/mcp-prefix.mjs';
+import { browserRequestToUpstream, browserResponseToClient, guardBrowserNavigationRequest, prefixToolName, stripToolPrefix } from '../scripts/mcp-prefix.mjs';
 
 test('prefixes Playwright tool discovery to avoid OpenJarvis native collisions', () => {
   const response = browserResponseToClient(JSON.stringify({
@@ -20,6 +20,19 @@ test('strips only the private prefix from forwarded tool calls', () => {
   assert.equal(parsed.params.arguments.url, 'https://example.com');
   assert.equal(prefixToolName('jarvis_browser_click'), 'jarvis_browser_click');
   assert.equal(stripToolPrefix('browser_click'), 'browser_click');
+});
+
+test('blocks non-web, credential-bearing, and malformed browser navigation URLs', () => {
+  const request = (url) => ({ jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'jarvis_browser_navigate', arguments: { url } } });
+  for (const url of ['file:///etc/passwd', 'data:text/html,private', 'javascript:alert(1)', 'ftp://example.com/', 'https://user:pass@example.com/', 'not a URL']) {
+    const blocked = guardBrowserNavigationRequest(request(url));
+    assert.equal(blocked.blocked, true, url);
+    assert.equal(blocked.localResponse.id, 7);
+    assert.equal(blocked.localResponse.result.isError, true);
+  }
+  assert.equal(guardBrowserNavigationRequest(request('https://example.com/')), null);
+  assert.equal(guardBrowserNavigationRequest(request('http://example.com/')), null);
+  assert.equal(guardBrowserNavigationRequest({ method: 'tools/call', params: { name: 'jarvis_browser_click', arguments: {} } }), null);
 });
 
 test('passes non-JSON diagnostics through unchanged', () => {

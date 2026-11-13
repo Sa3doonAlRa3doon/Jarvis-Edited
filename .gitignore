@@ -9,6 +9,7 @@ npm-debug.log*
 client_secret*.json
 credentials.json
 token.json
+.google-token-*.tmp
 *.pem
 *.key
 __pycache__/

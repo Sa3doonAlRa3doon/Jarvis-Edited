@@ -1,6 +1,35 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { agentRoles, isMultiPurposePrompt, modelAttemptOrder, requestDomains, resolveModelMap, resolvePrimaryModel, routePrompt, selectInstalledModel, specialistAssignments } from '../lib/agent-router.mjs';
+import { agentRoles, assistantDomainPlugins, isMultiPurposePrompt, modelAttemptOrder, registerAssistantDomain, requestDomains, resolveModelMap, resolvePrimaryModel, routePrompt, selectInstalledModel, specialistAssignments } from '../lib/agent-router.mjs';
+import { PluginStorage } from '../lib/plugin-storage.mjs';
+
+test('ports the reference plugin storage safely and uses it for assistant domain routing', () => {
+  const storage = new PluginStorage();
+  storage.addPlugin('sample', { label: 'Sample' });
+  assert.equal(storage.getPlugins('sample').label, 'Sample');
+  assert.equal(Object.isFrozen(storage.getPlugins('sample')), true);
+  assert.throws(() => { storage.getPlugins('sample').label = 'Changed'; }, TypeError);
+  assert.deepEqual(Object.keys(storage.getPlugins()), ['sample']);
+  assert.throws(() => storage.addPlugin('sample', {}), /already registered/);
+  assert.throws(() => storage.addPlugin('../unsafe', {}), /short identifier/);
+  assert.throws(() => storage.addPlugin('not-an-object', () => {}), /object descriptor/);
+
+  const transferred = new PluginStorage();
+  storage.changeWith(transferred);
+  storage.removePlugin('sample');
+  assert.equal(transferred.getPlugins('sample').label, 'Sample', 'transfer copies the registry rather than sharing mutation');
+
+  const plugin = registerAssistantDomain({ id: 'test-domain', label: 'TEST DOMAIN', route: 'RESEARCH', pattern: /quantum widget/gi });
+  try {
+    assert.deepEqual(requestDomains('quantum widget').find((item) => item.id === plugin.id), {
+      id: 'test-domain', label: 'TEST DOMAIN', route: 'RESEARCH'
+    });
+    assert.deepEqual(specialistAssignments('quantum widget', { primary: 'local-primary', RESEARCH: 'local-research' })[0].route, 'RESEARCH');
+    assert.equal(requestDomains('quantum widget').some((item) => item.id === plugin.id), true, 'global regex flags do not leak state between requests');
+  } finally {
+    assistantDomainPlugins.removePlugin(plugin.id);
+  }
+});
 
 test('selects one primary model for every specialist role', () => {
   const model = resolvePrimaryModel({ JARVIS_MODEL: 'local-one-model' });

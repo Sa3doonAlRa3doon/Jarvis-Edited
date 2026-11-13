@@ -19,3 +19,16 @@ test('returns bounded local event analytics without exposing event details', asy
   assert.equal('secret' in analytics, false);
   await fs.rm(root, { recursive: true, force: true });
 });
+
+test('serializes concurrent appends across compaction without losing an event', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'jarvis-events-race-'));
+  try {
+    const store = new EventStore(root, { maxFileBytes: 512, keepAfterCompaction: 5 });
+    await store.init();
+    await Promise.all(Array.from({ length: 40 }, (_, index) => store.append('race', `Event ${index}`, { index })));
+    const lines = (await fs.readFile(store.logPath, 'utf8')).split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
+    assert.equal(Number(store.summary.compacted) + lines.length, 40);
+    assert.equal(new Set([...lines.map((item) => item.message), ...store.list(40).map((item) => item.message)]).size, 40);
+    assert.equal(store.list(40).length, 40);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});

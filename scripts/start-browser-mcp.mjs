@@ -5,7 +5,8 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import { browserRequestToUpstream, browserResponseToClient, MCP_TOOL_PREFIX } from './mcp-prefix.mjs';
+import { browserRequestToUpstream, browserResponseToClient, guardBrowserNavigationRequest, MCP_TOOL_PREFIX } from './mcp-prefix.mjs';
+import { BrowserActionLoopGuard, guardBrowserToolRequest } from '../lib/browser-action-loop-guard.mjs';
 import { createPublicNetworkProxy } from '../lib/public-network-proxy.mjs';
 import { listInstalled } from 'camoufox';
 
@@ -86,6 +87,7 @@ args.push(`--proxy-server=${publicProxy.unauthenticatedCliProxyUrl}`);
 const child = spawn(process.execPath, args, { cwd: workspace, env: process.env, stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true });
 const captureAfter = new Map();
 const heldResponses = new Map();
+const browserActionLoopGuard = new BrowserActionLoopGuard();
 let captureSequence = 0;
 let liveFrameCleanupTimer = 0;
 const materialTools = new Set([
@@ -99,13 +101,25 @@ function messageId(payload) {
 }
 
 function handleClientLine(line) {
+  let payload;
   try {
-    const payload = JSON.parse(line);
-    if (payload?.method === 'tools/call' && materialTools.has(String(payload.params?.name || ''))) {
-      captureAfter.set(messageId(payload), true);
-    }
-  } catch {}
-  return browserRequestToUpstream(line);
+    payload = JSON.parse(line);
+  } catch { return { forwarded: browserRequestToUpstream(line) }; }
+  const navigationResult = guardBrowserNavigationRequest(payload);
+  if (navigationResult?.blocked) {
+    process.stderr.write('[JARVIS] Browser navigation rejected an unsupported URL scheme.\n');
+    return { localResponse: JSON.stringify(navigationResult.localResponse) };
+  }
+  const guardResult = guardBrowserToolRequest(payload, browserActionLoopGuard, materialTools);
+  if (guardResult?.blocked) {
+    process.stderr.write('[JARVIS] Browser loop guard stopped a repeated action pattern.\n');
+    return { localResponse: JSON.stringify(guardResult.localResponse) };
+  }
+  if (guardResult?.warned) process.stderr.write(`[JARVIS] Browser loop guard warning: ${guardResult.reason}\n`);
+  if (guardResult?.tracked) {
+    captureAfter.set(messageId(payload), true);
+  }
+  return { forwarded: browserRequestToUpstream(line) };
 }
 
 function handleChildLine(line) {
@@ -156,7 +170,9 @@ function handleChildLine(line) {
 function forwardClientLines(input) {
   const reader = readline.createInterface({ input, crlfDelay: Infinity });
   reader.on('line', (line) => {
-    if (!child.stdin.destroyed) child.stdin.write(`${handleClientLine(line)}\n`);
+    const routed = handleClientLine(line);
+    if (routed.localResponse && !process.stdout.destroyed) process.stdout.write(`${routed.localResponse}\n`);
+    else if (!child.stdin.destroyed) child.stdin.write(`${routed.forwarded}\n`);
   });
   reader.on('close', () => { if (!child.stdin.destroyed) child.stdin.end(); });
 }
