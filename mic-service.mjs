@@ -112,7 +112,7 @@ async function configureListenerNow(input = {}) {
   if (settings.source !== 'pi' || !settings.piMicrophone || (!settings.wakeWord && !settings.doubleClap)) return publicState();
 
   const microphones = await linuxMicrophones();
-  if (!microphones.some((item) => item.id === settings.piMicrophone)) {
+  if (!microphones.some((item) => item.id === settings.piMicrophone || item.legacyIds?.includes(settings.piMicrophone))) {
     wakeState.error = 'Selected Pi microphone is not available to the local microphone backend.';
     scheduleListenerRetry(revision, wakeState.error);
     return publicState();

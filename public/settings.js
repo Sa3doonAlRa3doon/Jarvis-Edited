@@ -555,7 +555,7 @@ async function loadDeviceLists(selections = currentSettings(), { requestBrowserP
     const microphones = state.media.microphones || [];
     fillSelect(ui.piCamera, cameras, 'Select a Pi camera', draft.piCamera);
     fillSelect(ui.printerPiCamera, cameras, 'Use configured printer URL', draft.printerPiCamera);
-    fillSelect(ui.piMicrophone, microphones, 'Select plughw device', draft.piMicrophone);
+    fillSelect(ui.piMicrophone, microphones, 'Select a Pi microphone', draft.piMicrophone);
     let suggestedCamera = false;
     if (state.media.platform === 'linux' && !draft.piCamera) {
       const mainCamera = cameras.find((item) => /\blenovo\b/i.test(item.label || ''));

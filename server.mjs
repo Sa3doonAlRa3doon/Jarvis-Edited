@@ -56,7 +56,7 @@ import { askLocalModelCascade } from './lib/ollama-cascade.mjs';
 import { LocalSpeech } from './lib/local-speech.mjs';
 import { runEngineeringPipeline } from './scripts/engineering-pipeline.mjs';
 import {
-  clamp, dockerSummary, isLinuxCameraDeviceId, runBinary, storageDevices, systemMetrics
+  clamp, dockerSummary, isLinuxCameraDeviceId, isLinuxMicrophoneDeviceId, runBinary, storageDevices, systemMetrics
 } from './lib/system-probe.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -249,7 +249,7 @@ function validateSettings(input = {}) {
     browserCamera: cleanBrowserDeviceId(input.browserCamera), browserMicrophone: cleanBrowserDeviceId(input.browserMicrophone),
     piCamera: isLinuxCameraDeviceId(input.piCamera) ? String(input.piCamera) : '',
     printerPiCamera: isLinuxCameraDeviceId(input.printerPiCamera) ? String(input.printerPiCamera) : '',
-    piMicrophone: /^plughw:\d+,\d+$/.test(String(input.piMicrophone || '')) ? String(input.piMicrophone) : '',
+    piMicrophone: isLinuxMicrophoneDeviceId(input.piMicrophone) ? String(input.piMicrophone) : '',
     defaultCountry, defaultLocation,
     personDetection: input.personDetection !== false, voiceActivity: input.voiceActivity !== false,
     wakeWord: input.wakeWord !== false, doubleClap: input.doubleClap !== false,
