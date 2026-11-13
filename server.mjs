@@ -14,6 +14,7 @@ import { buildCapabilitySnapshot } from './lib/capability-registry.mjs';
 import { DesktopAppBridge } from './lib/desktop-apps.mjs';
 import { EmailDraftStore, createGmailRawMessage, emailsFromPrompt, outboundCommunicationKind, parseModelEmailDraft, validateEmailFields } from './lib/email-drafts.mjs';
 import { EventStore } from './lib/event-store.mjs';
+import { createFailureCooldownProbe } from './lib/failure-cooldown-probe.mjs';
 import { googleWorkspace } from './lib/google-workspace.mjs';
 import { summarizeGoogleTool } from './lib/google-response.mjs';
 import { GoogleAuthFlow } from './lib/google-auth-flow.mjs';
@@ -297,6 +298,11 @@ async function fetchJson(url, options = {}, timeoutMs = 3000) {
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return response.json();
 }
+
+const openJarvisMemoryProbe = createFailureCooldownProbe({
+  cooldownMs: safeNumber(process.env.OPENJARVIS_MEMORY_RETRY_MS, 300_000, 12_000, 3_600_000),
+  load: () => fetchJson(`${openJarvisUrl}/v1/memory/stats`, { headers: openJarvisHeaders() }, 4500)
+});
 
 function internalHeaders(extra = {}) {
   return internalServiceHeaders(internalServiceToken, extra);
@@ -687,14 +693,22 @@ async function agentSnapshot() {
   const [traceResult, telemetryResult, memoryResult] = await Promise.allSettled([
     fetchJson(`${openJarvisUrl}/v1/traces?limit=40`, { headers: openJarvisHeaders() }, 4500),
     fetchJson(`${openJarvisUrl}/v1/telemetry/stats`, { headers: openJarvisHeaders() }, 4500),
-    fetchJson(`${openJarvisUrl}/v1/memory/stats`, { headers: openJarvisHeaders() }, 4500)
+    openJarvisMemoryProbe.probe()
   ]);
   const traces = traceResult.status === 'fulfilled' ? (traceResult.value.traces || []).map(normaliseTrace) : [];
+  const memoryProbe = memoryResult.status === 'fulfilled'
+    ? memoryResult.value
+    : { state: 'unavailable', value: null, error: cleanText(memoryResult.reason?.message || 'OpenJarvis memory unavailable', 160), nextAttemptAt: 0 };
   return {
     online: traceResult.status === 'fulfilled' || telemetryResult.status === 'fulfilled', traces,
     lanes: { code: traces.filter((trace) => trace.kind === 'code').slice(0, 8), research: traces.filter((trace) => trace.kind === 'research').slice(0, 8), monitor: traces.filter((trace) => trace.kind === 'monitor').slice(0, 8) },
     telemetry: telemetryResult.status === 'fulfilled' ? telemetryResult.value : null,
-    memory: memoryResult.status === 'fulfilled' ? memoryResult.value : null,
+    memory: memoryProbe.value,
+    memoryStatus: {
+      state: memoryProbe.state,
+      error: memoryProbe.error || null,
+      retryAt: memoryProbe.nextAttemptAt ? new Date(memoryProbe.nextAttemptAt).toISOString() : null
+    },
     error: traceResult.status === 'rejected' ? cleanText(traceResult.reason?.message || 'OpenJarvis unavailable', 160) : null
   };
 }

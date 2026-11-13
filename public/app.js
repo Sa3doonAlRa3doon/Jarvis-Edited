@@ -7,6 +7,7 @@ import { hasWakeCommand, normalizeWakeCommand } from './wake-command.js';
 import { piCaptureStartupExpired, wakeCaptureLabel } from './wake-state.js';
 import { requiresBrowserTtsGesture } from './tts-autoplay-policy.js';
 import { playSpeechAudio, requestPiSpeech, usesPiSpeech } from './local-speech.js';
+import { openJarvisMemoryDetail, openJarvisMemoryLabel } from './openjarvis-status.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -695,7 +696,8 @@ function renderPrinter(payload) {
 function renderAgents(payload) {
   state.agents = payload;
   ui.agentLink.textContent = payload.online ? 'LIVE' : 'OFFLINE';
-  ui.memoryState.textContent = payload.memory?.entries != null ? `${payload.memory.entries} ITEMS` : 'LOCAL';
+  ui.memoryState.textContent = openJarvisMemoryLabel(payload);
+  ui.memoryState.title = openJarvisMemoryDetail(payload);
   renderLane();
 }
 
